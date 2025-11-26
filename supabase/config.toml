@@ -1,1 +1,10 @@
 project_id = "pehloxvqspftiorugkku"
+
+[functions.process-document]
+verify_jwt = false
+
+[functions.rag-query]
+verify_jwt = false
+
+[functions.extract-pdf-text]
+verify_jwt = false

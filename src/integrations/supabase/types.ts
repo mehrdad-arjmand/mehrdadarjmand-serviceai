@@ -14,7 +14,71 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      chunks: {
+        Row: {
+          chunk_index: number
+          created_at: string | null
+          document_id: string | null
+          embedding: string | null
+          equipment: string | null
+          fault_code: string | null
+          id: string
+          site: string | null
+          text: string
+        }
+        Insert: {
+          chunk_index: number
+          created_at?: string | null
+          document_id?: string | null
+          embedding?: string | null
+          equipment?: string | null
+          fault_code?: string | null
+          id?: string
+          site?: string | null
+          text: string
+        }
+        Update: {
+          chunk_index?: number
+          created_at?: string | null
+          document_id?: string | null
+          embedding?: string | null
+          equipment?: string | null
+          fault_code?: string | null
+          id?: string
+          site?: string | null
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chunks_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          doc_type: string | null
+          filename: string
+          id: string
+          uploaded_at: string | null
+        }
+        Insert: {
+          doc_type?: string | null
+          filename: string
+          id?: string
+          uploaded_at?: string | null
+        }
+        Update: {
+          doc_type?: string | null
+          filename?: string
+          id?: string
+          uploaded_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
