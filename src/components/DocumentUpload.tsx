@@ -51,7 +51,16 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
 
         if (extractResponse.error) throw extractResponse.error;
 
-        const { text } = extractResponse.data;
+        const { text } = extractResponse.data as { text: string };
+
+        // Limit text size on the client before sending to the Edge function
+        const MAX_TEXT_LENGTH = 40000;
+        const truncatedText =
+          typeof text === "string" ? text.slice(0, MAX_TEXT_LENGTH) : "";
+
+        if (!truncatedText) {
+          throw new Error("No text could be extracted from this PDF.");
+        }
 
         // 2. Create document record
         const { data: document, error: docError } = await supabase
@@ -72,7 +81,7 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
             body: {
               documentId: document.id,
               filename: file.name,
-              content: text,
+              content: truncatedText,
             },
           }
         );
