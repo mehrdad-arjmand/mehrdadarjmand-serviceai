@@ -26,9 +26,15 @@ Deno.serve(async (req) => {
     
     console.log(`Processing document: ${filename} (ID: ${documentId})`)
 
+    // Limit content size to stay within Edge function compute limits
+    const MAX_TEXT_LENGTH = 40000
+    const trimmedContent = content.length > MAX_TEXT_LENGTH 
+      ? content.slice(0, MAX_TEXT_LENGTH) 
+      : content
+
     // Chunk the text content (simple chunking with overlap)
-    const chunks = chunkText(content, 1000, 200)
-    console.log(`Created ${chunks.length} chunks`)
+    const chunks = chunkText(trimmedContent, 1000, 200)
+    console.log(`Created ${chunks.length} chunks from ${trimmedContent.length} characters (original length: ${content.length})`)
 
     // Process chunks in batches to avoid memory and compute limits
     const MAX_CHUNKS = 80
