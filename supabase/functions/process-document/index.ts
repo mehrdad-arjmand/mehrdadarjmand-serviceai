@@ -30,39 +30,55 @@ Deno.serve(async (req) => {
     const chunks = chunkText(content, 1000, 200)
     console.log(`Created ${chunks.length} chunks`)
 
-    // Generate embeddings for each chunk
-    const chunksWithEmbeddings = []
+    // Process chunks in batches to avoid memory limits
+    const BATCH_SIZE = 10
+    let totalProcessed = 0
     
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i]
-      console.log(`Processing chunk ${i + 1}/${chunks.length}`)
+    for (let batchStart = 0; batchStart < chunks.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, chunks.length)
+      const batchChunks = chunks.slice(batchStart, batchEnd)
       
-      // Generate embedding using Google's free text-embedding model
-      const embedding = await generateEmbedding(chunk)
+      console.log(`Processing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(chunks.length / BATCH_SIZE)}`)
       
-      chunksWithEmbeddings.push({
-        document_id: documentId,
-        chunk_index: i,
-        text: chunk,
-        embedding: embedding,
-      })
+      // Generate embeddings for this batch
+      const chunksWithEmbeddings = []
+      
+      for (let i = 0; i < batchChunks.length; i++) {
+        const globalIndex = batchStart + i
+        const chunk = batchChunks[i]
+        console.log(`Processing chunk ${globalIndex + 1}/${chunks.length}`)
+        
+        // Generate embedding
+        const embedding = await generateEmbedding(chunk)
+        
+        chunksWithEmbeddings.push({
+          document_id: documentId,
+          chunk_index: globalIndex,
+          text: chunk,
+          embedding: embedding,
+        })
+      }
+
+      // Insert this batch into database
+      const { error: insertError } = await supabase
+        .from('chunks')
+        .insert(chunksWithEmbeddings)
+
+      if (insertError) {
+        console.error(`Error inserting batch at index ${batchStart}:`, insertError)
+        throw insertError
+      }
+      
+      totalProcessed += chunksWithEmbeddings.length
+      console.log(`Batch complete. Total processed: ${totalProcessed}/${chunks.length}`)
     }
 
-    // Insert all chunks into database
-    const { error: insertError } = await supabase
-      .from('chunks')
-      .insert(chunksWithEmbeddings)
-
-    if (insertError) {
-      throw insertError
-    }
-
-    console.log(`Successfully indexed ${chunksWithEmbeddings.length} chunks`)
+    console.log(`Successfully indexed ${totalProcessed} chunks`)
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        chunksCount: chunksWithEmbeddings.length 
+        chunksCount: totalProcessed 
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
