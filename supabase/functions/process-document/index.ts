@@ -30,26 +30,33 @@ Deno.serve(async (req) => {
     const chunks = chunkText(content, 1000, 200)
     console.log(`Created ${chunks.length} chunks`)
 
-    // Process chunks in batches to avoid memory limits
+    // Process chunks in batches to avoid memory and compute limits
+    const MAX_CHUNKS = 80
+    const totalChunks = Math.min(chunks.length, MAX_CHUNKS)
+    const chunksToProcess = chunks.slice(0, totalChunks)
+
+    if (totalChunks < chunks.length) {
+      console.log(`Limiting chunks from ${chunks.length} to ${totalChunks} to stay within compute limits`)
+    }
+
     const BATCH_SIZE = 10
     let totalProcessed = 0
     
-    for (let batchStart = 0; batchStart < chunks.length; batchStart += BATCH_SIZE) {
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, chunks.length)
-      const batchChunks = chunks.slice(batchStart, batchEnd)
+    for (let batchStart = 0; batchStart < totalChunks; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, totalChunks)
+      const batchChunks = chunksToProcess.slice(batchStart, batchEnd)
       
-      console.log(`Processing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(chunks.length / BATCH_SIZE)}`)
+      console.log(`Processing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(totalChunks / BATCH_SIZE)}`)
       
-      // Generate embeddings for this batch
+      // Generate embeddings for this batch in a single API call
+      const embeddings = await generateEmbeddings(batchChunks)
       const chunksWithEmbeddings = []
       
       for (let i = 0; i < batchChunks.length; i++) {
         const globalIndex = batchStart + i
         const chunk = batchChunks[i]
-        console.log(`Processing chunk ${globalIndex + 1}/${chunks.length}`)
-        
-        // Generate embedding
-        const embedding = await generateEmbedding(chunk)
+        const embedding = embeddings[i]
+        console.log(`Processing chunk ${globalIndex + 1}/${totalChunks}`)
         
         chunksWithEmbeddings.push({
           document_id: documentId,
@@ -70,7 +77,7 @@ Deno.serve(async (req) => {
       }
       
       totalProcessed += chunksWithEmbeddings.length
-      console.log(`Batch complete. Total processed: ${totalProcessed}/${chunks.length}`)
+      console.log(`Batch complete. Total processed: ${totalProcessed}/${totalChunks}`)
     }
 
     console.log(`Successfully indexed ${totalProcessed} chunks`)
@@ -112,7 +119,7 @@ function chunkText(text: string, chunkSize: number, overlap: number): string[] {
   return chunks
 }
 
-async function generateEmbedding(text: string): Promise<number[]> {
+async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   // Use Lovable AI's free models via LOVABLE_API_KEY
   const response = await fetch('https://api.lovable.app/v1/embeddings', {
     method: 'POST',
@@ -121,7 +128,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
       'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`
     },
     body: JSON.stringify({
-      input: text,
+      input: texts,
       model: 'text-embedding-004'
     })
   })
@@ -129,9 +136,9 @@ async function generateEmbedding(text: string): Promise<number[]> {
   if (!response.ok) {
     const error = await response.text()
     console.error('Embedding API error:', error)
-    throw new Error(`Failed to generate embedding: ${error}`)
+    throw new Error(`Failed to generate embeddings: ${error}`)
   }
 
   const data = await response.json()
-  return data.data[0].embedding
+  return data.data.map((item: { embedding: number[] }) => item.embedding)
 }
