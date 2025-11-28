@@ -1,44 +1,37 @@
-import { useState } from "react";
-import { DocumentUpload } from "@/components/DocumentUpload";
-import { TechnicianChat } from "@/components/TechnicianChat";
+import { Header } from "@/components/Header";
+import { RepositoryCard } from "@/components/RepositoryCard";
+import { AssistantCard } from "@/components/AssistantCard";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Index = () => {
-  const [documentsCount, setDocumentsCount] = useState(0);
-  const [chunksCount, setChunksCount] = useState(0);
-
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="container mx-auto px-6 py-4">
-          <h1 className="text-xl font-semibold text-foreground">
-            Field Technician Knowledge Base
-            <span className="ml-2 text-sm font-normal text-muted-foreground">· Prototype</span>
-          </h1>
-        </div>
-      </header>
+    <div className="min-h-screen bg-slate-50">
+      <Header />
 
       {/* Main Content */}
-      <main className="container mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left Panel - Context & Documents */}
-          <div className="space-y-6">
-            <DocumentUpload 
-              onIndexComplete={(docs, chunks) => {
-                setDocumentsCount(docs);
-                setChunksCount(chunks);
-              }}
-            />
+      <main className="container mx-auto px-6 py-8" style={{ maxWidth: "1040px" }}>
+        {/* Workspace Section */}
+        <Tabs defaultValue="repository" className="w-full">
+          <div className="flex items-end justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-semibold text-foreground">Workspace</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Switch between document repository and assistant.
+              </p>
+            </div>
+            <TabsList>
+              <TabsTrigger value="repository">Repository</TabsTrigger>
+              <TabsTrigger value="assistant">Assistant</TabsTrigger>
+            </TabsList>
           </div>
 
-          {/* Right Panel - Technician Assistant */}
-          <div className="space-y-6">
-            <TechnicianChat 
-              hasDocuments={documentsCount > 0}
-              chunksCount={chunksCount}
-            />
-          </div>
-        </div>
+          <TabsContent value="repository">
+            <RepositoryCard />
+          </TabsContent>
+          <TabsContent value="assistant">
+            <AssistantCard />
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );
