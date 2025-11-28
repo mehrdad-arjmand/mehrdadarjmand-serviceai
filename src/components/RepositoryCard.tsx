@@ -5,8 +5,64 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
 
 export const RepositoryCard = () => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      toast({
+        title: "No file selected",
+        description: "Please select a file first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      const { data, error } = await supabase.functions.invoke('test-upload', {
+        body: formData,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Upload successful",
+        description: `Received ${data.fileName} (${data.sizeInBytes} bytes)`,
+      });
+
+      setSelectedFile(null);
+      // Reset file input
+      const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      toast({
+        title: "Upload failed",
+        description: error.message || "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <Card className="w-full">
       <CardHeader>
@@ -21,15 +77,15 @@ export const RepositoryCard = () => {
           <input
             type="file"
             id="file-upload"
-            multiple
             accept=".pdf,.docx,.txt"
             className="hidden"
+            onChange={handleFileChange}
           />
           <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-3">
             <Upload className="h-10 w-10 text-muted-foreground" />
             <div className="space-y-1">
               <p className="text-sm font-medium text-foreground">
-                Click to upload or drag and drop
+                {selectedFile ? selectedFile.name : "Click to upload or drag and drop"}
               </p>
               <p className="text-xs text-muted-foreground">
                 PDF, DOCX, or TXT files
@@ -88,7 +144,9 @@ export const RepositoryCard = () => {
 
         {/* Build Button */}
         <div className="flex justify-end">
-          <Button size="lg">Build knowledge base</Button>
+          <Button size="lg" onClick={handleUpload} disabled={!selectedFile || isUploading}>
+            {isUploading ? "Uploading..." : "Build knowledge base"}
+          </Button>
         </div>
       </CardContent>
     </Card>
