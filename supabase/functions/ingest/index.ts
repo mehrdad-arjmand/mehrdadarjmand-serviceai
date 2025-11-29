@@ -1,4 +1,5 @@
 import { getDocument } from 'https://esm.sh/pdfjs-serverless@0.2.2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,6 +12,10 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabase = createClient(supabaseUrl, supabaseKey)
+
     const formData = await req.formData()
     const files = formData.getAll('files') as File[]
     const docType = formData.get('docType') as string
@@ -56,6 +61,45 @@ Deno.serve(async (req) => {
 
         doc.textLength = doc.extractedText.length
         console.log(`Extracted ${doc.textLength} characters from ${doc.fileName}`)
+        
+        // Save to database
+        const { data: docData, error: docError } = await supabase
+          .from('documents')
+          .insert({
+            id: doc.id,
+            filename: doc.fileName,
+            doc_type: docType || 'unknown',
+          })
+          .select()
+          .single()
+
+        if (docError) {
+          throw docError
+        }
+
+        // Split text into chunks (simple: ~1000 chars per chunk)
+        const chunkSize = 1000
+        const chunks = []
+        for (let i = 0; i < doc.extractedText.length; i += chunkSize) {
+          chunks.push({
+            document_id: doc.id,
+            chunk_index: Math.floor(i / chunkSize),
+            text: doc.extractedText.slice(i, i + chunkSize),
+            equipment: equipmentType || null,
+          })
+        }
+
+        // Save chunks
+        if (chunks.length > 0) {
+          const { error: chunksError } = await supabase
+            .from('chunks')
+            .insert(chunks)
+
+          if (chunksError) {
+            throw chunksError
+          }
+        }
+
       } catch (error) {
         console.error(`Error extracting text from ${doc.fileName}:`, error)
         doc.error = error instanceof Error ? error.message : 'Unknown error'
