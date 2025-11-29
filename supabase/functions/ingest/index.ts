@@ -179,27 +179,23 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<string> {
 }
 
 async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
-  // DOCX is a ZIP file containing XML files
-  // For MVP, we'll do basic extraction by looking for text in the raw data
-  const uint8Array = new Uint8Array(arrayBuffer)
-  const decoder = new TextDecoder('utf-8', { fatal: false })
-  const content = decoder.decode(uint8Array)
-  
-  // Look for text between XML tags (w:t elements in DOCX)
-  const textMatches = content.match(/>([^<]+)</g)
-  if (textMatches) {
-    return textMatches
-      .map(match => match.slice(1, -1)) // Remove >< markers
-      .filter(text => text.trim().length > 0)
-      .join(' ')
-      .replace(/\s+/g, ' ')
+  try {
+    // Import mammoth for proper DOCX parsing
+    const mammoth = await import('https://esm.sh/mammoth@1.6.0')
+    
+    const result = await mammoth.extractRawText({ arrayBuffer })
+    
+    // Remove null bytes and other problematic characters
+    const cleanedText = result.value
+      .replace(/\x00/g, '') // Remove null bytes
+      .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, ' ') // Remove control characters
+      .replace(/\s+/g, ' ') // Normalize whitespace
       .trim()
       .slice(0, 100000) // Limit to 100k chars
+    
+    return cleanedText
+  } catch (error) {
+    console.error('DOCX extraction error:', error)
+    throw new Error(`Failed to extract DOCX text: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
-  
-  return content
-    .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 100000)
 }
