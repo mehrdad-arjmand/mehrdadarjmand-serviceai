@@ -1,3 +1,5 @@
+import { getDocument } from 'https://esm.sh/pdfjs-serverless@0.2.2'
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -99,22 +101,37 @@ async function extractTextFromTxt(arrayBuffer: ArrayBuffer): Promise<string> {
 }
 
 async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<string> {
-  // Simple PDF text extraction - looks for text content between stream markers
-  const uint8Array = new Uint8Array(arrayBuffer)
-  const decoder = new TextDecoder('utf-8', { fatal: false })
-  let text = decoder.decode(uint8Array)
-  
-  // Extract text from PDF streams and objects
-  // This is a basic approach - production would use a proper PDF library
-  text = text
-    .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, ' ') // Remove control chars
-    .replace(/\s+/g, ' ') // Normalize whitespace
-    .trim()
-  
-  // Try to extract readable text chunks
-  const readableText = text.match(/[A-Za-z0-9\s.,!?;:'"()-]{10,}/g)?.join(' ') || text
-  
-  return readableText.slice(0, 100000) // Limit to 100k chars
+  try {
+    const uint8Array = new Uint8Array(arrayBuffer)
+    
+    // Use pdfjs-serverless for proper PDF text extraction
+    const document = await getDocument({
+      data: uint8Array,
+      useSystemFonts: true,
+    }).promise
+    
+    const textParts: string[] = []
+    
+    // Iterate through each page and extract text
+    for (let i = 1; i <= document.numPages; i++) {
+      const page = await document.getPage(i)
+      const content = await page.getTextContent()
+      const pageText = content.items
+        .map((item: any) => item.str)
+        .join(' ')
+      textParts.push(pageText)
+    }
+    
+    // Join all pages with newlines and clean up whitespace
+    return textParts
+      .join('\n\n')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100000) // Limit to 100k chars
+  } catch (error) {
+    console.error('PDF extraction error:', error)
+    throw new Error(`Failed to extract PDF text: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
 }
 
 async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
