@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface Document {
   id: string;
@@ -24,13 +24,70 @@ interface Document {
   createdAt: string;
 }
 
-export const RepositoryCard = () => {
+interface RepositoryCardProps {
+  onDocumentSelect?: (id: string | null) => void;
+}
+
+export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [docType, setDocType] = useState<string>("");
   const [equipmentType, setEquipmentType] = useState<string>("");
+
+  // Fetch documents from database on mount
+  useEffect(() => {
+    const fetchDocuments = async () => {
+      try {
+        const { data: docs, error } = await supabase
+          .from('documents')
+          .select('*')
+          .order('uploaded_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (docs) {
+          // Fetch chunks for each document to reconstruct full text
+          const documentsWithText = await Promise.all(
+            docs.map(async (doc) => {
+              const { data: chunks, error: chunksError } = await supabase
+                .from('chunks')
+                .select('text, chunk_index, equipment')
+                .eq('document_id', doc.id)
+                .order('chunk_index');
+
+              if (chunksError) {
+                console.error('Error fetching chunks:', chunksError);
+                return null;
+              }
+
+              const extractedText = chunks?.map(c => c.text).join('') || '';
+              const equipment = chunks?.[0]?.equipment || 'unknown';
+
+              return {
+                id: doc.id,
+                fileName: doc.filename,
+                fileType: doc.filename.split('.').pop() || 'unknown',
+                docType: doc.doc_type || 'unknown',
+                equipmentType: equipment,
+                extractedText,
+                textLength: extractedText.length,
+                error: null,
+                createdAt: doc.uploaded_at || new Date().toISOString(),
+              };
+            })
+          );
+
+          setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
+        }
+      } catch (error) {
+        console.error('Error fetching documents:', error);
+      }
+    };
+
+    fetchDocuments();
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -211,7 +268,11 @@ export const RepositoryCard = () => {
                       <TableRow 
                         key={doc.id}
                         className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => setSelectedDocId(doc.id === selectedDocId ? null : doc.id)}
+                        onClick={() => {
+                          const newId = doc.id === selectedDocId ? null : doc.id;
+                          setSelectedDocId(newId);
+                          onDocumentSelect?.(newId);
+                        }}
                       >
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2">
