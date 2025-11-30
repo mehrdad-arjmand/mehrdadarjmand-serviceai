@@ -112,17 +112,25 @@ function buildFullQuery(question: string, site?: string, equipment?: string, fau
 }
 
 async function generateEmbedding(text: string): Promise<number[]> {
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`
-    },
-    body: JSON.stringify({
-      input: text,
-      model: 'text-embedding-004'
-    })
-  })
+  const GOOGLE_API_KEY = Deno.env.get('GOOGLE_API_KEY')
+  if (!GOOGLE_API_KEY) {
+    throw new Error('GOOGLE_API_KEY not configured')
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GOOGLE_API_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: {
+          parts: [{ text }]
+        }
+      })
+    }
+  )
 
   if (!response.ok) {
     const error = await response.text()
@@ -130,7 +138,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
   }
 
   const data = await response.json()
-  return data.data[0].embedding
+  return data.embedding.values
 }
 
 async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<string> {
