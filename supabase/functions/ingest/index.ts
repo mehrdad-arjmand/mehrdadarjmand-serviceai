@@ -225,7 +225,7 @@ async function generateEmbeddings(texts: string[]): Promise<number[][]> {
     throw new Error('LOVABLE_API_KEY not configured')
   }
 
-  const response = await fetch('https://api.lovable.app/v1/embeddings', {
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
