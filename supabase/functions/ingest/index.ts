@@ -89,15 +89,34 @@ Deno.serve(async (req) => {
           })
         }
 
-        // Save chunks
+        // Save chunks and generate embeddings
         if (chunks.length > 0) {
-          const { error: chunksError } = await supabase
+          const { data: insertedChunks, error: chunksError } = await supabase
             .from('chunks')
             .insert(chunks)
+            .select()
 
           if (chunksError) {
             throw chunksError
           }
+
+          // Generate embeddings for all chunks
+          console.log(`Generating embeddings for ${insertedChunks.length} chunks`)
+          const chunkTexts = insertedChunks.map(c => c.text)
+          const embeddings = await generateEmbeddings(chunkTexts)
+
+          // Update chunks with embeddings
+          for (let i = 0; i < insertedChunks.length; i++) {
+            const { error: updateError } = await supabase
+              .from('chunks')
+              .update({ embedding: embeddings[i] })
+              .eq('id', insertedChunks[i].id)
+
+            if (updateError) {
+              console.error(`Failed to update embedding for chunk ${i}:`, updateError)
+            }
+          }
+          console.log(`Successfully generated embeddings for ${doc.fileName}`)
         }
 
       } catch (error) {
@@ -198,4 +217,31 @@ async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
     console.error('DOCX extraction error:', error)
     throw new Error(`Failed to extract DOCX text: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
+}
+
+async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!lovableApiKey) {
+    throw new Error('LOVABLE_API_KEY not configured')
+  }
+
+  const response = await fetch('https://api.lovable.app/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${lovableApiKey}`
+    },
+    body: JSON.stringify({
+      input: texts,
+      model: 'text-embedding-004'
+    })
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Failed to generate embeddings: ${error}`)
+  }
+
+  const data = await response.json()
+  return data.data.map((item: any) => item.embedding)
 }
