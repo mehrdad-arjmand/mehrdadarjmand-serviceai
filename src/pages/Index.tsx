@@ -1,12 +1,32 @@
 import { Header } from "@/components/Header";
 import { RepositoryCard } from "@/components/RepositoryCard";
-import { AssistantCard } from "@/components/AssistantCard";
+import { TechnicianChat } from "@/components/TechnicianChat";
 import { DocumentDetails } from "@/components/DocumentDetails";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 const Index = () => {
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [chunksCount, setChunksCount] = useState(0);
+  const [hasDocuments, setHasDocuments] = useState(false);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      const { count: docsCount } = await supabase
+        .from('documents')
+        .select('*', { count: 'exact', head: true });
+      
+      const { count: chunksCount } = await supabase
+        .from('chunks')
+        .select('*', { count: 'exact', head: true });
+
+      setHasDocuments((docsCount || 0) > 0);
+      setChunksCount(chunksCount || 0);
+    };
+
+    fetchStats();
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -34,7 +54,7 @@ const Index = () => {
             <RepositoryCard onDocumentSelect={setSelectedDocumentId} />
           </TabsContent>
           <TabsContent value="assistant">
-            <AssistantCard />
+            <TechnicianChat hasDocuments={hasDocuments} chunksCount={chunksCount} />
           </TabsContent>
           <TabsContent value="details">
             <DocumentDetails selectedDocumentId={selectedDocumentId} />
