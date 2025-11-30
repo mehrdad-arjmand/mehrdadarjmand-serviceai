@@ -107,9 +107,12 @@ Deno.serve(async (req) => {
 
           // Update chunks with embeddings
           for (let i = 0; i < insertedChunks.length; i++) {
+            // Format embedding as a PostgreSQL vector string
+            const embeddingStr = `[${embeddings[i].join(',')}]`
+            
             const { error: updateError } = await supabase
               .from('chunks')
-              .update({ embedding: embeddings[i] })
+              .update({ embedding: embeddingStr })
               .eq('id', insertedChunks[i].id)
 
             if (updateError) {

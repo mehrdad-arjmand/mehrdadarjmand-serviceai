@@ -35,11 +35,14 @@ Deno.serve(async (req) => {
     const queryEmbedding = await generateEmbedding(fullQuery)
 
     // Perform vector similarity search
+    // Format embedding as PostgreSQL vector string
+    const embeddingStr = `[${queryEmbedding.join(',')}]`
+    
     const { data: chunks, error: searchError } = await supabase.rpc(
       'match_chunks',
       {
-        query_embedding: queryEmbedding,
-        match_threshold: 0.5,
+        query_embedding: embeddingStr,
+        match_threshold: 0.3, // Lower threshold for better recall
         match_count: 5
       }
     )
@@ -54,7 +57,7 @@ Deno.serve(async (req) => {
     // Build context from retrieved chunks
     const context = chunks
       ?.map((chunk: any, idx: number) => 
-        `[Source ${idx + 1}: ${chunk.filename} | Chunk ${chunk.chunk_index}]\n${chunk.text}`
+        `[Source ${idx + 1}: ${chunk.filename || 'Unknown'} | Chunk ${chunk.chunk_index} | Similarity: ${(chunk.similarity * 100).toFixed(1)}%]\n${chunk.text}`
       )
       .join('\n\n---\n\n') || 'No relevant context found.'
 
@@ -79,7 +82,7 @@ Please provide a clear, concise answer based on the context above.`
         success: true,
         answer,
         sources: chunks?.map((chunk: any) => ({
-          filename: chunk.filename,
+          filename: chunk.filename || 'Unknown',
           chunkIndex: chunk.chunk_index,
           text: chunk.text,
           similarity: chunk.similarity
