@@ -112,7 +112,7 @@ function buildFullQuery(question: string, site?: string, equipment?: string, fau
 }
 
 async function generateEmbedding(text: string): Promise<number[]> {
-  const response = await fetch('https://api.lovable.app/v1/embeddings', {
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -134,7 +134,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<string> {
-  const response = await fetch('https://api.lovable.app/v1/chat/completions', {
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
