@@ -220,28 +220,38 @@ async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
 }
 
 async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY')
-  if (!lovableApiKey) {
-    throw new Error('LOVABLE_API_KEY not configured')
+  const GOOGLE_API_KEY = Deno.env.get('GOOGLE_API_KEY')
+  if (!GOOGLE_API_KEY) {
+    throw new Error('GOOGLE_API_KEY not configured')
   }
 
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${lovableApiKey}`
-    },
-    body: JSON.stringify({
-      input: texts,
-      model: 'text-embedding-004'
-    })
-  })
+  // Generate embeddings for each text using Google's API
+  const embeddings: number[][] = []
+  
+  for (const text of texts) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GOOGLE_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: {
+            parts: [{ text }]
+          }
+        })
+      }
+    )
 
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Failed to generate embeddings: ${error}`)
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`Failed to generate embedding: ${error}`)
+    }
+
+    const data = await response.json()
+    embeddings.push(data.embedding.values)
   }
 
-  const data = await response.json()
-  return data.data.map((item: any) => item.embedding)
+  return embeddings
 }
