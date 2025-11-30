@@ -95,6 +95,7 @@ export type Database = {
           document_id: string
           equipment: string
           fault_code: string
+          filename: string
           id: string
           similarity: number
           site: string
