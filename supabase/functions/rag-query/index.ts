@@ -42,8 +42,8 @@ Deno.serve(async (req) => {
       'match_chunks',
       {
         query_embedding: embeddingStr,
-        match_threshold: 0.3, // Lower threshold for better recall
-        match_count: 5
+        match_threshold: 0.25, // Lower threshold for better recall
+        match_count: 8 // Retrieve more chunks for better context
       }
     )
 
@@ -53,6 +53,14 @@ Deno.serve(async (req) => {
     }
 
     console.log(`Found ${chunks?.length || 0} relevant chunks`)
+    if (chunks && chunks.length > 0) {
+      console.log('Top chunk similarities:', chunks.map((c: any) => ({
+        filename: c.filename,
+        chunk: c.chunk_index,
+        similarity: (c.similarity * 100).toFixed(1) + '%',
+        preview: c.text.slice(0, 100)
+      })))
+    }
 
     // Build context from retrieved chunks
     const context = chunks
@@ -62,7 +70,16 @@ Deno.serve(async (req) => {
       .join('\n\n---\n\n') || 'No relevant context found.'
 
     // Generate answer using Lovable AI (Gemini Flash)
-    const systemPrompt = `You are a field technician assistant for industrial energy systems. You must answer ONLY based on the provided context from uploaded documents. If the context is insufficient, clearly state that and suggest next diagnostic steps. Always prioritize safety - call out lock-out/tag-out procedures and high-voltage safety warnings when relevant. Provide concise, numbered troubleshooting sequences when appropriate.`
+    const systemPrompt = `You are a field technician assistant for industrial energy systems. 
+
+CRITICAL INSTRUCTIONS:
+- Answer based on the provided context from documents
+- If relevant information is found in ANY of the sources, use it to answer the question
+- Quote or reference specific details from the context when answering
+- Only say "no information available" if NONE of the sources contain relevant information
+- Pay close attention to technical details, safety warnings, and specifications in the context
+
+Always prioritize safety - mention lock-out/tag-out procedures and safety warnings when relevant.`
 
     const userPrompt = `Site: ${site || 'Not specified'}
 Equipment: ${equipment || 'Not specified'}
