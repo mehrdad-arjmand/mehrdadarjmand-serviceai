@@ -2,10 +2,9 @@ import { Upload, FileText, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
@@ -17,7 +16,11 @@ interface Document {
   fileName: string;
   fileType: string;
   docType: string;
+  uploadDate: string | null;
+  site: string | null;
   equipmentType: string;
+  equipmentMake: string | null;
+  equipmentModel: string | null;
   extractedText: string;
   textLength: number;
   error: string | null;
@@ -33,8 +36,44 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
   const [isUploading, setIsUploading] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  
+  // Form state
   const [docType, setDocType] = useState<string>("");
+  const [uploadDate, setUploadDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [site, setSite] = useState<string>("");
   const [equipmentType, setEquipmentType] = useState<string>("");
+  const [equipmentMake, setEquipmentMake] = useState<string>("");
+  const [equipmentModel, setEquipmentModel] = useState<string>("");
+
+  // Dropdown options state
+  const [docTypeOptions, setDocTypeOptions] = useState<string[]>([
+    "Manual",
+    "Daily / shift report",
+    "Procedure / SOP",
+    "Project document"
+  ]);
+  const [siteOptions, setSiteOptions] = useState<string[]>([]);
+  const [equipmentTypeOptions, setEquipmentTypeOptions] = useState<string[]>([
+    "Inverter",
+    "Battery",
+    "Converter",
+    "PCS"
+  ]);
+  const [equipmentMakeOptions, setEquipmentMakeOptions] = useState<string[]>([]);
+  const [equipmentModelOptions, setEquipmentModelOptions] = useState<string[]>([]);
+
+  // Inline add state
+  const [showDocTypeInput, setShowDocTypeInput] = useState(false);
+  const [showSiteInput, setShowSiteInput] = useState(false);
+  const [showEquipmentTypeInput, setShowEquipmentTypeInput] = useState(false);
+  const [showEquipmentMakeInput, setShowEquipmentMakeInput] = useState(false);
+  const [showEquipmentModelInput, setShowEquipmentModelInput] = useState(false);
+
+  const [newDocType, setNewDocType] = useState("");
+  const [newSite, setNewSite] = useState("");
+  const [newEquipmentType, setNewEquipmentType] = useState("");
+  const [newEquipmentMake, setNewEquipmentMake] = useState("");
+  const [newEquipmentModel, setNewEquipmentModel] = useState("");
 
   // Fetch documents from database on mount
   useEffect(() => {
@@ -70,7 +109,11 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                 fileName: doc.filename,
                 fileType: doc.filename.split('.').pop() || 'unknown',
                 docType: doc.doc_type || 'unknown',
+                uploadDate: doc.upload_date || null,
+                site: doc.site || null,
                 equipmentType: equipment,
+                equipmentMake: doc.equipment_make || null,
+                equipmentModel: doc.equipment_model || null,
                 extractedText,
                 textLength: extractedText.length,
                 error: null,
@@ -93,6 +136,46 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
     const files = Array.from(e.target.files || []);
     if (files.length > 0) {
       setSelectedFiles(files);
+    }
+  };
+
+  const handleAddOption = (
+    type: 'docType' | 'site' | 'equipmentType' | 'equipmentMake' | 'equipmentModel',
+    value: string
+  ) => {
+    if (!value.trim()) return;
+
+    switch (type) {
+      case 'docType':
+        setDocTypeOptions([...docTypeOptions, value]);
+        setDocType(value);
+        setShowDocTypeInput(false);
+        setNewDocType("");
+        break;
+      case 'site':
+        setSiteOptions([...siteOptions, value]);
+        setSite(value);
+        setShowSiteInput(false);
+        setNewSite("");
+        break;
+      case 'equipmentType':
+        setEquipmentTypeOptions([...equipmentTypeOptions, value]);
+        setEquipmentType(value);
+        setShowEquipmentTypeInput(false);
+        setNewEquipmentType("");
+        break;
+      case 'equipmentMake':
+        setEquipmentMakeOptions([...equipmentMakeOptions, value]);
+        setEquipmentMake(value);
+        setShowEquipmentMakeInput(false);
+        setNewEquipmentMake("");
+        break;
+      case 'equipmentModel':
+        setEquipmentModelOptions([...equipmentModelOptions, value]);
+        setEquipmentModel(value);
+        setShowEquipmentModelInput(false);
+        setNewEquipmentModel("");
+        break;
     }
   };
 
@@ -121,7 +204,11 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
       const formData = new FormData();
       selectedFiles.forEach(file => formData.append('files', file));
       formData.append('docType', docType);
+      formData.append('uploadDate', uploadDate);
+      formData.append('site', site || '');
       formData.append('equipmentType', equipmentType);
+      formData.append('equipmentMake', equipmentMake || '');
+      formData.append('equipmentModel', equipmentModel || '');
 
       const { data, error } = await supabase.functions.invoke('ingest', {
         body: formData,
@@ -130,7 +217,45 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
       if (error) throw error;
 
       if (data.success) {
-        setDocuments(prev => [...prev, ...data.documents]);
+        // Refresh documents list
+        const { data: docs } = await supabase
+          .from('documents')
+          .select('*')
+          .order('uploaded_at', { ascending: false });
+
+        if (docs) {
+          const documentsWithText = await Promise.all(
+            docs.map(async (doc) => {
+              const { data: chunks } = await supabase
+                .from('chunks')
+                .select('text, chunk_index, equipment')
+                .eq('document_id', doc.id)
+                .order('chunk_index');
+
+              const extractedText = chunks?.map(c => c.text).join('') || '';
+              const equipment = chunks?.[0]?.equipment || 'unknown';
+
+              return {
+                id: doc.id,
+                fileName: doc.filename,
+                fileType: doc.filename.split('.').pop() || 'unknown',
+                docType: doc.doc_type || 'unknown',
+                uploadDate: doc.upload_date || null,
+                site: doc.site || null,
+                equipmentType: equipment,
+                equipmentMake: doc.equipment_make || null,
+                equipmentModel: doc.equipment_model || null,
+                extractedText,
+                textLength: extractedText.length,
+                error: null,
+                createdAt: doc.uploaded_at || new Date().toISOString(),
+              };
+            })
+          );
+
+          setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
+        }
+
         toast({
           title: "Upload successful",
           description: `Processed ${data.documents.length} file(s)`,
@@ -236,50 +361,248 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
 
         <Separator />
 
-        {/* Metadata Row */}
+        {/* Metadata Form */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Document Type */}
           <div className="space-y-2">
             <Label htmlFor="doc-type">Document type</Label>
-            <Select value={docType} onValueChange={setDocType}>
-              <SelectTrigger id="doc-type">
-                <SelectValue placeholder="Select document type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="manual">Manual</SelectItem>
-                <SelectItem value="report">Daily / shift report</SelectItem>
-                <SelectItem value="procedure">Procedure / SOP</SelectItem>
-                <SelectItem value="project">Project document</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
+            {showDocTypeInput ? (
+              <div className="flex gap-2">
+                <Input
+                  value={newDocType}
+                  onChange={(e) => setNewDocType(e.target.value)}
+                  placeholder="Enter new document type"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddOption('docType', newDocType);
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  onClick={() => handleAddOption('docType', newDocType)}
+                >
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <Select 
+                value={docType} 
+                onValueChange={(value) => {
+                  if (value === "__add_new__") {
+                    setShowDocTypeInput(true);
+                  } else {
+                    setDocType(value);
+                  }
+                }}
+              >
+                <SelectTrigger id="doc-type">
+                  <SelectValue placeholder="Select document type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {docTypeOptions.map((option) => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                  <SelectItem value="__add_new__">+ Add item</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
+          {/* Upload Date */}
+          <div className="space-y-2">
+            <Label htmlFor="upload-date">Upload date</Label>
+            <Input
+              id="upload-date"
+              type="date"
+              value={uploadDate}
+              onChange={(e) => setUploadDate(e.target.value)}
+            />
+          </div>
+
+          {/* Site */}
+          <div className="space-y-2">
+            <Label htmlFor="site">Site</Label>
+            {showSiteInput ? (
+              <div className="flex gap-2">
+                <Input
+                  value={newSite}
+                  onChange={(e) => setNewSite(e.target.value)}
+                  placeholder="Enter site name"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddOption('site', newSite);
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  onClick={() => handleAddOption('site', newSite)}
+                >
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <Select 
+                value={site} 
+                onValueChange={(value) => {
+                  if (value === "__add_new__") {
+                    setShowSiteInput(true);
+                  } else {
+                    setSite(value);
+                  }
+                }}
+              >
+                <SelectTrigger id="site">
+                  <SelectValue placeholder="Select site" />
+                </SelectTrigger>
+                <SelectContent>
+                  {siteOptions.map((option) => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                  <SelectItem value="__add_new__">+ Add item</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* Equipment Type */}
           <div className="space-y-2">
             <Label htmlFor="equipment-type">Equipment type</Label>
-            <Select value={equipmentType} onValueChange={setEquipmentType}>
-              <SelectTrigger id="equipment-type">
-                <SelectValue placeholder="Select equipment type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inverter">Inverter</SelectItem>
-                <SelectItem value="battery">Battery</SelectItem>
-                <SelectItem value="converter">Converter</SelectItem>
-                <SelectItem value="pcs">PCS</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
+            {showEquipmentTypeInput ? (
+              <div className="flex gap-2">
+                <Input
+                  value={newEquipmentType}
+                  onChange={(e) => setNewEquipmentType(e.target.value)}
+                  placeholder="Enter equipment type"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddOption('equipmentType', newEquipmentType);
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  onClick={() => handleAddOption('equipmentType', newEquipmentType)}
+                >
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <Select 
+                value={equipmentType} 
+                onValueChange={(value) => {
+                  if (value === "__add_new__") {
+                    setShowEquipmentTypeInput(true);
+                  } else {
+                    setEquipmentType(value);
+                  }
+                }}
+              >
+                <SelectTrigger id="equipment-type">
+                  <SelectValue placeholder="Select equipment type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {equipmentTypeOptions.map((option) => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                  <SelectItem value="__add_new__">+ Add item</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
           </div>
-        </div>
 
-        {/* Notes */}
-        <div className="space-y-2">
-          <Label htmlFor="notes">Notes (optional)</Label>
-          <Textarea
-            id="notes"
-            placeholder="Short description, e.g. 'XG-4000 inverter commissioning logs for Site-23'."
-            rows={3}
-            className="resize-none"
-          />
+          {/* Equipment Make */}
+          <div className="space-y-2">
+            <Label htmlFor="equipment-make">Equipment make</Label>
+            {showEquipmentMakeInput ? (
+              <div className="flex gap-2">
+                <Input
+                  value={newEquipmentMake}
+                  onChange={(e) => setNewEquipmentMake(e.target.value)}
+                  placeholder="Enter equipment make"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddOption('equipmentMake', newEquipmentMake);
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  onClick={() => handleAddOption('equipmentMake', newEquipmentMake)}
+                >
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <Select 
+                value={equipmentMake} 
+                onValueChange={(value) => {
+                  if (value === "__add_new__") {
+                    setShowEquipmentMakeInput(true);
+                  } else {
+                    setEquipmentMake(value);
+                  }
+                }}
+              >
+                <SelectTrigger id="equipment-make">
+                  <SelectValue placeholder="Select equipment make" />
+                </SelectTrigger>
+                <SelectContent>
+                  {equipmentMakeOptions.map((option) => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                  <SelectItem value="__add_new__">+ Add item</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* Equipment Model */}
+          <div className="space-y-2">
+            <Label htmlFor="equipment-model">Equipment model</Label>
+            {showEquipmentModelInput ? (
+              <div className="flex gap-2">
+                <Input
+                  value={newEquipmentModel}
+                  onChange={(e) => setNewEquipmentModel(e.target.value)}
+                  placeholder="Enter equipment model"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddOption('equipmentModel', newEquipmentModel);
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  onClick={() => handleAddOption('equipmentModel', newEquipmentModel)}
+                >
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <Select 
+                value={equipmentModel} 
+                onValueChange={(value) => {
+                  if (value === "__add_new__") {
+                    setShowEquipmentModelInput(true);
+                  } else {
+                    setEquipmentModel(value);
+                  }
+                }}
+              >
+                <SelectTrigger id="equipment-model">
+                  <SelectValue placeholder="Select equipment model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {equipmentModelOptions.map((option) => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                  <SelectItem value="__add_new__">+ Add item</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </div>
 
         {/* Upload Button */}
@@ -300,10 +623,12 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Name</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Length</TableHead>
-                      <TableHead>Equipment</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Document type</TableHead>
+                      <TableHead>Upload date</TableHead>
+                      <TableHead>Site</TableHead>
+                      <TableHead>Equipment type</TableHead>
+                      <TableHead>Equipment make</TableHead>
+                      <TableHead>Equipment model</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -324,16 +649,12 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                             {doc.fileName}
                           </div>
                         </TableCell>
-                        <TableCell className="uppercase text-xs">{doc.fileType}</TableCell>
-                        <TableCell>{doc.textLength.toLocaleString()} chars</TableCell>
+                        <TableCell className="capitalize">{doc.docType}</TableCell>
+                        <TableCell>{doc.uploadDate || '—'}</TableCell>
+                        <TableCell>{doc.site || '—'}</TableCell>
                         <TableCell className="capitalize">{doc.equipmentType}</TableCell>
-                        <TableCell>
-                          {doc.error ? (
-                            <Badge variant="destructive">Error</Badge>
-                          ) : (
-                            <Badge variant="default" className="bg-green-600">Success</Badge>
-                          )}
-                        </TableCell>
+                        <TableCell>{doc.equipmentMake || '—'}</TableCell>
+                        <TableCell>{doc.equipmentModel || '—'}</TableCell>
                         <TableCell>
                           <Button
                             variant="ghost"
@@ -353,20 +674,19 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                 </Table>
               </div>
 
-              {/* Preview Area */}
+              {/* Full Text Preview */}
               {selectedDoc && (
                 <div className="space-y-2">
-                  <Label>Preview: {selectedDoc.fileName}</Label>
+                  <Label>Document text: {selectedDoc.fileName}</Label>
                   {selectedDoc.error ? (
                     <div className="p-4 border rounded-lg bg-destructive/10 text-destructive">
                       <p className="font-medium">Error extracting text:</p>
                       <p className="text-sm mt-1">{selectedDoc.error}</p>
                     </div>
                   ) : (
-                    <ScrollArea className="h-[300px] border rounded-lg p-4 bg-muted/30">
+                    <ScrollArea className="h-[400px] border rounded-lg p-4 bg-muted/30">
                       <pre className="text-xs whitespace-pre-wrap font-mono">
-                        {selectedDoc.extractedText.slice(0, 3000)}
-                        {selectedDoc.extractedText.length > 3000 && '\n\n... (truncated)'}
+                        {selectedDoc.extractedText}
                       </pre>
                     </ScrollArea>
                   )}

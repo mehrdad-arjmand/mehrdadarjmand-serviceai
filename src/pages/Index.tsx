@@ -1,7 +1,6 @@
 import { Header } from "@/components/Header";
 import { RepositoryCard } from "@/components/RepositoryCard";
 import { TechnicianChat } from "@/components/TechnicianChat";
-import { DocumentDetails } from "@/components/DocumentDetails";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -40,13 +39,12 @@ const Index = () => {
             <div>
               <h2 className="text-2xl font-semibold text-foreground">Workspace</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Switch between document repository, assistant, and document details.
+                Switch between document repository and assistant.
               </p>
             </div>
             <TabsList>
               <TabsTrigger value="repository">Repository</TabsTrigger>
               <TabsTrigger value="assistant">Assistant</TabsTrigger>
-              <TabsTrigger value="details">Details</TabsTrigger>
             </TabsList>
           </div>
 
@@ -55,9 +53,6 @@ const Index = () => {
           </TabsContent>
           <TabsContent value="assistant">
             <TechnicianChat hasDocuments={hasDocuments} chunksCount={chunksCount} />
-          </TabsContent>
-          <TabsContent value="details">
-            <DocumentDetails selectedDocumentId={selectedDocumentId} />
           </TabsContent>
         </Tabs>
       </main>
