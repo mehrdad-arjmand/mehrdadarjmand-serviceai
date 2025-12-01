@@ -61,20 +61,32 @@ export type Database = {
       documents: {
         Row: {
           doc_type: string | null
+          equipment_make: string | null
+          equipment_model: string | null
           filename: string
           id: string
+          site: string | null
+          upload_date: string | null
           uploaded_at: string | null
         }
         Insert: {
           doc_type?: string | null
+          equipment_make?: string | null
+          equipment_model?: string | null
           filename: string
           id?: string
+          site?: string | null
+          upload_date?: string | null
           uploaded_at?: string | null
         }
         Update: {
           doc_type?: string | null
+          equipment_make?: string | null
+          equipment_model?: string | null
           filename?: string
           id?: string
+          site?: string | null
+          upload_date?: string | null
           uploaded_at?: string | null
         }
         Relationships: []
