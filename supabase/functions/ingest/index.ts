@@ -19,7 +19,11 @@ Deno.serve(async (req) => {
     const formData = await req.formData()
     const files = formData.getAll('files') as File[]
     const docType = formData.get('docType') as string
+    const uploadDate = formData.get('uploadDate') as string
+    const site = formData.get('site') as string
     const equipmentType = formData.get('equipmentType') as string
+    const equipmentMake = formData.get('equipmentMake') as string
+    const equipmentModel = formData.get('equipmentModel') as string
 
     if (!files || files.length === 0) {
       throw new Error('No files provided')
@@ -69,6 +73,10 @@ Deno.serve(async (req) => {
             id: doc.id,
             filename: doc.fileName,
             doc_type: docType || 'unknown',
+            upload_date: uploadDate || null,
+            site: site || null,
+            equipment_make: equipmentMake || null,
+            equipment_model: equipmentModel || null,
           })
           .select()
           .single()
@@ -195,11 +203,11 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<string> {
     }
     
     // Join all pages with newlines and clean up whitespace
+    // No character limit - extract full document
     return textParts
       .join('\n\n')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 100000) // Limit to 100k chars
   } catch (error) {
     console.error('PDF extraction error:', error)
     throw new Error(`Failed to extract PDF text: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -214,12 +222,12 @@ async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
     const result = await mammoth.extractRawText({ arrayBuffer })
     
     // Remove null bytes and other problematic characters
+    // No character limit - extract full document
     const cleanedText = result.value
       .replace(/\x00/g, '') // Remove null bytes
       .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, ' ') // Remove control characters
       .replace(/\s+/g, ' ') // Normalize whitespace
       .trim()
-      .slice(0, 100000) // Limit to 100k chars
     
     return cleanedText
   } catch (error) {
