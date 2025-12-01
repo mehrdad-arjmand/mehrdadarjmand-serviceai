@@ -1,4 +1,4 @@
-import { Upload, FileText } from "lucide-react";
+import { Upload, FileText, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -155,6 +155,49 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
     }
   };
 
+  const handleDelete = async (docId: string, fileName: string) => {
+    if (!confirm(`Delete "${fileName}"? This will remove it from the knowledge base.`)) {
+      return;
+    }
+
+    try {
+      // Delete chunks first (foreign key constraint)
+      const { error: chunksError } = await supabase
+        .from('chunks')
+        .delete()
+        .eq('document_id', docId);
+
+      if (chunksError) throw chunksError;
+
+      // Delete document
+      const { error: docError } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', docId);
+
+      if (docError) throw docError;
+
+      // Update UI
+      setDocuments(prev => prev.filter(d => d.id !== docId));
+      if (selectedDocId === docId) {
+        setSelectedDocId(null);
+        onDocumentSelect?.(null);
+      }
+
+      toast({
+        title: "Document deleted",
+        description: `"${fileName}" has been removed from the knowledge base.`,
+      });
+    } catch (error: any) {
+      console.error('Delete error:', error);
+      toast({
+        title: "Delete failed",
+        description: error.message || "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
   const selectedDoc = documents.find(doc => doc.id === selectedDocId);
 
   return (
@@ -261,6 +304,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                       <TableHead>Length</TableHead>
                       <TableHead>Equipment</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -289,6 +333,19 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                           ) : (
                             <Badge variant="default" className="bg-green-600">Success</Badge>
                           )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(doc.id, doc.fileName);
+                            }}
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
