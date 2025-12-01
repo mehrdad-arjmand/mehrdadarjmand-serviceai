@@ -77,16 +77,22 @@ Deno.serve(async (req) => {
           throw docError
         }
 
-        // Split text into chunks (simple: ~1000 chars per chunk)
-        const chunkSize = 1000
+        // Split text into chunks with overlap to preserve context
+        const chunkSize = 800
+        const overlapSize = 200 // 25% overlap
         const chunks = []
-        for (let i = 0; i < doc.extractedText.length; i += chunkSize) {
-          chunks.push({
-            document_id: doc.id,
-            chunk_index: Math.floor(i / chunkSize),
-            text: doc.extractedText.slice(i, i + chunkSize),
-            equipment: equipmentType || null,
-          })
+        let chunkIndex = 0
+        
+        for (let i = 0; i < doc.extractedText.length; i += (chunkSize - overlapSize)) {
+          const chunkText = doc.extractedText.slice(i, i + chunkSize)
+          if (chunkText.trim().length > 0) {
+            chunks.push({
+              document_id: doc.id,
+              chunk_index: chunkIndex++,
+              text: chunkText,
+              equipment: equipmentType || null,
+            })
+          }
         }
 
         // Save chunks and generate embeddings
