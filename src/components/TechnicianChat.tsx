@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,22 @@ import { Label } from "@/components/ui/label";
 import { Send, Mic, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { CalendarIcon } from "lucide-react";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 interface TechnicianChatProps {
   hasDocuments: boolean;
@@ -30,6 +46,52 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const [isQuerying, setIsQuerying] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const { toast } = useToast();
+
+  const [filterDocType, setFilterDocType] = useState<string>("");
+  const [filterUploadDate, setFilterUploadDate] = useState<Date | undefined>();
+  const [filterSite, setFilterSite] = useState<string>("");
+  const [filterEquipmentMake, setFilterEquipmentMake] = useState<string>("");
+  const [filterEquipmentModel, setFilterEquipmentModel] = useState<string>("");
+
+  // Available filter options from documents
+  const [docTypes, setDocTypes] = useState<string[]>([]);
+  const [sites, setSites] = useState<string[]>([]);
+  const [equipmentMakes, setEquipmentMakes] = useState<string[]>([]);
+  const [equipmentModels, setEquipmentModels] = useState<string[]>([]);
+
+  // Speech recognition ref
+  const recognitionRef = useRef<any>(null);
+
+  // Fetch distinct filter values from documents
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        const { data: documents, error } = await supabase
+          .from('documents')
+          .select('doc_type, site, equipment_make, equipment_model');
+
+        if (error) throw error;
+
+        if (documents) {
+          const uniqueDocTypes = [...new Set(documents.map(d => d.doc_type).filter(Boolean))];
+          const uniqueSites = [...new Set(documents.map(d => d.site).filter(Boolean))];
+          const uniqueMakes = [...new Set(documents.map(d => d.equipment_make).filter(Boolean))];
+          const uniqueModels = [...new Set(documents.map(d => d.equipment_model).filter(Boolean))];
+
+          setDocTypes(uniqueDocTypes as string[]);
+          setSites(uniqueSites as string[]);
+          setEquipmentMakes(uniqueMakes as string[]);
+          setEquipmentModels(uniqueModels as string[]);
+        }
+      } catch (error) {
+        console.error('Error fetching filter options:', error);
+      }
+    };
+
+    if (hasDocuments) {
+      fetchFilterOptions();
+    }
+  }, [hasDocuments]);
 
   const handleAskAssistant = async () => {
     if (!hasDocuments) {
@@ -61,6 +123,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           site: site.trim() || undefined,
           equipment: equipment.trim() || undefined,
           faultCode: faultCode.trim() || undefined,
+          documentType: filterDocType || undefined,
+          uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
+          filterSite: filterSite || undefined,
+          equipmentMake: filterEquipmentMake || undefined,
+          equipmentModel: filterEquipmentModel || undefined,
         },
       });
 
@@ -86,6 +153,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   };
 
   const handleDictate = () => {
+    // Toggle: if already listening, stop
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+
+    // Start listening
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({
         title: "Speech recognition not supported",
@@ -97,39 +171,76 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
 
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = true; // Keep listening
+    recognition.interimResults = true;
     recognition.lang = 'en-US';
+
+    let finalTranscript = '';
 
     recognition.onstart = () => {
       setIsListening(true);
       toast({
-        title: "Listening...",
-        description: "Speak your question now.",
+        title: "Recording...",
+        description: "Click the mic button again to stop.",
       });
     };
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setQuestion(transcript);
-      toast({
-        title: "Speech captured",
-        description: "Your question has been transcribed.",
-      });
+      let interimTranscript = '';
+      
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      
+      // Update question field with accumulated text
+      setQuestion(finalTranscript + interimTranscript);
     };
 
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
-      toast({
-        title: "Speech recognition error",
-        description: event.error,
-        variant: "destructive",
-      });
+      
+      if (event.error === 'not-allowed') {
+        toast({
+          title: "Microphone permission denied",
+          description: "Please enable mic access in your browser.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Speech recognition error",
+          description: event.error,
+          variant: "destructive",
+        });
+      }
+      
+      setIsListening(false);
+      recognitionRef.current = null;
     };
 
     recognition.onend = () => {
       setIsListening(false);
+      recognitionRef.current = null;
+      
+      if (finalTranscript.trim()) {
+        setQuestion(finalTranscript.trim());
+        toast({
+          title: "Speech captured",
+          description: "Your question has been transcribed.",
+        });
+      } else {
+        toast({
+          title: "No speech detected",
+          description: "Try speaking again.",
+          variant: "destructive",
+        });
+      }
     };
 
     recognition.start();
@@ -148,6 +259,111 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               Ask questions about your equipment and procedures
             </p>
           </div>
+
+          {/* Filters Section */}
+          {hasDocuments && (
+            <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Optional Filters</Label>
+                <span className="text-xs text-muted-foreground">Leave empty to search all documents</span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Document Type */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
+                  <Select value={filterDocType} onValueChange={setFilterDocType}>
+                    <SelectTrigger id="filter-doc-type" className="h-9">
+                      <SelectValue placeholder="All types" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All types</SelectItem>
+                      {docTypes.map((type) => (
+                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Upload Date */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="filter-upload-date" className="text-xs">Upload Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="filter-upload-date"
+                        variant="outline"
+                        className={cn(
+                          "h-9 w-full justify-start text-left font-normal",
+                          !filterUploadDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {filterUploadDate ? format(filterUploadDate, "PPP") : "Any date"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={filterUploadDate}
+                        onSelect={setFilterUploadDate}
+                        initialFocus
+                        className="pointer-events-auto"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                {/* Site */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="filter-site" className="text-xs">Site</Label>
+                  <Select value={filterSite} onValueChange={setFilterSite}>
+                    <SelectTrigger id="filter-site" className="h-9">
+                      <SelectValue placeholder="All sites" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All sites</SelectItem>
+                      {sites.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Equipment Make */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
+                  <Select value={filterEquipmentMake} onValueChange={setFilterEquipmentMake}>
+                    <SelectTrigger id="filter-equipment-make" className="h-9">
+                      <SelectValue placeholder="All makes" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All makes</SelectItem>
+                      {equipmentMakes.map((make) => (
+                        <SelectItem key={make} value={make}>{make}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Equipment Model */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
+                  <Select value={filterEquipmentModel} onValueChange={setFilterEquipmentModel}>
+                    <SelectTrigger id="filter-equipment-model" className="h-9">
+                      <SelectValue placeholder="All models" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All models</SelectItem>
+                      {equipmentModels.map((model) => (
+                        <SelectItem key={model} value={model}>{model}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
@@ -219,11 +435,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
             <Button
               onClick={handleDictate}
-              disabled={isQuerying || isListening}
-              variant="outline"
+              disabled={isQuerying}
+              variant={isListening ? "destructive" : "outline"}
               size="icon"
             >
-              <Mic className={`h-4 w-4 ${isListening ? 'text-destructive' : ''}`} />
+              <Mic className="h-4 w-4" />
             </Button>
           </div>
 
