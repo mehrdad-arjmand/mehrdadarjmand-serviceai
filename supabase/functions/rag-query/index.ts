@@ -42,8 +42,8 @@ Deno.serve(async (req) => {
       'match_chunks',
       {
         query_embedding: embeddingStr,
-        match_threshold: 0.25, // Lower threshold for better recall
-        match_count: 8 // Retrieve more chunks for better context
+        match_threshold: 0.20, // Very low threshold to catch all potentially relevant content
+        match_count: 20 // Retrieve many chunks to ensure we find the right content
       }
     )
 
@@ -74,10 +74,13 @@ Deno.serve(async (req) => {
 
 CRITICAL INSTRUCTIONS:
 - Answer based on the provided context from documents
-- If relevant information is found in ANY of the sources, use it to answer the question
-- Quote or reference specific details from the context when answering
-- Only say "no information available" if NONE of the sources contain relevant information
-- Pay close attention to technical details, safety warnings, and specifications in the context
+- Search thoroughly through ALL provided sources - relevant information may appear in any chunk
+- If you find PARTIAL or RELATED information in the context, use it to answer the question
+- Some chunks may contain table of contents or headers - look past these to find actual content
+- Quote or reference specific details, numbers, procedures, and warnings from the context
+- Only say "no information available" if you have thoroughly checked all sources and found nothing relevant
+- Even if information seems incomplete, provide what you found with appropriate disclaimers
+- Pay close attention to technical details, maintenance procedures, safety warnings, and specifications
 
 Always prioritize safety - mention lock-out/tag-out procedures and safety warnings when relevant.`
 
