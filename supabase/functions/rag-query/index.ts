@@ -10,6 +10,12 @@ interface RAGQueryRequest {
   site?: string
   equipment?: string
   faultCode?: string
+  // Optional document filters
+  documentType?: string
+  uploadDate?: string
+  filterSite?: string
+  equipmentMake?: string
+  equipmentModel?: string
 }
 
 Deno.serve(async (req) => {
@@ -23,9 +29,25 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    const { question, site, equipment, faultCode }: RAGQueryRequest = await req.json()
+    const { 
+      question, 
+      site, 
+      equipment, 
+      faultCode,
+      documentType,
+      uploadDate,
+      filterSite,
+      equipmentMake,
+      equipmentModel
+    }: RAGQueryRequest = await req.json()
     
-    console.log('RAG Query:', { question, site, equipment, faultCode })
+    console.log('RAG Query:', { 
+      question, 
+      site, 
+      equipment, 
+      faultCode,
+      filters: { documentType, uploadDate, filterSite, equipmentMake, equipmentModel }
+    })
 
     // Build context-aware query
     const fullQuery = buildFullQuery(question, site, equipment, faultCode)
@@ -62,8 +84,48 @@ Deno.serve(async (req) => {
       })))
     }
 
+    // Apply document filters if provided
+    let filteredChunks = chunks || []
+    
+    if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel) {
+      // Get matching document IDs based on filters
+      let docQuery = supabase.from('documents').select('id')
+      
+      if (documentType) docQuery = docQuery.eq('doc_type', documentType)
+      if (uploadDate) docQuery = docQuery.eq('upload_date', uploadDate)
+      if (filterSite) docQuery = docQuery.eq('site', filterSite)
+      if (equipmentMake) docQuery = docQuery.eq('equipment_make', equipmentMake)
+      if (equipmentModel) docQuery = docQuery.eq('equipment_model', equipmentModel)
+      
+      const { data: matchingDocs, error: filterError } = await docQuery
+      
+      if (filterError) {
+        console.error('Filter error:', filterError)
+        throw filterError
+      }
+      
+      if (!matchingDocs || matchingDocs.length === 0) {
+        return new Response(
+          JSON.stringify({ 
+            success: true,
+            answer: 'No documents match the selected filters. Try broadening your filters or searching all documents.',
+            sources: []
+          }),
+          { 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200 
+          }
+        )
+      }
+      
+      const matchingDocIds = new Set(matchingDocs.map(d => d.id))
+      filteredChunks = filteredChunks.filter((chunk: any) => matchingDocIds.has(chunk.document_id))
+      
+      console.log(`Filtered to ${filteredChunks.length} chunks from ${matchingDocs.length} matching documents`)
+    }
+
     // Merge semantic search results with keyword-based fallback chunks
-    const combinedChunks = await enrichWithKeywordFallback(supabase, question, chunks || [])
+    const combinedChunks = await enrichWithKeywordFallback(supabase, question, filteredChunks)
 
     // Build context from retrieved chunks
     const context = combinedChunks
