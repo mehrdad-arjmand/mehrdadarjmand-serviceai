@@ -62,10 +62,13 @@ Deno.serve(async (req) => {
       })))
     }
 
+    // Merge semantic search results with keyword-based fallback chunks
+    const combinedChunks = await enrichWithKeywordFallback(supabase, question, chunks || [])
+
     // Build context from retrieved chunks
-    const context = chunks
-      ?.map((chunk: any, idx: number) => 
-        `[Source ${idx + 1}: ${chunk.filename || 'Unknown'} | Chunk ${chunk.chunk_index} | Similarity: ${(chunk.similarity * 100).toFixed(1)}%]\n${chunk.text}`
+    const context = combinedChunks
+      .map((chunk: any, idx: number) => 
+        `[Source ${idx + 1}: ${chunk.filename || 'Unknown'} | Chunk ${chunk.chunk_index} | Similarity: ${chunk.similarity ? (chunk.similarity * 100).toFixed(1) : 'N/A'}%]\n${chunk.text}`
       )
       .join('\n\n---\n\n') || 'No relevant context found.'
 
@@ -101,12 +104,12 @@ Please provide a clear, concise answer based on the context above.`
       JSON.stringify({ 
         success: true,
         answer,
-        sources: chunks?.map((chunk: any) => ({
+        sources: combinedChunks.map((chunk: any) => ({
           filename: chunk.filename || 'Unknown',
           chunkIndex: chunk.chunk_index,
           text: chunk.text,
           similarity: chunk.similarity
-        })) || []
+        }))
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -125,6 +128,58 @@ Please provide a clear, concise answer based on the context above.`
     )
   }
 })
+
+const STOP_WORDS = new Set<string>([
+  'the','and','for','with','that','this','from','have','what','when','where','which','will','would','could','should',
+  'about','your','into','over','under','after','before','while','there','here','such','than','then','every','years','year'
+])
+
+async function enrichWithKeywordFallback(supabase: any, question: string, initialChunks: any[]): Promise<any[]> {
+  try {
+    const tokens = (question.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
+      (word) => word.length >= 4 && !STOP_WORDS.has(word)
+    )
+
+    if (tokens.length === 0) {
+      return initialChunks
+    }
+
+    const sortedTokens = [...tokens].sort((a, b) => b.length - a.length)
+    const mainKeyword = sortedTokens[0]
+    console.log('Keyword fallback search using:', mainKeyword)
+
+    const { data, error } = await supabase
+      .from('chunks')
+      .select('id, chunk_index, text, site, equipment, fault_code')
+      .ilike('text', `%${mainKeyword}%`)
+      .limit(10)
+
+    if (error) {
+      console.error('Keyword fallback search error:', error)
+      return initialChunks
+    }
+
+    const existingIds = new Set(initialChunks.map((c: any) => c.id))
+    const mergedChunks = [...initialChunks]
+
+    for (const row of data || []) {
+      if (!existingIds.has(row.id)) {
+        mergedChunks.push({
+          ...row,
+          similarity: row.similarity ?? 0,
+          filename: row.filename ?? 'Unknown',
+        })
+      }
+    }
+
+    console.log(`Keyword fallback added ${(data || []).length} chunks (after dedup: ${mergedChunks.length})`)
+
+    return mergedChunks
+  } catch (error) {
+    console.error('Keyword fallback search unexpected error:', error)
+    return initialChunks
+  }
+}
 
 function buildFullQuery(question: string, site?: string, equipment?: string, faultCode?: string): string {
   const parts = [question]
