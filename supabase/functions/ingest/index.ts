@@ -242,32 +242,44 @@ async function generateEmbeddings(texts: string[]): Promise<number[][]> {
     throw new Error('GOOGLE_API_KEY not configured')
   }
 
-  // Generate embeddings for each text using Google's API
+  // Use batch API to reduce API calls and CPU time
+  const BATCH_SIZE = 5
   const embeddings: number[][] = []
   
-  for (const text of texts) {
+  // Process texts in batches
+  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+    const batch = texts.slice(i, i + BATCH_SIZE)
+    
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GOOGLE_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key=${GOOGLE_API_KEY}`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          content: {
-            parts: [{ text }]
-          }
+          requests: batch.map(text => ({
+            model: 'models/text-embedding-004',
+            content: {
+              parts: [{ text }]
+            }
+          }))
         })
       }
     )
 
     if (!response.ok) {
       const error = await response.text()
-      throw new Error(`Failed to generate embedding: ${error}`)
+      throw new Error(`Failed to generate embeddings batch: ${error}`)
     }
 
     const data = await response.json()
-    embeddings.push(data.embedding.values)
+    // Extract embeddings from batch response
+    for (const embeddingResponse of data.embeddings) {
+      embeddings.push(embeddingResponse.values)
+    }
+    
+    console.log(`Generated embeddings for batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(texts.length / BATCH_SIZE)}`)
   }
 
   return embeddings
