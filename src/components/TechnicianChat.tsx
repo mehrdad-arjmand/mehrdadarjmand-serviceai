@@ -47,27 +47,38 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const [filterDocType, setFilterDocType] = useState<string>("");
   const [filterUploadDate, setFilterUploadDate] = useState<Date | undefined>();
   const [filterSite, setFilterSite] = useState<string>("");
+  const [filterEquipmentType, setFilterEquipmentType] = useState<string>("");
   const [filterEquipmentMake, setFilterEquipmentMake] = useState<string>("");
   const [filterEquipmentModel, setFilterEquipmentModel] = useState<string>("");
 
   // Available filter options from documents
   const [docTypes, setDocTypes] = useState<string[]>([]);
   const [sites, setSites] = useState<string[]>([]);
+  const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
   const [equipmentMakes, setEquipmentMakes] = useState<string[]>([]);
   const [equipmentModels, setEquipmentModels] = useState<string[]>([]);
 
   // Speech recognition ref
   const recognitionRef = useRef<any>(null);
 
-  // Fetch distinct filter values from documents
+  // Fetch distinct filter values from documents and chunks
   useEffect(() => {
     const fetchFilterOptions = async () => {
       try {
-        const { data: documents, error } = await supabase
+        // Fetch from documents table
+        const { data: documents, error: docError } = await supabase
           .from('documents')
           .select('doc_type, site, equipment_make, equipment_model');
 
-        if (error) throw error;
+        if (docError) throw docError;
+
+        // Fetch equipment types from chunks table
+        const { data: chunks, error: chunkError } = await supabase
+          .from('chunks')
+          .select('equipment')
+          .not('equipment', 'is', null);
+
+        if (chunkError) throw chunkError;
 
         if (documents) {
           const uniqueDocTypes = [...new Set(documents.map(d => d.doc_type).filter(Boolean))];
@@ -79,6 +90,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           setSites(uniqueSites as string[]);
           setEquipmentMakes(uniqueMakes as string[]);
           setEquipmentModels(uniqueModels as string[]);
+        }
+
+        if (chunks) {
+          const uniqueEquipmentTypes = [...new Set(chunks.map(c => c.equipment).filter(Boolean))];
+          setEquipmentTypes(uniqueEquipmentTypes as string[]);
         }
       } catch (error) {
         console.error('Error fetching filter options:', error);
@@ -120,6 +136,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           documentType: filterDocType || undefined,
           uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
           filterSite: filterSite || undefined,
+          equipmentType: filterEquipmentType || undefined,
           equipmentMake: filterEquipmentMake || undefined,
           equipmentModel: filterEquipmentModel || undefined,
         },
@@ -319,6 +336,22 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                       <SelectItem value="__all__">All sites</SelectItem>
                       {sites.map((s) => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Equipment Type */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="filter-equipment-type" className="text-xs">Equipment Type</Label>
+                  <Select value={filterEquipmentType || "__all__"} onValueChange={(v) => setFilterEquipmentType(v === "__all__" ? "" : v)}>
+                    <SelectTrigger id="filter-equipment-type" className="h-9">
+                      <SelectValue placeholder="All types" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">All types</SelectItem>
+                      {equipmentTypes.map((type) => (
+                        <SelectItem key={type} value={type}>{type}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
