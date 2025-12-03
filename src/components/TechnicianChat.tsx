@@ -272,12 +272,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                 {/* Document Type */}
                 <div className="space-y-1.5">
                   <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
-                  <Select value={filterDocType} onValueChange={setFilterDocType}>
+                  <Select value={filterDocType || "__all__"} onValueChange={(v) => setFilterDocType(v === "__all__" ? "" : v)}>
                     <SelectTrigger id="filter-doc-type" className="h-9">
                       <SelectValue placeholder="All types" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All types</SelectItem>
+                      <SelectItem value="__all__">All types</SelectItem>
                       {docTypes.map((type) => (
                         <SelectItem key={type} value={type}>{type}</SelectItem>
                       ))}
@@ -317,12 +317,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                 {/* Site */}
                 <div className="space-y-1.5">
                   <Label htmlFor="filter-site" className="text-xs">Site</Label>
-                  <Select value={filterSite} onValueChange={setFilterSite}>
+                  <Select value={filterSite || "__all__"} onValueChange={(v) => setFilterSite(v === "__all__" ? "" : v)}>
                     <SelectTrigger id="filter-site" className="h-9">
                       <SelectValue placeholder="All sites" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All sites</SelectItem>
+                      <SelectItem value="__all__">All sites</SelectItem>
                       {sites.map((s) => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
                       ))}
@@ -333,12 +333,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                 {/* Equipment Make */}
                 <div className="space-y-1.5">
                   <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
-                  <Select value={filterEquipmentMake} onValueChange={setFilterEquipmentMake}>
+                  <Select value={filterEquipmentMake || "__all__"} onValueChange={(v) => setFilterEquipmentMake(v === "__all__" ? "" : v)}>
                     <SelectTrigger id="filter-equipment-make" className="h-9">
                       <SelectValue placeholder="All makes" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All makes</SelectItem>
+                      <SelectItem value="__all__">All makes</SelectItem>
                       {equipmentMakes.map((make) => (
                         <SelectItem key={make} value={make}>{make}</SelectItem>
                       ))}
@@ -349,12 +349,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                 {/* Equipment Model */}
                 <div className="space-y-1.5">
                   <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
-                  <Select value={filterEquipmentModel} onValueChange={setFilterEquipmentModel}>
+                  <Select value={filterEquipmentModel || "__all__"} onValueChange={(v) => setFilterEquipmentModel(v === "__all__" ? "" : v)}>
                     <SelectTrigger id="filter-equipment-model" className="h-9">
                       <SelectValue placeholder="All models" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All models</SelectItem>
+                      <SelectItem value="__all__">All models</SelectItem>
                       {equipmentModels.map((model) => (
                         <SelectItem key={model} value={model}>{model}</SelectItem>
                       ))}
