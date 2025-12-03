@@ -366,7 +366,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
         <Separator />
 
         {/* Metadata Form */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Document Type */}
           <div className="space-y-2">
             <Label htmlFor="doc-type">Document type</Label>

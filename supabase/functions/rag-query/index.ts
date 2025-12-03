@@ -11,6 +11,7 @@ interface RAGQueryRequest {
   documentType?: string
   uploadDate?: string
   filterSite?: string
+  equipmentType?: string
   equipmentMake?: string
   equipmentModel?: string
 }
@@ -31,32 +32,28 @@ Deno.serve(async (req) => {
       documentType,
       uploadDate,
       filterSite,
+      equipmentType,
       equipmentMake,
       equipmentModel
     }: RAGQueryRequest = await req.json()
     
     console.log('RAG Query:', { 
       question, 
-      filters: { documentType, uploadDate, filterSite, equipmentMake, equipmentModel }
+      filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel }
     })
 
-    // Use question directly for embedding
-    const fullQuery = question
-    console.log('Full query:', fullQuery)
-
     // Generate embedding for the query
-    const queryEmbedding = await generateEmbedding(fullQuery)
+    const queryEmbedding = await generateEmbedding(question)
 
-    // Perform vector similarity search
-    // Format embedding as PostgreSQL vector string
+    // Perform vector similarity search with high count to ensure we get diverse results
     const embeddingStr = `[${queryEmbedding.join(',')}]`
     
     const { data: chunks, error: searchError } = await supabase.rpc(
       'match_chunks',
       {
         query_embedding: embeddingStr,
-        match_threshold: 0.20, // Very low threshold to catch all potentially relevant content
-        match_count: 20 // Retrieve many chunks to ensure we find the right content
+        match_threshold: 0.15, // Very low threshold
+        match_count: 50 // Get many chunks to ensure we find actual content
       }
     )
 
@@ -65,21 +62,12 @@ Deno.serve(async (req) => {
       throw searchError
     }
 
-    console.log(`Found ${chunks?.length || 0} relevant chunks`)
-    if (chunks && chunks.length > 0) {
-      console.log('Top chunk similarities:', chunks.map((c: any) => ({
-        filename: c.filename,
-        chunk: c.chunk_index,
-        similarity: (c.similarity * 100).toFixed(1) + '%',
-        preview: c.text.slice(0, 100)
-      })))
-    }
+    console.log(`Found ${chunks?.length || 0} semantic chunks`)
 
     // Apply document filters if provided
     let filteredChunks = chunks || []
     
     if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel) {
-      // Get matching document IDs based on filters
       let docQuery = supabase.from('documents').select('id')
       
       if (documentType) docQuery = docQuery.eq('doc_type', documentType)
@@ -115,13 +103,32 @@ Deno.serve(async (req) => {
       console.log(`Filtered to ${filteredChunks.length} chunks from ${matchingDocs.length} matching documents`)
     }
 
-    // Merge semantic search results with keyword-based fallback chunks
+    // Apply equipment type filter on chunks (this field is on chunks table)
+    if (equipmentType) {
+      filteredChunks = filteredChunks.filter((chunk: any) => chunk.equipment === equipmentType)
+      console.log(`After equipment type filter: ${filteredChunks.length} chunks`)
+    }
+
+    // Merge with aggressive keyword search
     const combinedChunks = await enrichWithKeywordFallback(supabase, question, filteredChunks)
 
+    // Re-rank chunks: prioritize substantive content over TOC/index entries
+    const rankedChunks = rerankChunks(combinedChunks, question)
+
+    // Take top chunks for context
+    const topChunks = rankedChunks.slice(0, 30)
+
+    console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
+      chunk: c.chunk_index,
+      score: c.finalScore?.toFixed(3),
+      isTOC: c.isTOC,
+      preview: c.text.slice(0, 80)
+    })))
+
     // Build context from retrieved chunks
-    const context = combinedChunks
+    const context = topChunks
       .map((chunk: any, idx: number) => 
-        `[Source ${idx + 1}: ${chunk.filename || 'Unknown'} | Chunk ${chunk.chunk_index} | Similarity: ${chunk.similarity ? (chunk.similarity * 100).toFixed(1) : 'N/A'}%]\n${chunk.text}`
+        `[Source ${idx + 1}: ${chunk.filename || 'Unknown'} | Chunk ${chunk.chunk_index}]\n${chunk.text}`
       )
       .join('\n\n---\n\n') || 'No relevant context found.'
 
@@ -130,22 +137,20 @@ Deno.serve(async (req) => {
 
 CRITICAL INSTRUCTIONS:
 - Answer based on the provided context from documents
-- Search thoroughly through ALL provided sources - relevant information may appear in any chunk
-- If you find PARTIAL or RELATED information in the context, use it to answer the question
-- Some chunks may contain table of contents or headers - look past these to find actual content
-- Quote or reference specific details, numbers, procedures, and warnings from the context
-- Only say "no information available" if you have thoroughly checked all sources and found nothing relevant
-- Even if information seems incomplete, provide what you found with appropriate disclaimers
-- Pay close attention to technical details, maintenance procedures, safety warnings, and specifications
+- Search thoroughly through ALL provided sources - the actual content you need may be in later sources, not just the first few
+- IGNORE table of contents entries that just list page numbers - look for actual procedural content with specific instructions
+- If a source contains actual step-by-step instructions, specific values, or detailed procedures, prioritize that over TOC entries
+- Quote specific details, numbers, procedures, measurements, and warnings from the context
+- Look for sections that contain actual maintenance steps, not just section headings
 
-Always prioritize safety - mention lock-out/tag-out procedures and safety warnings when relevant.`
+Always prioritize safety - mention safety warnings when relevant.`
 
     const userPrompt = `Technician Question: ${question}
 
-Context from documents:
+Context from documents (search ALL sources carefully - actual content may be in later chunks):
 ${context}
 
-Please provide a clear, concise answer based on the context above.`
+Please provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries.`
 
     const answer = await generateAnswer(systemPrompt, userPrompt)
 
@@ -153,7 +158,7 @@ Please provide a clear, concise answer based on the context above.`
       JSON.stringify({ 
         success: true,
         answer,
-        sources: combinedChunks.map((chunk: any) => ({
+        sources: topChunks.map((chunk: any) => ({
           filename: chunk.filename || 'Unknown',
           chunkIndex: chunk.chunk_index,
           text: chunk.text,
@@ -180,8 +185,72 @@ Please provide a clear, concise answer based on the context above.`
 
 const STOP_WORDS = new Set<string>([
   'the','and','for','with','that','this','from','have','what','when','where','which','will','would','could','should',
-  'about','your','into','over','under','after','before','while','there','here','such','than','then','every','years','year'
+  'about','your','into','over','under','after','before','while','there','here','such','than','then','tell','know'
 ])
+
+// Detect if a chunk looks like a table of contents entry
+function isTOCChunk(text: string): boolean {
+  // TOC patterns: lots of dots, page numbers, section numbers without content
+  const dotPattern = /\.{4,}/g
+  const dotMatches = text.match(dotPattern)
+  const dotCount = dotMatches ? dotMatches.length : 0
+  
+  // Count actual word content vs formatting
+  const words = text.split(/\s+/).filter(w => w.length > 2 && !w.match(/^[\d.]+$/))
+  const contentRatio = words.length / (text.length / 10) // words per 10 chars
+  
+  // TOC entries have lots of dots and low content ratio
+  if (dotCount >= 3 && contentRatio < 2) return true
+  
+  // Check for page number patterns like "... 88" or "...... 92"
+  const pageNumPattern = /\.{3,}\s*\d{1,3}\s/g
+  const pageNumMatches = text.match(pageNumPattern)
+  if (pageNumMatches && pageNumMatches.length >= 2) return true
+  
+  return false
+}
+
+// Re-rank chunks to prioritize substantive content
+function rerankChunks(chunks: any[], question: string): any[] {
+  const questionLower = question.toLowerCase()
+  const keywords = questionLower.match(/[a-z]{4,}/g) || []
+  
+  return chunks.map(chunk => {
+    const text = chunk.text.toLowerCase()
+    const isTOC = isTOCChunk(chunk.text)
+    
+    // Base score from similarity
+    let score = chunk.similarity || 0.3
+    
+    // Heavily penalize TOC chunks
+    if (isTOC) {
+      score *= 0.3
+    }
+    
+    // Boost chunks with actual procedural content
+    const proceduralIndicators = [
+      'replace', 'every', 'years', 'check', 'inspect', 'clean', 'ensure',
+      'warning', 'caution', 'must', 'should', 'procedure', 'step',
+      'value', 'concentration', 'level', 'temperature', 'pressure'
+    ]
+    const proceduralMatches = proceduralIndicators.filter(ind => text.includes(ind)).length
+    score += proceduralMatches * 0.05
+    
+    // Boost chunks that contain question keywords in actual content (not just headings)
+    const keywordMatches = keywords.filter(kw => text.includes(kw)).length
+    if (!isTOC && keywordMatches > 0) {
+      score += keywordMatches * 0.1
+    }
+    
+    // Boost chunks with specific values/measurements
+    const hasSpecificValues = /\d+\s*(ppm|%|°C|°F|years?|months?|days?|hours?)/i.test(chunk.text)
+    if (hasSpecificValues) {
+      score += 0.15
+    }
+    
+    return { ...chunk, finalScore: score, isTOC }
+  }).sort((a, b) => b.finalScore - a.finalScore)
+}
 
 async function enrichWithKeywordFallback(supabase: any, question: string, initialChunks: any[]): Promise<any[]> {
   try {
@@ -193,8 +262,8 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
       return initialChunks
     }
 
-    // Use multiple keywords for better matching
-    const sortedTokens = [...tokens].sort((a, b) => b.length - a.length).slice(0, 3)
+    // Use multiple keywords
+    const sortedTokens = [...tokens].sort((a, b) => b.length - a.length).slice(0, 4)
     console.log('Keyword fallback search using:', sortedTokens)
 
     // Query chunks with document join to get filename
@@ -202,7 +271,7 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
       .from('chunks')
       .select('id, document_id, chunk_index, text, site, equipment, fault_code, documents!inner(filename)')
       .or(sortedTokens.map(kw => `text.ilike.%${kw}%`).join(','))
-      .limit(30)
+      .limit(50)
 
     if (error) {
       console.error('Keyword fallback search error:', error)
@@ -216,13 +285,13 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
       if (!existingIds.has(row.id)) {
         mergedChunks.push({
           ...row,
-          similarity: 0.5, // Assign moderate similarity for keyword matches
+          similarity: 0.4, // Moderate similarity for keyword matches
           filename: row.documents?.filename ?? 'Unknown',
         })
       }
     }
 
-    console.log(`Keyword fallback added ${(data || []).length} chunks (after dedup: ${mergedChunks.length})`)
+    console.log(`Keyword fallback: found ${(data || []).length}, merged total: ${mergedChunks.length}`)
 
     return mergedChunks
   } catch (error) {
@@ -230,7 +299,6 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
     return initialChunks
   }
 }
-
 
 async function generateEmbedding(text: string): Promise<number[]> {
   const GOOGLE_API_KEY = Deno.env.get('GOOGLE_API_KEY')
