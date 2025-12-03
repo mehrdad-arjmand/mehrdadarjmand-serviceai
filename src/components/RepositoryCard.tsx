@@ -1,4 +1,4 @@
-import { Upload, FileText, Trash2 } from "lucide-react";
+import { Upload, FileText, Trash2, CalendarIcon } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,6 +10,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format, parse } from "date-fns";
+import { cn } from "@/lib/utils";
 
 interface Document {
   id: string;
@@ -412,13 +416,30 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
           {/* Upload Date */}
           <div className="space-y-2">
             <Label htmlFor="upload-date">Upload date</Label>
-            <Input
-              id="upload-date"
-              type="date"
-              value={uploadDate}
-              onChange={(e) => setUploadDate(e.target.value)}
-              className="[&::-webkit-calendar-picker-indicator]:order-1 [&::-webkit-calendar-picker-indicator]:ml-auto"
-            />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  id="upload-date"
+                  variant="outline"
+                  className={cn(
+                    "h-10 w-full justify-between text-left font-normal",
+                    !uploadDate && "text-muted-foreground"
+                  )}
+                >
+                  {uploadDate ? format(parse(uploadDate, 'yyyy-MM-dd', new Date()), "PPP") : "Select date"}
+                  <CalendarIcon className="h-4 w-4 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={uploadDate ? parse(uploadDate, 'yyyy-MM-dd', new Date()) : undefined}
+                  onSelect={(date) => setUploadDate(date ? format(date, 'yyyy-MM-dd') : '')}
+                  initialFocus
+                  className="pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
           </div>
 
           {/* Site */}

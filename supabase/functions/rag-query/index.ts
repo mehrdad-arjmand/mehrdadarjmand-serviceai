@@ -7,9 +7,6 @@ const corsHeaders = {
 
 interface RAGQueryRequest {
   question: string
-  site?: string
-  equipment?: string
-  faultCode?: string
   // Optional document filters
   documentType?: string
   uploadDate?: string
@@ -31,9 +28,6 @@ Deno.serve(async (req) => {
 
     const { 
       question, 
-      site, 
-      equipment, 
-      faultCode,
       documentType,
       uploadDate,
       filterSite,
@@ -43,14 +37,11 @@ Deno.serve(async (req) => {
     
     console.log('RAG Query:', { 
       question, 
-      site, 
-      equipment, 
-      faultCode,
       filters: { documentType, uploadDate, filterSite, equipmentMake, equipmentModel }
     })
 
-    // Build context-aware query
-    const fullQuery = buildFullQuery(question, site, equipment, faultCode)
+    // Use question directly for embedding
+    const fullQuery = question
     console.log('Full query:', fullQuery)
 
     // Generate embedding for the query
@@ -149,11 +140,7 @@ CRITICAL INSTRUCTIONS:
 
 Always prioritize safety - mention lock-out/tag-out procedures and safety warnings when relevant.`
 
-    const userPrompt = `Site: ${site || 'Not specified'}
-Equipment: ${equipment || 'Not specified'}
-Fault Code: ${faultCode || 'Not specified'}
-
-Technician Question: ${question}
+    const userPrompt = `Technician Question: ${question}
 
 Context from documents:
 ${context}
@@ -206,15 +193,16 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
       return initialChunks
     }
 
-    const sortedTokens = [...tokens].sort((a, b) => b.length - a.length)
-    const mainKeyword = sortedTokens[0]
-    console.log('Keyword fallback search using:', mainKeyword)
+    // Use multiple keywords for better matching
+    const sortedTokens = [...tokens].sort((a, b) => b.length - a.length).slice(0, 3)
+    console.log('Keyword fallback search using:', sortedTokens)
 
+    // Query chunks with document join to get filename
     const { data, error } = await supabase
       .from('chunks')
-      .select('id, chunk_index, text, site, equipment, fault_code')
-      .ilike('text', `%${mainKeyword}%`)
-      .limit(10)
+      .select('id, document_id, chunk_index, text, site, equipment, fault_code, documents!inner(filename)')
+      .or(sortedTokens.map(kw => `text.ilike.%${kw}%`).join(','))
+      .limit(30)
 
     if (error) {
       console.error('Keyword fallback search error:', error)
@@ -228,8 +216,8 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
       if (!existingIds.has(row.id)) {
         mergedChunks.push({
           ...row,
-          similarity: row.similarity ?? 0,
-          filename: row.filename ?? 'Unknown',
+          similarity: 0.5, // Assign moderate similarity for keyword matches
+          filename: row.documents?.filename ?? 'Unknown',
         })
       }
     }
@@ -243,13 +231,6 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
   }
 }
 
-function buildFullQuery(question: string, site?: string, equipment?: string, faultCode?: string): string {
-  const parts = [question]
-  if (site) parts.push(`Site: ${site}`)
-  if (equipment) parts.push(`Equipment: ${equipment}`)
-  if (faultCode) parts.push(`Fault code: ${faultCode}`)
-  return parts.join(' ')
-}
 
 async function generateEmbedding(text: string): Promise<number[]> {
   const GOOGLE_API_KEY = Deno.env.get('GOOGLE_API_KEY')
