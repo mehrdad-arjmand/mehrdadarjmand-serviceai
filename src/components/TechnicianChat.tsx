@@ -37,9 +37,6 @@ interface Source {
 }
 
 export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProps) => {
-  const [site, setSite] = useState("");
-  const [equipment, setEquipment] = useState("");
-  const [faultCode, setFaultCode] = useState("");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
@@ -120,9 +117,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: {
           question: question.trim(),
-          site: site.trim() || undefined,
-          equipment: equipment.trim() || undefined,
-          faultCode: faultCode.trim() || undefined,
           documentType: filterDocType || undefined,
           uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
           filterSite: filterSite || undefined,
@@ -294,12 +288,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                         id="filter-upload-date"
                         variant="outline"
                         className={cn(
-                          "h-9 w-full justify-start text-left font-normal",
+                          "h-9 w-full justify-between text-left font-normal",
                           !filterUploadDate && "text-muted-foreground"
                         )}
                       >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
                         {filterUploadDate ? format(filterUploadDate, "PPP") : "Any date"}
+                        <CalendarIcon className="h-4 w-4 opacity-50" />
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
@@ -364,41 +358,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               </div>
             </div>
           )}
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="site" className="text-sm">Site</Label>
-              <Input
-                id="site"
-                value={site}
-                onChange={(e) => setSite(e.target.value)}
-                placeholder="e.g., Site-23 Phoenix"
-                disabled={isQuerying}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="equipment" className="text-sm">Equipment</Label>
-              <Input
-                id="equipment"
-                value={equipment}
-                onChange={(e) => setEquipment(e.target.value)}
-                placeholder="e.g., Inverter XG-4000 #4"
-                disabled={isQuerying}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="fault" className="text-sm">Fault Code</Label>
-              <Input
-                id="fault"
-                value={faultCode}
-                onChange={(e) => setFaultCode(e.target.value)}
-                placeholder="e.g., F312"
-                disabled={isQuerying}
-              />
-            </div>
-          </div>
 
           <div className="space-y-2">
             <Label htmlFor="question" className="text-sm">
