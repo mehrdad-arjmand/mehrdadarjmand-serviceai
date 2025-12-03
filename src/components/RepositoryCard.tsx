@@ -417,6 +417,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
               type="date"
               value={uploadDate}
               onChange={(e) => setUploadDate(e.target.value)}
+              className="[&::-webkit-calendar-picker-indicator]:order-1 [&::-webkit-calendar-picker-indicator]:ml-auto"
             />
           </div>
 
