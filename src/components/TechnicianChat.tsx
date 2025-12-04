@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2 } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -42,6 +42,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const [sources, setSources] = useState<Source[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isFromVoice, setIsFromVoice] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const { toast } = useToast();
 
   const [filterDocType, setFilterDocType] = useState<string>("");
@@ -106,7 +108,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
   }, [hasDocuments]);
 
-  const handleAskAssistant = async () => {
+  const handleAskAssistant = async (questionText?: string, fromVoice: boolean = false) => {
+    const queryText = questionText || question;
+    
     if (!hasDocuments) {
       toast({
         title: "No documents indexed",
@@ -116,7 +120,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       return;
     }
 
-    if (!question.trim()) {
+    if (!queryText.trim()) {
       toast({
         title: "Question required",
         description: "Please describe your issue or question.",
@@ -128,11 +132,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     setIsQuerying(true);
     setAnswer("");
     setSources([]);
+    setIsFromVoice(fromVoice);
+
+    // Stop any ongoing TTS
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
 
     try {
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: {
-          question: question.trim(),
+          question: queryText.trim(),
           documentType: filterDocType || undefined,
           uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
           filterSite: filterSite || undefined,
@@ -147,6 +158,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       setAnswer(data.answer);
       setSources(data.sources || []);
 
+      // If from voice, automatically speak the answer
+      if (fromVoice && data.answer) {
+        speakText(data.answer);
+      }
+
       toast({
         title: "Answer generated",
         description: `Found ${data.sources?.length || 0} relevant sources.`,
@@ -160,6 +176,38 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       });
     } finally {
       setIsQuerying(false);
+    }
+  };
+
+  const speakText = (text: string) => {
+    if (!('speechSynthesis' in window)) {
+      toast({
+        title: "TTS not supported",
+        description: "Voice playback is not supported in this browser.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const stopSpeaking = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
     }
   };
 
@@ -184,7 +232,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
 
-    recognition.continuous = true; // Keep listening
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
@@ -194,7 +242,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       setIsListening(true);
       toast({
         title: "Recording...",
-        description: "Click the mic button again to stop.",
+        description: "Click the mic button again to stop and send.",
       });
     };
 
@@ -240,15 +288,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       recognitionRef.current = null;
       
       if (finalTranscript.trim()) {
-        setQuestion(finalTranscript.trim());
+        const trimmedTranscript = finalTranscript.trim();
+        setQuestion(trimmedTranscript);
+        
+        // Auto-send the question
+        handleAskAssistant(trimmedTranscript, true);
+        
         toast({
           title: "Speech captured",
-          description: "Your question has been transcribed.",
+          description: "Sending your question...",
         });
       } else {
         toast({
           title: "No speech detected",
-          description: "Try speaking again.",
+          description: "No clear speech detected. You can try again.",
           variant: "destructive",
         });
       }
@@ -408,8 +461,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
           <div className="flex gap-2">
             <Button
-              onClick={handleAskAssistant}
-              disabled={isQuerying || !hasDocuments}
+              onClick={() => handleAskAssistant()}
+              disabled={isQuerying || !hasDocuments || isListening}
               className="flex-1"
             >
               {isQuerying ? (
@@ -447,7 +500,27 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       {answer && (
         <Card className="p-6">
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-foreground">Answer</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-foreground">Answer</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => isSpeaking ? stopSpeaking() : speakText(answer)}
+                className="gap-1"
+              >
+                {isSpeaking ? (
+                  <>
+                    <VolumeX className="h-4 w-4" />
+                    Stop
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="h-4 w-4" />
+                    Listen
+                  </>
+                )}
+              </Button>
+            </div>
             <div className="prose prose-sm max-w-none text-foreground">
               <p className="whitespace-pre-wrap">{answer}</p>
             </div>
