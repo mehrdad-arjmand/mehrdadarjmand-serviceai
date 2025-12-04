@@ -5,6 +5,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+interface ConversationMessage {
+  role: "user" | "assistant"
+  content: string
+}
+
 interface RAGQueryRequest {
   question: string
   // Optional document filters
@@ -14,6 +19,9 @@ interface RAGQueryRequest {
   equipmentType?: string
   equipmentMake?: string
   equipmentModel?: string
+  // Conversation mode
+  history?: ConversationMessage[]
+  isConversationMode?: boolean
 }
 
 Deno.serve(async (req) => {
@@ -34,12 +42,16 @@ Deno.serve(async (req) => {
       filterSite,
       equipmentType,
       equipmentMake,
-      equipmentModel
+      equipmentModel,
+      history,
+      isConversationMode
     }: RAGQueryRequest = await req.json()
     
     console.log('RAG Query:', { 
       question, 
-      filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel }
+      filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel },
+      isConversationMode,
+      historyLength: history?.length || 0
     })
 
     // Generate embedding for the query
@@ -133,7 +145,24 @@ Deno.serve(async (req) => {
       .join('\n\n---\n\n') || 'No relevant context found.'
 
     // Generate answer using Lovable AI (Gemini Flash)
-    const systemPrompt = `You are a field technician assistant for industrial energy systems. 
+    const systemPrompt = isConversationMode 
+      ? `You are a voice assistant for field technicians working on industrial energy systems.
+
+VOICE MODE INSTRUCTIONS:
+- Answer in concise, spoken language suitable for being read aloud
+- Avoid reading out bullet points, asterisks, colons, or formatting syntax
+- Use short paragraphs and natural sentence flow
+- Do not say "asterisk" or describe formatting - speak naturally
+- Keep answers brief and actionable - under 150 words when possible
+- If the topic is complex, offer to provide more detail: "Would you like me to explain further?"
+
+CRITICAL RETRIEVAL INSTRUCTIONS:
+- Answer based on the provided context from documents
+- Search through ALL provided sources - actual content may be in later sources
+- IGNORE table of contents entries - look for actual procedural content
+- Quote specific details, numbers, procedures when relevant
+- Always mention safety warnings when relevant.`
+      : `You are a field technician assistant for industrial energy systems. 
 
 CRITICAL INSTRUCTIONS:
 - Answer based on the provided context from documents
@@ -145,8 +174,18 @@ CRITICAL INSTRUCTIONS:
 
 Always prioritize safety - mention safety warnings when relevant.`
 
-    const userPrompt = `Technician Question: ${question}
+    // Build conversation context if in conversation mode
+    let conversationContext = ''
+    if (isConversationMode && history && history.length > 0) {
+      // Include last 4 exchanges for context
+      const recentHistory = history.slice(-8)
+      conversationContext = '\n\nRecent conversation:\n' + recentHistory
+        .map(m => `${m.role === 'user' ? 'Technician' : 'Assistant'}: ${m.content}`)
+        .join('\n')
+    }
 
+    const userPrompt = `Technician Question: ${question}
+${conversationContext}
 Context from documents (search ALL sources carefully - actual content may be in later chunks):
 ${context}
 
