@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, Headphones, PhoneOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { useConversationMode, ConversationMessage } from "@/hooks/useConversationMode";
 import {
   Select,
   SelectContent,
@@ -23,6 +23,7 @@ import {
 import { CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
 interface TechnicianChatProps {
   hasDocuments: boolean;
@@ -62,6 +63,45 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
   // Speech recognition ref
   const recognitionRef = useRef<any>(null);
+
+  // Conversation mode handler
+  const handleConversationSend = async (
+    questionText: string, 
+    history: ConversationMessage[], 
+    isConversationMode: boolean
+  ): Promise<string> => {
+    const { data, error } = await supabase.functions.invoke("rag-query", {
+      body: {
+        question: questionText.trim(),
+        documentType: filterDocType || undefined,
+        uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
+        filterSite: filterSite || undefined,
+        equipmentType: filterEquipmentType || undefined,
+        equipmentMake: filterEquipmentMake || undefined,
+        equipmentModel: filterEquipmentModel || undefined,
+        history,
+        isConversationMode,
+      },
+    });
+
+    if (error) throw error;
+    
+    // Update the main answer and sources for display
+    setAnswer(data.answer);
+    setSources(data.sources || []);
+    
+    return data.answer;
+  };
+
+  const {
+    isConversationMode,
+    conversationState,
+    conversationHistory,
+    startConversation,
+    endConversation,
+    tapToSpeak,
+    stopSpeaking: stopConversationSpeaking,
+  } = useConversationMode({ onSendMessage: handleConversationSend });
 
   // Fetch distinct filter values from documents and chunks
   useEffect(() => {
@@ -315,14 +355,113 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       {/* Context Inputs */}
       <Card className="p-6">
         <div className="space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground mb-1">
-              Technician Assistant
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Ask questions about your equipment and procedures
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground mb-1">
+                Technician Assistant
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Ask questions about your equipment and procedures
+              </p>
+            </div>
+            
+            {/* Conversation Mode Toggle */}
+            {hasDocuments && (
+              <Button
+                onClick={isConversationMode ? endConversation : startConversation}
+                variant={isConversationMode ? "destructive" : "secondary"}
+                className="gap-2"
+                disabled={isQuerying}
+              >
+                {isConversationMode ? (
+                  <>
+                    <PhoneOff className="h-4 w-4" />
+                    End Conversation
+                  </>
+                ) : (
+                  <>
+                    <Headphones className="h-4 w-4" />
+                    Start Conversation
+                  </>
+                )}
+              </Button>
+            )}
           </div>
+
+          {/* Conversation Mode Banner */}
+          {isConversationMode && (
+            <div className="p-3 bg-primary/10 rounded-lg border border-primary/20">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="bg-primary/20 text-primary">
+                    Voice Mode
+                  </Badge>
+                  <span className="text-sm text-muted-foreground">
+                    {conversationState === "idle" && "Tap mic to speak"}
+                    {conversationState === "listening" && "Listening..."}
+                    {conversationState === "waitingForAnswer" && "Thinking..."}
+                    {conversationState === "speaking" && "Speaking..."}
+                  </span>
+                </div>
+                {conversationState === "speaking" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={stopConversationSpeaking}
+                    className="h-7 text-xs"
+                  >
+                    <VolumeX className="h-3 w-3 mr-1" />
+                    Stop
+                  </Button>
+                )}
+              </div>
+              
+              {/* Conversation State Indicator */}
+              <div className="mt-2 flex justify-center">
+                <Button
+                  onClick={tapToSpeak}
+                  disabled={conversationState === "waitingForAnswer"}
+                  variant={conversationState === "listening" ? "destructive" : "default"}
+                  size="lg"
+                  className="rounded-full w-16 h-16"
+                >
+                  {conversationState === "listening" ? (
+                    <div className="animate-pulse">
+                      <Mic className="h-6 w-6" />
+                    </div>
+                  ) : conversationState === "waitingForAnswer" ? (
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  ) : conversationState === "speaking" ? (
+                    <Volume2 className="h-6 w-6" />
+                  ) : (
+                    <Mic className="h-6 w-6" />
+                  )}
+                </Button>
+              </div>
+              
+              {/* Conversation History */}
+              {conversationHistory.length > 0 && (
+                <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
+                  {conversationHistory.map((msg, idx) => (
+                    <div
+                      key={idx}
+                      className={cn(
+                        "p-2 rounded text-sm",
+                        msg.role === "user" 
+                          ? "bg-muted ml-8 text-foreground" 
+                          : "bg-primary/5 mr-8 text-foreground"
+                      )}
+                    >
+                      <span className="text-xs text-muted-foreground block mb-1">
+                        {msg.role === "user" ? "You (voice)" : "Service AI"}
+                      </span>
+                      {msg.content}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Filters Section */}
           {hasDocuments && (
@@ -462,7 +601,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           <div className="flex gap-2">
             <Button
               onClick={() => handleAskAssistant()}
-              disabled={isQuerying || !hasDocuments || isListening}
+              disabled={isQuerying || !hasDocuments || isListening || isConversationMode}
               className="flex-1"
             >
               {isQuerying ? (
@@ -480,9 +619,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
             <Button
               onClick={handleDictate}
-              disabled={isQuerying}
+              disabled={isQuerying || isConversationMode}
               variant={isListening ? "destructive" : "outline"}
               size="icon"
+              title={isConversationMode ? "Use the conversation mic above" : "Dictate question"}
             >
               <Mic className="h-4 w-4" />
             </Button>
