@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, Headphones, PhoneOff } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useConversationMode, ConversationMessage } from "@/hooks/useConversationMode";
@@ -405,121 +405,63 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     recognition.start();
   };
 
+  // Handle conversation mode tap-to-speak
+  const handleConversationTap = () => {
+    if (conversationState === "listening") {
+      // Stop listening and process
+      tapToSpeak();
+    } else if (conversationState === "idle" || conversationState === "speaking") {
+      // Start listening
+      tapToSpeak();
+    }
+  };
+
+  // Toggle conversation mode
+  const handleConversationToggle = () => {
+    if (isConversationMode) {
+      endConversation();
+    } else {
+      startConversation();
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Context Inputs */}
+      {/* Main Assistant Card */}
       <Card className="p-6">
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground mb-1">
-                Technician Assistant
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Ask questions about your equipment and procedures
-              </p>
-            </div>
-            
-            {/* Conversation Mode Toggle */}
-            {hasDocuments && (
-              <Button
-                onClick={isConversationMode ? endConversation : startConversation}
-                variant={isConversationMode ? "destructive" : "secondary"}
-                className="gap-2"
-                disabled={isQuerying}
-              >
-                {isConversationMode ? (
-                  <>
-                    <PhoneOff className="h-4 w-4" />
-                    End Conversation
-                  </>
-                ) : (
-                  <>
-                    <Headphones className="h-4 w-4" />
-                    Start Conversation
-                  </>
-                )}
-              </Button>
-            )}
+          {/* Header */}
+          <div>
+            <h2 className="text-lg font-semibold text-foreground mb-1">
+              Technician Assistant
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Ask questions about your equipment and procedures
+            </p>
           </div>
 
-          {/* Conversation Mode Banner */}
+          {/* Conversation Mode Indicator */}
           {isConversationMode && (
-            <div className="p-3 bg-primary/10 rounded-lg border border-primary/20">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="bg-primary/20 text-primary">
-                    Voice Mode
-                  </Badge>
-                  <span className="text-sm text-muted-foreground">
-                    {conversationState === "idle" && "Tap mic to speak"}
-                    {conversationState === "listening" && "Listening..."}
-                    {conversationState === "waitingForAnswer" && "Thinking..."}
-                    {conversationState === "speaking" && "Speaking..."}
-                  </span>
-                </div>
-                {conversationState === "speaking" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={stopConversationSpeaking}
-                    className="h-7 text-xs"
-                  >
-                    <VolumeX className="h-3 w-3 mr-1" />
-                    Stop
-                  </Button>
-                )}
-              </div>
-              
-              {/* Conversation State Indicator */}
-              <div className="mt-2 flex justify-center">
+            <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-lg border border-primary/20">
+              <Badge variant="secondary" className="bg-primary/20 text-primary text-xs">
+                Conversation Mode
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                {conversationState === "idle" && "Ready to listen"}
+                {conversationState === "listening" && "Listening..."}
+                {conversationState === "waitingForAnswer" && "Thinking..."}
+                {conversationState === "speaking" && "Speaking..."}
+              </span>
+              {conversationState === "speaking" && (
                 <Button
-                  onClick={tapToSpeak}
-                  disabled={conversationState === "waitingForAnswer"}
-                  variant={conversationState === "listening" ? "destructive" : "default"}
-                  size="lg"
-                  className="rounded-full w-16 h-16"
+                  variant="ghost"
+                  size="sm"
+                  onClick={stopConversationSpeaking}
+                  className="h-6 px-2 text-xs ml-auto"
                 >
-                  {conversationState === "listening" ? (
-                    <div className="animate-pulse">
-                      <Mic className="h-6 w-6" />
-                    </div>
-                  ) : conversationState === "waitingForAnswer" ? (
-                    <Loader2 className="h-6 w-6 animate-spin" />
-                  ) : conversationState === "speaking" ? (
-                    <Volume2 className="h-6 w-6" />
-                  ) : (
-                    <Mic className="h-6 w-6" />
-                  )}
+                  <VolumeX className="h-3 w-3 mr-1" />
+                  Stop
                 </Button>
-              </div>
-              
-              {/* Conversation History */}
-              {conversationHistory.length > 0 && (
-                <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
-                  {conversationHistory.map((msg, idx) => (
-                    <div
-                      key={idx}
-                      className={cn(
-                        "p-2 rounded text-sm",
-                        msg.role === "user" 
-                          ? "bg-muted ml-8 text-foreground" 
-                          : "bg-primary/5 mr-8 text-foreground"
-                      )}
-                    >
-                      <span className="text-xs text-muted-foreground block mb-1">
-                        {msg.role === "user" ? "You (voice)" : "Service AI"}
-                      </span>
-                      {msg.role === "assistant" ? (
-                        <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
-                        </div>
-                      ) : (
-                        msg.content
-                      )}
-                    </div>
-                  ))}
-                </div>
               )}
             </div>
           )}
@@ -645,60 +587,125 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
             </div>
           )}
 
+          {/* Conversation History (shown in conversation mode) */}
+          {isConversationMode && conversationHistory.length > 0 && (
+            <div className="space-y-2 max-h-64 overflow-y-auto p-3 bg-muted/20 rounded-lg border border-border">
+              {conversationHistory.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={cn(
+                    "p-3 rounded-lg text-sm",
+                    msg.role === "user" 
+                      ? "bg-primary/10 ml-8" 
+                      : "bg-muted mr-8"
+                  )}
+                >
+                  <span className="text-xs text-muted-foreground block mb-1">
+                    {msg.role === "user" ? "You (voice)" : "Service AI"}
+                  </span>
+                  {msg.role === "assistant" ? (
+                    <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <span className="text-foreground">{msg.content}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Input Area with ChatGPT-style bottom bar */}
           <div className="space-y-2">
-            <Label htmlFor="question" className="text-sm">
-              Describe the issue and your question
-            </Label>
             <Textarea
               id="question"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="What troubleshooting steps should I take?"
-              rows={4}
-              disabled={isQuerying}
+              placeholder={isConversationMode ? "Tap mic to speak or type here..." : "What troubleshooting steps should I take?"}
+              rows={3}
+              disabled={isQuerying || conversationState === "waitingForAnswer"}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !isConversationMode) {
+                  e.preventDefault();
+                  handleAskAssistant();
+                }
+              }}
+              className="resize-none"
             />
+            
+            {/* ChatGPT-style control bar */}
+            <div className="flex items-center justify-between">
+              {/* Left side - info */}
+              <div className="text-xs text-muted-foreground">
+                {!hasDocuments ? (
+                  <span>Upload documents to start ({chunksCount} chunks indexed)</span>
+                ) : isListening ? (
+                  <span className="text-primary animate-pulse">Recording... Click mic to stop</span>
+                ) : conversationState === "listening" ? (
+                  <span className="text-primary animate-pulse">Listening... Tap mic when done</span>
+                ) : null}
+              </div>
+              
+              {/* Right side - action buttons */}
+              <div className="flex items-center gap-1">
+                {/* Conversation mode toggle */}
+                <Button
+                  onClick={handleConversationToggle}
+                  disabled={isQuerying || !hasDocuments}
+                  variant={isConversationMode ? "default" : "ghost"}
+                  size="icon"
+                  className={cn(
+                    "h-9 w-9 rounded-full",
+                    isConversationMode && "bg-primary text-primary-foreground"
+                  )}
+                  title={isConversationMode ? "End conversation mode" : "Start conversation mode"}
+                >
+                  <AudioWaveform className="h-4 w-4" />
+                </Button>
+
+                {/* Mic button - for dictation or conversation */}
+                <Button
+                  onClick={isConversationMode ? handleConversationTap : handleDictate}
+                  disabled={isQuerying || !hasDocuments || conversationState === "waitingForAnswer"}
+                  variant={isListening || conversationState === "listening" ? "destructive" : "ghost"}
+                  size="icon"
+                  className={cn(
+                    "h-9 w-9 rounded-full",
+                    (isListening || conversationState === "listening") && "animate-pulse"
+                  )}
+                  title={isConversationMode ? "Tap to speak" : "Dictate question"}
+                >
+                  {conversationState === "waitingForAnswer" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : conversationState === "speaking" ? (
+                    <Volume2 className="h-4 w-4" />
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
+                </Button>
+
+                {/* Send button */}
+                <Button
+                  onClick={() => handleAskAssistant()}
+                  disabled={isQuerying || !hasDocuments || isListening || !question.trim()}
+                  size="icon"
+                  className="h-9 w-9 rounded-full"
+                  title="Send question"
+                >
+                  {isQuerying ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
           </div>
-
-          <div className="flex gap-2">
-            <Button
-              onClick={() => handleAskAssistant()}
-              disabled={isQuerying || !hasDocuments || isListening || isConversationMode}
-              className="flex-1"
-            >
-              {isQuerying ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Send className="mr-2 h-4 w-4" />
-                  Ask Assistant
-                </>
-              )}
-            </Button>
-
-            <Button
-              onClick={handleDictate}
-              disabled={isQuerying || isConversationMode}
-              variant={isListening ? "destructive" : "outline"}
-              size="icon"
-              title={isConversationMode ? "Use the conversation mic above" : "Dictate question"}
-            >
-              <Mic className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {!hasDocuments && (
-            <p className="text-sm text-muted-foreground text-center py-2">
-              Upload documents to start using the assistant ({chunksCount} chunks indexed)
-            </p>
-          )}
         </div>
       </Card>
 
       {/* Answer */}
-      {answer && (
+      {answer && !isConversationMode && (
         <Card className="p-6">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -730,7 +737,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       )}
 
       {/* Sources */}
-      {sources.length > 0 && (
+      {sources.length > 0 && !isConversationMode && (
         <Card className="p-6">
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-foreground">
