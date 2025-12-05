@@ -7,6 +7,8 @@ import { Send, Mic, Loader2, Volume2, VolumeX, Headphones, PhoneOff } from "luci
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useConversationMode, ConversationMessage } from "@/hooks/useConversationMode";
+import ReactMarkdown from "react-markdown";
+import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
 import {
   Select,
   SelectContent,
@@ -219,6 +221,23 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
   };
 
+  // Voice ref for TTS
+  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const utteranceQueueRef = useRef<number>(0);
+
+  // Initialize voice on mount
+  useEffect(() => {
+    const initVoice = () => {
+      selectedVoiceRef.current = selectBestVoice();
+    };
+    
+    initVoice();
+    
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = initVoice;
+    }
+  }, []);
+
   const speakText = (text: string) => {
     if (!('speechSynthesis' in window)) {
       toast({
@@ -231,22 +250,58 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
     // Cancel any ongoing speech
     window.speechSynthesis.cancel();
+    
+    // Clean the text for natural speech (strips markdown)
+    const cleanText = renderAnswerForSpeech(text);
+    
+    // Split into sentences for natural pauses
+    const sentences = splitIntoSentences(cleanText);
+    
+    if (sentences.length === 0) return;
+    
+    // Ensure voice is selected
+    if (!selectedVoiceRef.current) {
+      selectedVoiceRef.current = selectBestVoice();
+    }
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-
-    window.speechSynthesis.speak(utterance);
+    const queueId = ++utteranceQueueRef.current;
+    let currentIndex = 0;
+    
+    setIsSpeaking(true);
+    
+    const speakNext = () => {
+      // Check if this queue is still active
+      if (queueId !== utteranceQueueRef.current) return;
+      
+      if (currentIndex >= sentences.length) {
+        setIsSpeaking(false);
+        return;
+      }
+      
+      const utterance = createUtterance(
+        sentences[currentIndex],
+        selectedVoiceRef.current
+      );
+      
+      utterance.onend = () => {
+        currentIndex++;
+        speakNext();
+      };
+      
+      utterance.onerror = () => {
+        setIsSpeaking(false);
+      };
+      
+      window.speechSynthesis.speak(utterance);
+    };
+    
+    speakNext();
   };
 
   const stopSpeaking = () => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
+      utteranceQueueRef.current++;
       setIsSpeaking(false);
     }
   };
@@ -455,7 +510,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                       <span className="text-xs text-muted-foreground block mb-1">
                         {msg.role === "user" ? "You (voice)" : "Service AI"}
                       </span>
-                      {msg.content}
+                      {msg.role === "assistant" ? (
+                        <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        msg.content
+                      )}
                     </div>
                   ))}
                 </div>
@@ -661,8 +722,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                 )}
               </Button>
             </div>
-            <div className="prose prose-sm max-w-none text-foreground">
-              <p className="whitespace-pre-wrap">{answer}</p>
+            <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground">
+              <ReactMarkdown>{answer}</ReactMarkdown>
             </div>
           </div>
         </Card>
