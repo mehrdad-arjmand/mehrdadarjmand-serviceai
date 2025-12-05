@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
 
 export type ConversationState = "idle" | "listening" | "waitingForAnswer" | "speaking";
 
@@ -24,9 +25,21 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
   
   const recognitionRef = useRef<any>(null);
   const synthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
-  // Cleanup on unmount
+  // Initialize voice on mount and when voices change
   useEffect(() => {
+    const initVoice = () => {
+      selectedVoiceRef.current = selectBestVoice();
+    };
+    
+    initVoice();
+    
+    // Voices may load asynchronously
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = initVoice;
+    }
+    
     return () => {
       stopListening();
       stopSpeaking();
@@ -59,24 +72,53 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
     }
 
     stopSpeaking();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-
-    utterance.onend = () => {
-      synthesisRef.current = null;
+    
+    // Clean the text for natural speech
+    const cleanText = renderAnswerForSpeech(text);
+    
+    // Split into sentences for natural pauses
+    const sentences = splitIntoSentences(cleanText);
+    
+    if (sentences.length === 0) {
       onEnd?.();
-    };
+      return;
+    }
+    
+    // Ensure voice is selected
+    if (!selectedVoiceRef.current) {
+      selectedVoiceRef.current = selectBestVoice();
+    }
 
-    utterance.onerror = () => {
-      synthesisRef.current = null;
-      onEnd?.();
+    let currentIndex = 0;
+    
+    const speakNext = () => {
+      if (currentIndex >= sentences.length) {
+        synthesisRef.current = null;
+        onEnd?.();
+        return;
+      }
+      
+      const utterance = createUtterance(
+        sentences[currentIndex],
+        selectedVoiceRef.current
+      );
+      
+      utterance.onend = () => {
+        currentIndex++;
+        speakNext();
+      };
+      
+      utterance.onerror = (e) => {
+        console.error('[TTS] Error:', e);
+        synthesisRef.current = null;
+        onEnd?.();
+      };
+      
+      synthesisRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
     };
-
-    synthesisRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
+    
+    speakNext();
   }, [stopSpeaking, toast]);
 
   const startListening = useCallback((onTranscript: (transcript: string) => void) => {
@@ -142,7 +184,6 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
       if (finalTranscript.trim()) {
         onTranscript(finalTranscript.trim());
       } else if (isConversationMode && conversationState === "listening") {
-        // No speech detected, go back to listening
         toast({
           title: "No speech detected",
           description: "Tap to speak again.",
@@ -177,24 +218,19 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
   }, [stopListening, stopSpeaking, toast]);
 
   const handleConversationTurn = useCallback(async (transcript: string) => {
-    // Add user message to history
     const userMessage: ConversationMessage = { role: "user", content: transcript };
     const newHistory = [...conversationHistory, userMessage];
     setConversationHistory(newHistory);
     setConversationState("waitingForAnswer");
 
     try {
-      // Get answer from API
       const answer = await onSendMessage(transcript, newHistory, true);
       
-      // Add assistant message to history
       const assistantMessage: ConversationMessage = { role: "assistant", content: answer };
       setConversationHistory(prev => [...prev, assistantMessage]);
       
-      // Speak the answer
       setConversationState("speaking");
       speakText(answer, () => {
-        // After speaking, go back to idle (user can tap to continue)
         if (isConversationMode) {
           setConversationState("idle");
         }
@@ -212,20 +248,17 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
 
   const tapToSpeak = useCallback(() => {
     if (conversationState === "listening") {
-      // Stop listening and process
       stopListening();
       return;
     }
 
     if (conversationState === "speaking") {
-      // Stop speaking and allow new input
       stopSpeaking();
       setConversationState("idle");
       return;
     }
 
     if (conversationState === "idle" && isConversationMode) {
-      // Start listening
       startListening((transcript) => {
         handleConversationTurn(transcript);
       });
