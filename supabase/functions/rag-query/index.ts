@@ -121,9 +121,30 @@ Deno.serve(async (req) => {
       console.log(`After equipment type filter: ${filteredChunks.length} chunks`)
     }
 
-    // Merge with aggressive keyword search
-    const combinedChunks = await enrichWithKeywordFallback(supabase, question, filteredChunks)
+    // Get matching document IDs for filters (to pass to keyword fallback)
+    let matchingDocIds: Set<string> | null = null
+    if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel) {
+      let docQuery = supabase.from('documents').select('id')
+      if (documentType) docQuery = docQuery.eq('doc_type', documentType)
+      if (uploadDate) docQuery = docQuery.eq('upload_date', uploadDate)
+      if (filterSite) docQuery = docQuery.eq('site', filterSite)
+      if (equipmentMake) docQuery = docQuery.eq('equipment_make', equipmentMake)
+      if (equipmentModel) docQuery = docQuery.eq('equipment_model', equipmentModel)
+      
+      const { data: matchingDocs } = await docQuery
+      if (matchingDocs && matchingDocs.length > 0) {
+        matchingDocIds = new Set(matchingDocs.map(d => d.id))
+      }
+    }
 
+    // Merge with aggressive keyword search - PASS FILTERS to ensure keyword fallback respects them
+    const combinedChunks = await enrichWithKeywordFallback(
+      supabase, 
+      question, 
+      filteredChunks, 
+      matchingDocIds,
+      equipmentType
+    )
     // Re-rank chunks: prioritize substantive content over TOC/index entries
     const rankedChunks = rerankChunks(combinedChunks, question)
 
@@ -291,7 +312,13 @@ function rerankChunks(chunks: any[], question: string): any[] {
   }).sort((a, b) => b.finalScore - a.finalScore)
 }
 
-async function enrichWithKeywordFallback(supabase: any, question: string, initialChunks: any[]): Promise<any[]> {
+async function enrichWithKeywordFallback(
+  supabase: any, 
+  question: string, 
+  initialChunks: any[],
+  matchingDocIds: Set<string> | null,
+  equipmentType?: string
+): Promise<any[]> {
   try {
     const tokens = (question.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
       (word) => word.length >= 4 && !STOP_WORDS.has(word)
@@ -306,11 +333,13 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
     console.log('Keyword fallback search using:', sortedTokens)
 
     // Query chunks with document join to get filename
-    const { data, error } = await supabase
+    let query = supabase
       .from('chunks')
       .select('id, document_id, chunk_index, text, site, equipment, fault_code, documents!inner(filename)')
       .or(sortedTokens.map(kw => `text.ilike.%${kw}%`).join(','))
       .limit(50)
+
+    const { data, error } = await query
 
     if (error) {
       console.error('Keyword fallback search error:', error)
@@ -321,16 +350,22 @@ async function enrichWithKeywordFallback(supabase: any, question: string, initia
     const mergedChunks = [...initialChunks]
 
     for (const row of data || []) {
-      if (!existingIds.has(row.id)) {
-        mergedChunks.push({
-          ...row,
-          similarity: 0.4, // Moderate similarity for keyword matches
-          filename: row.documents?.filename ?? 'Unknown',
-        })
-      }
+      if (existingIds.has(row.id)) continue
+      
+      // APPLY DOCUMENT FILTERS to keyword results
+      if (matchingDocIds && !matchingDocIds.has(row.document_id)) continue
+      
+      // APPLY EQUIPMENT TYPE FILTER
+      if (equipmentType && row.equipment !== equipmentType) continue
+      
+      mergedChunks.push({
+        ...row,
+        similarity: 0.4, // Moderate similarity for keyword matches
+        filename: row.documents?.filename ?? 'Unknown',
+      })
     }
 
-    console.log(`Keyword fallback: found ${(data || []).length}, merged total: ${mergedChunks.length}`)
+    console.log(`Keyword fallback: found ${(data || []).length}, after filter: ${mergedChunks.length - initialChunks.length} new, total: ${mergedChunks.length}`)
 
     return mergedChunks
   } catch (error) {
