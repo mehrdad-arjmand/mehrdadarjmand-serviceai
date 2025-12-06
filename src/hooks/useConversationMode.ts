@@ -26,6 +26,7 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
   const recognitionRef = useRef<any>(null);
   const synthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const shouldAutoListenRef = useRef(false);
 
   // Initialize voice on mount and when voices change
   useEffect(() => {
@@ -121,7 +122,7 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
     speakNext();
   }, [stopSpeaking, toast]);
 
-  const startListening = useCallback((onTranscript: (transcript: string) => void) => {
+  const startListeningInternal = useCallback((onTranscript: (transcript: string) => void) => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({
         title: "Speech recognition not supported",
@@ -168,7 +169,7 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
           variant: "destructive",
         });
         endConversation();
-      } else {
+      } else if (event.error !== 'aborted') {
         toast({
           title: "Speech recognition error",
           description: event.error,
@@ -183,7 +184,8 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
       recognitionRef.current = null;
       if (finalTranscript.trim()) {
         onTranscript(finalTranscript.trim());
-      } else if (isConversationMode && conversationState === "listening") {
+      } else if (shouldAutoListenRef.current) {
+        // No speech detected, but we're in conversation mode - show a message
         toast({
           title: "No speech detected",
           description: "Tap to speak again.",
@@ -194,28 +196,7 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
 
     recognition.start();
     return true;
-  }, [toast, isConversationMode, conversationState]);
-
-  const startConversation = useCallback(() => {
-    setIsConversationMode(true);
-    setConversationHistory([]);
-    setConversationState("idle");
-    toast({
-      title: "Conversation mode started",
-      description: "Tap the mic to speak with Service AI.",
-    });
   }, [toast]);
-
-  const endConversation = useCallback(() => {
-    stopListening();
-    stopSpeaking();
-    setIsConversationMode(false);
-    setConversationState("idle");
-    toast({
-      title: "Conversation ended",
-      description: "Returning to normal mode.",
-    });
-  }, [stopListening, stopSpeaking, toast]);
 
   const handleConversationTurn = useCallback(async (transcript: string) => {
     const userMessage: ConversationMessage = { role: "user", content: transcript };
@@ -231,7 +212,16 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
       
       setConversationState("speaking");
       speakText(answer, () => {
-        if (isConversationMode) {
+        if (shouldAutoListenRef.current) {
+          // Auto-start listening for next turn
+          setTimeout(() => {
+            if (shouldAutoListenRef.current) {
+              startListeningInternal((newTranscript) => {
+                handleConversationTurn(newTranscript);
+              });
+            }
+          }, 300);
+        } else {
           setConversationState("idle");
         }
       });
@@ -244,26 +234,47 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
       });
       setConversationState("idle");
     }
-  }, [conversationHistory, onSendMessage, speakText, isConversationMode, toast]);
+  }, [conversationHistory, onSendMessage, speakText, startListeningInternal, toast]);
 
-  const tapToSpeak = useCallback(() => {
+  const startConversation = useCallback(() => {
+    setIsConversationMode(true);
+    setConversationHistory([]);
+    shouldAutoListenRef.current = true;
+    
+    // Auto-start listening immediately
+    setTimeout(() => {
+      startListeningInternal((transcript) => {
+        handleConversationTurn(transcript);
+      });
+    }, 100);
+  }, [startListeningInternal, handleConversationTurn]);
+
+  const endConversation = useCallback(() => {
+    shouldAutoListenRef.current = false;
+    stopListening();
+    stopSpeaking();
+    setIsConversationMode(false);
+    setConversationState("idle");
+    // Keep conversation history visible - don't clear it
+  }, [stopListening, stopSpeaking]);
+
+  const stopCurrentAction = useCallback(() => {
     if (conversationState === "listening") {
       stopListening();
-      return;
-    }
-
-    if (conversationState === "speaking") {
+      setConversationState("idle");
+    } else if (conversationState === "speaking") {
       stopSpeaking();
       setConversationState("idle");
-      return;
     }
+  }, [conversationState, stopListening, stopSpeaking]);
 
-    if (conversationState === "idle" && isConversationMode) {
-      startListening((transcript) => {
+  const resumeListening = useCallback(() => {
+    if (isConversationMode && conversationState === "idle") {
+      startListeningInternal((transcript) => {
         handleConversationTurn(transcript);
       });
     }
-  }, [conversationState, isConversationMode, startListening, stopListening, stopSpeaking, handleConversationTurn]);
+  }, [isConversationMode, conversationState, startListeningInternal, handleConversationTurn]);
 
   return {
     isConversationMode,
@@ -271,7 +282,8 @@ export function useConversationMode({ onSendMessage }: UseConversationModeProps)
     conversationHistory,
     startConversation,
     endConversation,
-    tapToSpeak,
+    stopCurrentAction,
+    resumeListening,
     stopSpeaking,
   };
 }
