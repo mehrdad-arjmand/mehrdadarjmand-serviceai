@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useConversationMode, ConversationMessage } from "@/hooks/useConversationMode";
@@ -25,7 +25,6 @@ import {
 import { CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 
 interface TechnicianChatProps {
   hasDocuments: boolean;
@@ -44,11 +43,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [isFromVoice, setIsFromVoice] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const { toast } = useToast();
 
+  // Dictation state
+  const [isListening, setIsListening] = useState(false);
+  const [dictationPreview, setDictationPreview] = useState<string | null>(null);
+  const recognitionRef = useRef<any>(null);
+
+  // Filter states
   const [filterDocType, setFilterDocType] = useState<string>("");
   const [filterUploadDate, setFilterUploadDate] = useState<Date | undefined>();
   const [filterSite, setFilterSite] = useState<string>("");
@@ -62,9 +65,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
   const [equipmentMakes, setEquipmentMakes] = useState<string[]>([]);
   const [equipmentModels, setEquipmentModels] = useState<string[]>([]);
-
-  // Speech recognition ref
-  const recognitionRef = useRef<any>(null);
 
   // Conversation mode handler
   const handleConversationSend = async (
@@ -101,7 +101,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     conversationHistory,
     startConversation,
     endConversation,
-    tapToSpeak,
+    stopCurrentAction,
+    resumeListening,
     stopSpeaking: stopConversationSpeaking,
   } = useConversationMode({ onSendMessage: handleConversationSend });
 
@@ -109,14 +110,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   useEffect(() => {
     const fetchFilterOptions = async () => {
       try {
-        // Fetch from documents table
         const { data: documents, error: docError } = await supabase
           .from('documents')
           .select('doc_type, site, equipment_make, equipment_model');
 
         if (docError) throw docError;
 
-        // Fetch equipment types from chunks table
         const { data: chunks, error: chunkError } = await supabase
           .from('chunks')
           .select('equipment')
@@ -174,7 +173,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     setIsQuerying(true);
     setAnswer("");
     setSources([]);
-    setIsFromVoice(fromVoice);
 
     // Stop any ongoing TTS
     if ('speechSynthesis' in window) {
@@ -248,18 +246,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       return;
     }
 
-    // Cancel any ongoing speech
     window.speechSynthesis.cancel();
     
-    // Clean the text for natural speech (strips markdown)
     const cleanText = renderAnswerForSpeech(text);
-    
-    // Split into sentences for natural pauses
     const sentences = splitIntoSentences(cleanText);
     
     if (sentences.length === 0) return;
     
-    // Ensure voice is selected
     if (!selectedVoiceRef.current) {
       selectedVoiceRef.current = selectBestVoice();
     }
@@ -270,7 +263,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     setIsSpeaking(true);
     
     const speakNext = () => {
-      // Check if this queue is still active
       if (queueId !== utteranceQueueRef.current) return;
       
       if (currentIndex >= sentences.length) {
@@ -306,14 +298,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
   };
 
-  const handleDictate = () => {
-    // Toggle: if already listening, stop
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      return;
-    }
-
-    // Start listening
+  // Dictation handlers
+  const handleDictateStart = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({
         title: "Speech recognition not supported",
@@ -332,17 +318,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     recognition.lang = 'en-US';
 
     let finalTranscript = '';
+    let interimTranscript = '';
 
     recognition.onstart = () => {
       setIsListening(true);
-      toast({
-        title: "Recording...",
-        description: "Click the mic button again to stop and send.",
-      });
+      setDictationPreview(null);
     };
 
     recognition.onresult = (event: any) => {
-      let interimTranscript = '';
+      interimTranscript = '';
       
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
@@ -353,7 +337,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         }
       }
       
-      // Update question field with accumulated text
+      // Show live preview in textarea
       setQuestion(finalTranscript + interimTranscript);
     };
 
@@ -366,7 +350,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           description: "Please enable mic access in your browser.",
           variant: "destructive",
         });
-      } else {
+      } else if (event.error !== 'aborted') {
         toast({
           title: "Speech recognition error",
           description: event.error,
@@ -375,6 +359,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       }
       
       setIsListening(false);
+      setDictationPreview(null);
       recognitionRef.current = null;
     };
 
@@ -382,38 +367,40 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       setIsListening(false);
       recognitionRef.current = null;
       
-      if (finalTranscript.trim()) {
-        const trimmedTranscript = finalTranscript.trim();
+      const trimmedTranscript = finalTranscript.trim();
+      if (trimmedTranscript) {
+        // Show preview with X/✓ controls
+        setDictationPreview(trimmedTranscript);
         setQuestion(trimmedTranscript);
-        
-        // Auto-send the question
-        handleAskAssistant(trimmedTranscript, true);
-        
-        toast({
-          title: "Speech captured",
-          description: "Sending your question...",
-        });
       } else {
         toast({
           title: "No speech detected",
-          description: "No clear speech detected. You can try again.",
+          description: "Please try again.",
           variant: "destructive",
         });
+        setDictationPreview(null);
       }
     };
 
     recognition.start();
   };
 
-  // Handle conversation mode tap-to-speak
-  const handleConversationTap = () => {
-    if (conversationState === "listening") {
-      // Stop listening and process
-      tapToSpeak();
-    } else if (conversationState === "idle" || conversationState === "speaking") {
-      // Start listening
-      tapToSpeak();
+  const handleDictateStop = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
     }
+  };
+
+  const handleDictateConfirm = () => {
+    if (dictationPreview) {
+      handleAskAssistant(dictationPreview, true);
+      setDictationPreview(null);
+    }
+  };
+
+  const handleDictateCancel = () => {
+    setDictationPreview(null);
+    setQuestion("");
   };
 
   // Toggle conversation mode
@@ -424,6 +411,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       startConversation();
     }
   };
+
+  // Determine which buttons to show based on state
+  const hasText = question.trim().length > 0;
+  const showSendButton = hasText && !isConversationMode;
+  const showConversationButton = !hasText && !isConversationMode && !dictationPreview;
+  const isConversationActive = isConversationMode;
 
   return (
     <div className="space-y-6">
@@ -439,32 +432,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               Ask questions about your equipment and procedures
             </p>
           </div>
-
-          {/* Conversation Mode Indicator */}
-          {isConversationMode && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-lg border border-primary/20">
-              <Badge variant="secondary" className="bg-primary/20 text-primary text-xs">
-                Conversation Mode
-              </Badge>
-              <span className="text-sm text-muted-foreground">
-                {conversationState === "idle" && "Ready to listen"}
-                {conversationState === "listening" && "Listening..."}
-                {conversationState === "waitingForAnswer" && "Thinking..."}
-                {conversationState === "speaking" && "Speaking..."}
-              </span>
-              {conversationState === "speaking" && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={stopConversationSpeaking}
-                  className="h-6 px-2 text-xs ml-auto"
-                >
-                  <VolumeX className="h-3 w-3 mr-1" />
-                  Stop
-                </Button>
-              )}
-            </div>
-          )}
 
           {/* Filters Section */}
           {hasDocuments && (
@@ -587,12 +554,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
             </div>
           )}
 
-          {/* Conversation History (shown in conversation mode) */}
-          {isConversationMode && conversationHistory.length > 0 && (
-            <div className="space-y-2 max-h-64 overflow-y-auto p-3 bg-muted/20 rounded-lg border border-border">
+          {/* Chat History - shows conversation and text responses in same area */}
+          {(conversationHistory.length > 0 || answer) && (
+            <div className="space-y-2 max-h-80 overflow-y-auto p-3 bg-muted/20 rounded-lg border border-border">
+              {/* Conversation history */}
               {conversationHistory.map((msg, idx) => (
                 <div
-                  key={idx}
+                  key={`conv-${idx}`}
                   className={cn(
                     "p-3 rounded-lg text-sm",
                     msg.role === "user" 
@@ -612,6 +580,67 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                   )}
                 </div>
               ))}
+              
+              {/* Text-mode answer (only when not in conversation mode and no conversation history) */}
+              {answer && conversationHistory.length === 0 && (
+                <div className="p-3 rounded-lg text-sm bg-muted mr-8">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-muted-foreground">Service AI</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => isSpeaking ? stopSpeaking() : speakText(answer)}
+                      className="h-6 px-2 text-xs"
+                    >
+                      {isSpeaking ? (
+                        <>
+                          <VolumeX className="h-3 w-3 mr-1" />
+                          Stop
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="h-3 w-3 mr-1" />
+                          Listen
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
+                    <ReactMarkdown>{answer}</ReactMarkdown>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Sources */}
+          {sources.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-muted-foreground">
+                Referenced Context ({sources.length} sources)
+              </h4>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {sources.map((source, idx) => (
+                  <details key={idx} className="group">
+                    <summary className="cursor-pointer list-none">
+                      <div className="flex items-start gap-2 p-2 bg-muted/50 rounded hover:bg-muted transition-colors text-sm">
+                        <span className="font-medium text-primary">[{idx + 1}]</span>
+                        <div className="flex-1">
+                          <p className="font-medium text-foreground">
+                            {source.filename} (Chunk {source.chunkIndex})
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Similarity: {(source.similarity * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                      </div>
+                    </summary>
+                    <div className="mt-1 ml-6 p-2 bg-background border border-border rounded text-xs text-muted-foreground">
+                      {source.text}
+                    </div>
+                  </details>
+                ))}
+              </div>
             </div>
           )}
 
@@ -620,12 +649,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
             <Textarea
               id="question"
               value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder={isConversationMode ? "Tap mic to speak or type here..." : "What troubleshooting steps should I take?"}
+              onChange={(e) => {
+                setQuestion(e.target.value);
+                // Clear dictation preview if user manually edits
+                if (dictationPreview) setDictationPreview(null);
+              }}
+              placeholder={isConversationMode ? "Voice conversation active..." : "What troubleshooting steps should I take?"}
               rows={3}
-              disabled={isQuerying || conversationState === "waitingForAnswer"}
+              disabled={isQuerying || isConversationActive || conversationState === "waitingForAnswer"}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !isConversationMode) {
+                if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && !dictationPreview) {
                   e.preventDefault();
                   handleAskAssistant();
                 }
@@ -635,141 +668,120 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
             
             {/* ChatGPT-style control bar */}
             <div className="flex items-center justify-between">
-              {/* Left side - info */}
+              {/* Left side - status info */}
               <div className="text-xs text-muted-foreground">
                 {!hasDocuments ? (
                   <span>Upload documents to start ({chunksCount} chunks indexed)</span>
                 ) : isListening ? (
                   <span className="text-primary animate-pulse">Recording... Click mic to stop</span>
-                ) : conversationState === "listening" ? (
-                  <span className="text-primary animate-pulse">Listening... Tap mic when done</span>
+                ) : isConversationMode && conversationState === "listening" ? (
+                  <span className="text-primary animate-pulse">Listening...</span>
+                ) : isConversationMode && conversationState === "waitingForAnswer" ? (
+                  <span className="text-muted-foreground">Thinking...</span>
+                ) : isConversationMode && conversationState === "speaking" ? (
+                  <span className="text-primary">Speaking...</span>
+                ) : isConversationMode ? (
+                  <span className="text-primary">Conversation mode active</span>
+                ) : dictationPreview ? (
+                  <span className="text-primary">Review your question</span>
                 ) : null}
               </div>
               
-              {/* Right side - action buttons */}
+              {/* Right side - action buttons (max 2 visible) */}
               <div className="flex items-center gap-1">
-                {/* Conversation mode toggle */}
-                <Button
-                  onClick={handleConversationToggle}
-                  disabled={isQuerying || !hasDocuments}
-                  variant={isConversationMode ? "default" : "ghost"}
-                  size="icon"
-                  className={cn(
-                    "h-9 w-9 rounded-full",
-                    isConversationMode && "bg-primary text-primary-foreground"
-                  )}
-                  title={isConversationMode ? "End conversation mode" : "Start conversation mode"}
-                >
-                  <AudioWaveform className="h-4 w-4" />
-                </Button>
+                {/* Dictation preview: show X and ✓ */}
+                {dictationPreview && !isConversationMode && (
+                  <>
+                    <Button
+                      onClick={handleDictateCancel}
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 rounded-full text-destructive hover:bg-destructive/10"
+                      title="Cancel dictation"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      onClick={handleDictateConfirm}
+                      disabled={isQuerying}
+                      size="icon"
+                      className="h-9 w-9 rounded-full bg-primary text-primary-foreground"
+                      title="Confirm and send"
+                    >
+                      {isQuerying ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </>
+                )}
 
-                {/* Mic button - for dictation or conversation */}
-                <Button
-                  onClick={isConversationMode ? handleConversationTap : handleDictate}
-                  disabled={isQuerying || !hasDocuments || conversationState === "waitingForAnswer"}
-                  variant={isListening || conversationState === "listening" ? "destructive" : "ghost"}
-                  size="icon"
-                  className={cn(
-                    "h-9 w-9 rounded-full",
-                    (isListening || conversationState === "listening") && "animate-pulse"
-                  )}
-                  title={isConversationMode ? "Tap to speak" : "Dictate question"}
-                >
-                  {conversationState === "waitingForAnswer" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : conversationState === "speaking" ? (
-                    <Volume2 className="h-4 w-4" />
-                  ) : (
-                    <Mic className="h-4 w-4" />
-                  )}
-                </Button>
+                {/* Conversation mode active: show Stop button */}
+                {isConversationActive && !dictationPreview && (
+                  <Button
+                    onClick={handleConversationToggle}
+                    variant="destructive"
+                    size="icon"
+                    className="h-9 w-9 rounded-full"
+                    title="End conversation"
+                  >
+                    <Square className="h-4 w-4" />
+                  </Button>
+                )}
 
-                {/* Send button */}
-                <Button
-                  onClick={() => handleAskAssistant()}
-                  disabled={isQuerying || !hasDocuments || isListening || !question.trim()}
-                  size="icon"
-                  className="h-9 w-9 rounded-full"
-                  title="Send question"
-                >
-                  {isQuerying ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
+                {/* Normal mode (no dictation preview, no conversation): show Mic and either Conversation or Send */}
+                {!dictationPreview && !isConversationActive && (
+                  <>
+                    {/* Mic button for dictation */}
+                    <Button
+                      onClick={isListening ? handleDictateStop : handleDictateStart}
+                      disabled={isQuerying || !hasDocuments}
+                      variant={isListening ? "destructive" : "ghost"}
+                      size="icon"
+                      className={cn(
+                        "h-9 w-9 rounded-full",
+                        isListening && "animate-pulse"
+                      )}
+                      title={isListening ? "Stop recording" : "Start dictation"}
+                    >
+                      <Mic className="h-4 w-4" />
+                    </Button>
+
+                    {/* Show Conversation button when idle (no text), Send button when typing */}
+                    {showConversationButton ? (
+                      <Button
+                        onClick={handleConversationToggle}
+                        disabled={isQuerying || !hasDocuments}
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 rounded-full"
+                        title="Start voice conversation"
+                      >
+                        <AudioWaveform className="h-4 w-4" />
+                      </Button>
+                    ) : showSendButton ? (
+                      <Button
+                        onClick={() => handleAskAssistant()}
+                        disabled={isQuerying || !hasDocuments || isListening || !question.trim()}
+                        size="icon"
+                        className="h-9 w-9 rounded-full bg-primary text-primary-foreground"
+                        title="Send question"
+                      >
+                        {isQuerying ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                      </Button>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           </div>
         </div>
       </Card>
-
-      {/* Answer */}
-      {answer && !isConversationMode && (
-        <Card className="p-6">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-foreground">Answer</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => isSpeaking ? stopSpeaking() : speakText(answer)}
-                className="gap-1"
-              >
-                {isSpeaking ? (
-                  <>
-                    <VolumeX className="h-4 w-4" />
-                    Stop
-                  </>
-                ) : (
-                  <>
-                    <Volume2 className="h-4 w-4" />
-                    Listen
-                  </>
-                )}
-              </Button>
-            </div>
-            <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground">
-              <ReactMarkdown>{answer}</ReactMarkdown>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Sources */}
-      {sources.length > 0 && !isConversationMode && (
-        <Card className="p-6">
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-foreground">
-              Referenced Context ({sources.length} sources)
-            </h3>
-            <div className="space-y-3">
-              {sources.map((source, idx) => (
-                <details key={idx} className="group">
-                  <summary className="cursor-pointer list-none">
-                    <div className="flex items-start gap-2 p-3 bg-muted/50 rounded hover:bg-muted transition-colors">
-                      <span className="text-sm font-medium text-primary">
-                        [{idx + 1}]
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-foreground">
-                          {source.filename} (Chunk {source.chunkIndex})
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Similarity: {(source.similarity * 100).toFixed(1)}%
-                        </p>
-                      </div>
-                    </div>
-                  </summary>
-                  <div className="mt-2 ml-6 p-3 bg-background border border-border rounded text-sm text-muted-foreground">
-                    {source.text}
-                  </div>
-                </details>
-              ))}
-            </div>
-          </div>
-        </Card>
-      )}
     </div>
   );
 };
