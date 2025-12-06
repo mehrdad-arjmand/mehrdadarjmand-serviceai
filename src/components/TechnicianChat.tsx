@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { useConversationMode, ConversationMessage } from "@/hooks/useConversationMode";
 import ReactMarkdown from "react-markdown";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
 import {
@@ -38,18 +37,39 @@ interface Source {
   similarity: number;
 }
 
+// Unified message type for all interactions
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  inputMode: "text" | "voice" | "dictation";
+  timestamp: Date;
+}
+
+type ConversationState = "idle" | "listening" | "waitingForAnswer" | "speaking";
+
 export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProps) => {
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const { toast } = useToast();
 
+  // Unified chat history for all modes
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  
+  // Conversation mode state
+  const [isConversationMode, setIsConversationMode] = useState(false);
+  const [conversationState, setConversationState] = useState<ConversationState>("idle");
+
   // Dictation state
   const [isListening, setIsListening] = useState(false);
   const [dictationPreview, setDictationPreview] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
+  const conversationRecognitionRef = useRef<any>(null);
+
+  // Request cancellation
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Filter states
   const [filterDocType, setFilterDocType] = useState<string>("");
@@ -66,47 +86,17 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const [equipmentMakes, setEquipmentMakes] = useState<string[]>([]);
   const [equipmentModels, setEquipmentModels] = useState<string[]>([]);
 
-  // Conversation mode handler
-  const handleConversationSend = async (
-    questionText: string, 
-    history: ConversationMessage[], 
-    isConversationMode: boolean
-  ): Promise<string> => {
-    const { data, error } = await supabase.functions.invoke("rag-query", {
-      body: {
-        question: questionText.trim(),
-        documentType: filterDocType || undefined,
-        uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
-        filterSite: filterSite || undefined,
-        equipmentType: filterEquipmentType || undefined,
-        equipmentMake: filterEquipmentMake || undefined,
-        equipmentModel: filterEquipmentModel || undefined,
-        history,
-        isConversationMode,
-      },
-    });
+  // Voice refs for TTS
+  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const utteranceQueueRef = useRef<number>(0);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
-    if (error) throw error;
-    
-    // Update the main answer and sources for display
-    setAnswer(data.answer);
-    setSources(data.sources || []);
-    
-    return data.answer;
-  };
+  // Scroll to bottom when chat updates
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory]);
 
-  const {
-    isConversationMode,
-    conversationState,
-    conversationHistory,
-    startConversation,
-    endConversation,
-    stopCurrentAction,
-    resumeListening,
-    stopSpeaking: stopConversationSpeaking,
-  } = useConversationMode({ onSendMessage: handleConversationSend });
-
-  // Fetch distinct filter values from documents and chunks
+  // Fetch distinct filter values from documents
   useEffect(() => {
     const fetchFilterOptions = async () => {
       try {
@@ -149,80 +139,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
   }, [hasDocuments]);
 
-  const handleAskAssistant = async (questionText?: string, fromVoice: boolean = false) => {
-    const queryText = questionText || question;
-    
-    if (!hasDocuments) {
-      toast({
-        title: "No documents indexed",
-        description: "Please upload and index documents first.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!queryText.trim()) {
-      toast({
-        title: "Question required",
-        description: "Please describe your issue or question.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsQuerying(true);
-    setAnswer("");
-    setSources([]);
-
-    // Stop any ongoing TTS
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-    }
-
-    try {
-      const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: {
-          question: queryText.trim(),
-          documentType: filterDocType || undefined,
-          uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
-          filterSite: filterSite || undefined,
-          equipmentType: filterEquipmentType || undefined,
-          equipmentMake: filterEquipmentMake || undefined,
-          equipmentModel: filterEquipmentModel || undefined,
-        },
-      });
-
-      if (error) throw error;
-
-      setAnswer(data.answer);
-      setSources(data.sources || []);
-
-      // If from voice, automatically speak the answer
-      if (fromVoice && data.answer) {
-        speakText(data.answer);
-      }
-
-      toast({
-        title: "Answer generated",
-        description: `Found ${data.sources?.length || 0} relevant sources.`,
-      });
-    } catch (error: any) {
-      console.error("Error querying assistant:", error);
-      toast({
-        title: "Error querying assistant",
-        description: error.message || "An unexpected error occurred.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsQuerying(false);
-    }
-  };
-
-  // Voice ref for TTS
-  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
-  const utteranceQueueRef = useRef<number>(0);
-
   // Initialize voice on mount
   useEffect(() => {
     const initVoice = () => {
@@ -234,15 +150,136 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     if ('speechSynthesis' in window) {
       window.speechSynthesis.onvoiceschanged = initVoice;
     }
+
+    return () => {
+      stopAllSpeech();
+      stopConversationListening();
+    };
   }, []);
 
-  const speakText = (text: string) => {
+  // Generate unique message ID
+  const generateId = () => `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  // Add message to unified chat history
+  const addMessage = (role: "user" | "assistant", content: string, inputMode: "text" | "voice" | "dictation") => {
+    const message: ChatMessage = {
+      id: generateId(),
+      role,
+      content,
+      inputMode,
+      timestamp: new Date(),
+    };
+    setChatHistory(prev => [...prev, message]);
+    return message.id;
+  };
+
+  // Build conversation history for API
+  const buildApiHistory = () => {
+    return chatHistory.slice(-8).map(msg => ({
+      role: msg.role,
+      content: msg.content,
+    }));
+  };
+
+  // Core function to send question to API
+  const sendQuestion = async (
+    questionText: string, 
+    inputMode: "text" | "voice" | "dictation",
+    speakAnswer: boolean = false
+  ) => {
+    if (!hasDocuments) {
+      toast({
+        title: "No documents indexed",
+        description: "Please upload and index documents first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!questionText.trim()) {
+      toast({
+        title: "Question required",
+        description: "Please describe your issue or question.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Add user message to chat
+    addMessage("user", questionText.trim(), inputMode);
+    
+    setIsQuerying(true);
+    setSources([]);
+
+    // Stop any ongoing TTS
+    stopAllSpeech();
+
+    // Create abort controller for cancellation
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const { data, error } = await supabase.functions.invoke("rag-query", {
+        body: {
+          question: questionText.trim(),
+          documentType: filterDocType || undefined,
+          uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
+          filterSite: filterSite || undefined,
+          equipmentType: filterEquipmentType || undefined,
+          equipmentMake: filterEquipmentMake || undefined,
+          equipmentModel: filterEquipmentModel || undefined,
+          history: buildApiHistory(),
+          isConversationMode: inputMode === "voice",
+        },
+      });
+
+      if (error) throw error;
+
+      // Add assistant message to chat
+      addMessage("assistant", data.answer, inputMode);
+      setSources(data.sources || []);
+
+      // Speak answer if requested
+      if (speakAnswer && data.answer) {
+        speakText(data.answer, () => {
+          // After speaking, if in conversation mode, resume listening
+          if (isConversationMode) {
+            startConversationListening();
+          }
+        });
+      }
+
+      if (!speakAnswer) {
+        toast({
+          title: "Answer generated",
+          description: `Found ${data.sources?.length || 0} relevant sources.`,
+        });
+      }
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Request cancelled');
+        return;
+      }
+      console.error("Error querying assistant:", error);
+      toast({
+        title: "Error querying assistant",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsQuerying(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  // TTS Functions
+  const speakText = (text: string, onEnd?: () => void) => {
     if (!('speechSynthesis' in window)) {
       toast({
         title: "TTS not supported",
         description: "Voice playback is not supported in this browser.",
         variant: "destructive",
       });
+      onEnd?.();
       return;
     }
 
@@ -251,7 +288,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     const cleanText = renderAnswerForSpeech(text);
     const sentences = splitIntoSentences(cleanText);
     
-    if (sentences.length === 0) return;
+    if (sentences.length === 0) {
+      onEnd?.();
+      return;
+    }
     
     if (!selectedVoiceRef.current) {
       selectedVoiceRef.current = selectBestVoice();
@@ -261,12 +301,19 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     let currentIndex = 0;
     
     setIsSpeaking(true);
+    setConversationState("speaking");
     
     const speakNext = () => {
-      if (queueId !== utteranceQueueRef.current) return;
+      if (queueId !== utteranceQueueRef.current) {
+        setIsSpeaking(false);
+        setConversationState("idle");
+        return;
+      }
       
       if (currentIndex >= sentences.length) {
         setIsSpeaking(false);
+        setConversationState("idle");
+        onEnd?.();
         return;
       }
       
@@ -282,6 +329,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       
       utterance.onerror = () => {
         setIsSpeaking(false);
+        setConversationState("idle");
+        onEnd?.();
       };
       
       window.speechSynthesis.speak(utterance);
@@ -290,7 +339,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     speakNext();
   };
 
-  const stopSpeaking = () => {
+  const stopAllSpeech = () => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       utteranceQueueRef.current++;
@@ -298,7 +347,32 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
   };
 
-  // Dictation handlers
+  // Global stop handler - interrupts everything
+  const handleGlobalStop = () => {
+    // Stop TTS
+    stopAllSpeech();
+    
+    // Cancel ongoing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
+    // If in conversation mode, end it
+    if (isConversationMode) {
+      endConversationMode();
+    }
+    
+    // Stop dictation
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    
+    setIsQuerying(false);
+    setConversationState("idle");
+  };
+
+  // Dictation handlers (one-shot)
   const handleDictateStart = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({
@@ -337,7 +411,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         }
       }
       
-      // Show live preview in textarea
       setQuestion(finalTranscript + interimTranscript);
     };
 
@@ -369,7 +442,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       
       const trimmedTranscript = finalTranscript.trim();
       if (trimmedTranscript) {
-        // Show preview with X/✓ controls
         setDictationPreview(trimmedTranscript);
         setQuestion(trimmedTranscript);
       } else {
@@ -393,8 +465,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
   const handleDictateConfirm = () => {
     if (dictationPreview) {
-      handleAskAssistant(dictationPreview, true);
+      sendQuestion(dictationPreview, "dictation", true);
       setDictationPreview(null);
+      setQuestion("");
     }
   };
 
@@ -403,24 +476,122 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     setQuestion("");
   };
 
-  // Toggle conversation mode
-  const handleConversationToggle = () => {
-    if (isConversationMode) {
-      endConversation();
-    } else {
-      startConversation();
+  // Conversation mode - continuous voice chat
+  const startConversationMode = () => {
+    setIsConversationMode(true);
+    // Immediately start listening
+    startConversationListening();
+  };
+
+  const endConversationMode = () => {
+    setIsConversationMode(false);
+    stopConversationListening();
+    stopAllSpeech();
+    setConversationState("idle");
+    // Keep chat history - don't clear it
+  };
+
+  const stopConversationListening = () => {
+    if (conversationRecognitionRef.current) {
+      conversationRecognitionRef.current.stop();
+      conversationRecognitionRef.current = null;
     }
   };
 
-  // Determine which buttons to show based on state
+  const startConversationListening = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast({
+        title: "Speech recognition not supported",
+        description: "Your browser doesn't support speech recognition.",
+        variant: "destructive",
+      });
+      endConversationMode();
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    conversationRecognitionRef.current = recognition;
+
+    recognition.continuous = false; // Auto-finalize on pause
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    let finalTranscript = '';
+
+    recognition.onstart = () => {
+      setConversationState("listening");
+    };
+
+    recognition.onresult = (event: any) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        }
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Conversation recognition error:', event.error);
+      
+      if (event.error === 'not-allowed') {
+        toast({
+          title: "Microphone permission denied",
+          description: "Please enable mic access in your browser.",
+          variant: "destructive",
+        });
+        endConversationMode();
+      } else if (event.error === 'no-speech') {
+        // No speech detected, restart listening if still in conversation mode
+        if (isConversationMode) {
+          setTimeout(() => {
+            if (isConversationMode) {
+              startConversationListening();
+            }
+          }, 500);
+        }
+      }
+      
+      conversationRecognitionRef.current = null;
+    };
+
+    recognition.onend = () => {
+      conversationRecognitionRef.current = null;
+      
+      const trimmedTranscript = finalTranscript.trim();
+      if (trimmedTranscript && isConversationMode) {
+        // Auto-send the question
+        setConversationState("waitingForAnswer");
+        sendQuestion(trimmedTranscript, "voice", true);
+      } else if (isConversationMode) {
+        // No speech, but still in conversation mode - restart listening
+        setTimeout(() => {
+          if (isConversationMode) {
+            startConversationListening();
+          }
+        }, 500);
+      }
+    };
+
+    recognition.start();
+  };
+
+  // Handle text submit
+  const handleTextSubmit = () => {
+    if (question.trim()) {
+      sendQuestion(question, "text", false);
+      setQuestion("");
+    }
+  };
+
+  // Determine button states
   const hasText = question.trim().length > 0;
-  const showSendButton = hasText && !isConversationMode;
-  const showConversationButton = !hasText && !isConversationMode && !dictationPreview;
-  const isConversationActive = isConversationMode;
+  const isProcessing = isQuerying || isSpeaking;
+  const showStopButton = isProcessing || isConversationMode;
 
   return (
     <div className="space-y-6">
-      {/* Main Assistant Card */}
       <Card className="p-6">
         <div className="space-y-4">
           {/* Header */}
@@ -554,13 +725,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
             </div>
           )}
 
-          {/* Chat History - shows conversation and text responses in same area */}
-          {(conversationHistory.length > 0 || answer) && (
-            <div className="space-y-2 max-h-80 overflow-y-auto p-3 bg-muted/20 rounded-lg border border-border">
-              {/* Conversation history */}
-              {conversationHistory.map((msg, idx) => (
+          {/* Unified Chat History - shows all interactions */}
+          {chatHistory.length > 0 && (
+            <div className="space-y-2 max-h-96 overflow-y-auto p-3 bg-muted/20 rounded-lg border border-border">
+              {chatHistory.map((msg) => (
                 <div
-                  key={`conv-${idx}`}
+                  key={msg.id}
                   className={cn(
                     "p-3 rounded-lg text-sm",
                     msg.role === "user" 
@@ -568,9 +738,33 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                       : "bg-muted mr-8"
                   )}
                 >
-                  <span className="text-xs text-muted-foreground block mb-1">
-                    {msg.role === "user" ? "You (voice)" : "Service AI"}
-                  </span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-muted-foreground">
+                      {msg.role === "user" 
+                        ? `You${msg.inputMode === "voice" ? " (voice)" : msg.inputMode === "dictation" ? " (dictation)" : ""}` 
+                        : "Service AI"}
+                    </span>
+                    {msg.role === "assistant" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => isSpeaking ? stopAllSpeech() : speakText(msg.content)}
+                        className="h-6 px-2 text-xs"
+                      >
+                        {isSpeaking ? (
+                          <>
+                            <VolumeX className="h-3 w-3 mr-1" />
+                            Stop
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="h-3 w-3 mr-1" />
+                            Listen
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
                   {msg.role === "assistant" ? (
                     <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
@@ -580,87 +774,26 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                   )}
                 </div>
               ))}
-              
-              {/* Text-mode answer (only when not in conversation mode and no conversation history) */}
-              {answer && conversationHistory.length === 0 && (
-                <div className="p-3 rounded-lg text-sm bg-muted mr-8">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-muted-foreground">Service AI</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => isSpeaking ? stopSpeaking() : speakText(answer)}
-                      className="h-6 px-2 text-xs"
-                    >
-                      {isSpeaking ? (
-                        <>
-                          <VolumeX className="h-3 w-3 mr-1" />
-                          Stop
-                        </>
-                      ) : (
-                        <>
-                          <Volume2 className="h-3 w-3 mr-1" />
-                          Listen
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
-                    <ReactMarkdown>{answer}</ReactMarkdown>
-                  </div>
-                </div>
-              )}
+              <div ref={chatEndRef} />
             </div>
           )}
 
-          {/* Sources */}
-          {sources.length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium text-muted-foreground">
-                Referenced Context ({sources.length} sources)
-              </h4>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {sources.map((source, idx) => (
-                  <details key={idx} className="group">
-                    <summary className="cursor-pointer list-none">
-                      <div className="flex items-start gap-2 p-2 bg-muted/50 rounded hover:bg-muted transition-colors text-sm">
-                        <span className="font-medium text-primary">[{idx + 1}]</span>
-                        <div className="flex-1">
-                          <p className="font-medium text-foreground">
-                            {source.filename} (Chunk {source.chunkIndex})
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Similarity: {(source.similarity * 100).toFixed(1)}%
-                          </p>
-                        </div>
-                      </div>
-                    </summary>
-                    <div className="mt-1 ml-6 p-2 bg-background border border-border rounded text-xs text-muted-foreground">
-                      {source.text}
-                    </div>
-                  </details>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Input Area with ChatGPT-style bottom bar */}
+          {/* Input Area - directly under chat history */}
           <div className="space-y-2">
             <Textarea
               id="question"
               value={question}
               onChange={(e) => {
                 setQuestion(e.target.value);
-                // Clear dictation preview if user manually edits
                 if (dictationPreview) setDictationPreview(null);
               }}
               placeholder={isConversationMode ? "Voice conversation active..." : "What troubleshooting steps should I take?"}
               rows={3}
-              disabled={isQuerying || isConversationActive || conversationState === "waitingForAnswer"}
+              disabled={isQuerying || isConversationMode}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && !dictationPreview) {
+                if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && !dictationPreview && hasText) {
                   e.preventDefault();
-                  handleAskAssistant();
+                  handleTextSubmit();
                 }
               }}
               className="resize-none"
@@ -674,16 +807,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                   <span>Upload documents to start ({chunksCount} chunks indexed)</span>
                 ) : isListening ? (
                   <span className="text-primary animate-pulse">Recording... Click mic to stop</span>
-                ) : isConversationMode && conversationState === "listening" ? (
+                ) : conversationState === "listening" ? (
                   <span className="text-primary animate-pulse">Listening...</span>
-                ) : isConversationMode && conversationState === "waitingForAnswer" ? (
+                ) : conversationState === "waitingForAnswer" ? (
                   <span className="text-muted-foreground">Thinking...</span>
-                ) : isConversationMode && conversationState === "speaking" ? (
+                ) : conversationState === "speaking" ? (
                   <span className="text-primary">Speaking...</span>
                 ) : isConversationMode ? (
                   <span className="text-primary">Conversation mode active</span>
                 ) : dictationPreview ? (
                   <span className="text-primary">Review your question</span>
+                ) : isQuerying ? (
+                  <span className="text-muted-foreground">Generating answer...</span>
                 ) : null}
               </div>
               
@@ -717,26 +852,26 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                   </>
                 )}
 
-                {/* Conversation mode active: show Stop button */}
-                {isConversationActive && !dictationPreview && (
+                {/* Show Stop button when processing or in conversation mode */}
+                {showStopButton && !dictationPreview && (
                   <Button
-                    onClick={handleConversationToggle}
+                    onClick={handleGlobalStop}
                     variant="destructive"
                     size="icon"
                     className="h-9 w-9 rounded-full"
-                    title="End conversation"
+                    title={isConversationMode ? "End conversation" : "Stop"}
                   >
                     <Square className="h-4 w-4" />
                   </Button>
                 )}
 
-                {/* Normal mode (no dictation preview, no conversation): show Mic and either Conversation or Send */}
-                {!dictationPreview && !isConversationActive && (
+                {/* Normal mode (no dictation preview, not processing): show Mic and Conversation/Send */}
+                {!dictationPreview && !showStopButton && (
                   <>
                     {/* Mic button for dictation */}
                     <Button
                       onClick={isListening ? handleDictateStop : handleDictateStart}
-                      disabled={isQuerying || !hasDocuments}
+                      disabled={!hasDocuments}
                       variant={isListening ? "destructive" : "ghost"}
                       size="icon"
                       className={cn(
@@ -748,11 +883,21 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                       <Mic className="h-4 w-4" />
                     </Button>
 
-                    {/* Show Conversation button when idle (no text), Send button when typing */}
-                    {showConversationButton ? (
+                    {/* Show Conversation button when no text, Send button when typing */}
+                    {hasText ? (
                       <Button
-                        onClick={handleConversationToggle}
-                        disabled={isQuerying || !hasDocuments}
+                        onClick={handleTextSubmit}
+                        disabled={!hasDocuments || isListening}
+                        size="icon"
+                        className="h-9 w-9 rounded-full bg-primary text-primary-foreground"
+                        title="Send question"
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={startConversationMode}
+                        disabled={!hasDocuments}
                         variant="ghost"
                         size="icon"
                         className="h-9 w-9 rounded-full"
@@ -760,26 +905,43 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                       >
                         <AudioWaveform className="h-4 w-4" />
                       </Button>
-                    ) : showSendButton ? (
-                      <Button
-                        onClick={() => handleAskAssistant()}
-                        disabled={isQuerying || !hasDocuments || isListening || !question.trim()}
-                        size="icon"
-                        className="h-9 w-9 rounded-full bg-primary text-primary-foreground"
-                        title="Send question"
-                      >
-                        {isQuerying ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Send className="h-4 w-4" />
-                        )}
-                      </Button>
-                    ) : null}
+                    )}
                   </>
                 )}
               </div>
             </div>
           </div>
+
+          {/* Referenced Context - below input area */}
+          {sources.length > 0 && (
+            <div className="space-y-2 pt-4 border-t border-border">
+              <h4 className="text-sm font-medium text-muted-foreground">
+                Referenced Context ({sources.length} sources)
+              </h4>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {sources.map((source, idx) => (
+                  <details key={idx} className="group">
+                    <summary className="cursor-pointer list-none">
+                      <div className="flex items-start gap-2 p-2 bg-muted/50 rounded hover:bg-muted transition-colors text-sm">
+                        <span className="font-medium text-primary">[{idx + 1}]</span>
+                        <div className="flex-1">
+                          <p className="font-medium text-foreground">
+                            {source.filename} (Chunk {source.chunkIndex})
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Similarity: {(source.similarity * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                      </div>
+                    </summary>
+                    <div className="mt-1 ml-6 p-2 bg-background border border-border rounded text-xs text-muted-foreground">
+                      {source.text}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </Card>
     </div>
