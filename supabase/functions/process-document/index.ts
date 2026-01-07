@@ -9,6 +9,7 @@ interface ProcessDocumentRequest {
   documentId: string
   filename: string
   content: string
+  pageCount?: number
 }
 
 Deno.serve(async (req) => {
@@ -16,59 +17,54 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders })
   }
 
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  )
+
+  let documentId = ''
+  
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
-
-    const { documentId, filename, content }: ProcessDocumentRequest = await req.json()
+    const { documentId: docId, filename, content, pageCount }: ProcessDocumentRequest = await req.json()
+    documentId = docId
     
-    console.log(`Processing document: ${filename} (ID: ${documentId})`)
+    console.log(`Processing document: ${filename} (ID: ${documentId}), content length: ${content.length}, pages: ${pageCount || 'unknown'}`)
 
-    // Limit content size to stay within Edge function compute limits
-    const MAX_TEXT_LENGTH = 40000
-    const trimmedContent = content.length > MAX_TEXT_LENGTH 
-      ? content.slice(0, MAX_TEXT_LENGTH) 
-      : content
+    // Update status to in_progress
+    await supabase
+      .from('documents')
+      .update({ 
+        ingestion_status: 'in_progress',
+        page_count: pageCount || null
+      })
+      .eq('id', documentId)
 
-    // Chunk the text content (simple chunking with overlap)
-    const chunks = chunkText(trimmedContent, 1000, 200)
-    console.log(`Created ${chunks.length} chunks from ${trimmedContent.length} characters (original length: ${content.length})`)
+    // Process ALL content - no truncation
+    // Chunk with 800 chars and 200 overlap for better retrieval
+    const chunks = chunkText(content, 800, 200)
+    console.log(`Created ${chunks.length} chunks from ${content.length} characters`)
 
-    // Process chunks in batches to avoid memory and compute limits
-    const MAX_CHUNKS = 80
-    const totalChunks = Math.min(chunks.length, MAX_CHUNKS)
-    const chunksToProcess = chunks.slice(0, totalChunks)
-
-    if (totalChunks < chunks.length) {
-      console.log(`Limiting chunks from ${chunks.length} to ${totalChunks} to stay within compute limits`)
-    }
-
+    // Process ALL chunks in batches
     const BATCH_SIZE = 10
     let totalProcessed = 0
     
-    for (let batchStart = 0; batchStart < totalChunks; batchStart += BATCH_SIZE) {
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, totalChunks)
-      const batchChunks = chunksToProcess.slice(batchStart, batchEnd)
+    for (let batchStart = 0; batchStart < chunks.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, chunks.length)
+      const batchChunks = chunks.slice(batchStart, batchEnd)
       
-      console.log(`Processing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(totalChunks / BATCH_SIZE)}`)
+      console.log(`Processing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(chunks.length / BATCH_SIZE)}`)
       
-      // Generate embeddings for this batch in a single API call
+      // Generate embeddings for this batch
       const embeddings = await generateEmbeddings(batchChunks)
       const chunksWithEmbeddings = []
       
       for (let i = 0; i < batchChunks.length; i++) {
         const globalIndex = batchStart + i
-        const chunk = batchChunks[i]
-        const embedding = embeddings[i]
-        console.log(`Processing chunk ${globalIndex + 1}/${totalChunks}`)
-        
         chunksWithEmbeddings.push({
           document_id: documentId,
           chunk_index: globalIndex,
-          text: chunk,
-          embedding: embedding,
+          text: batchChunks[i],
+          embedding: embeddings[i],
         })
       }
 
@@ -83,15 +79,32 @@ Deno.serve(async (req) => {
       }
       
       totalProcessed += chunksWithEmbeddings.length
-      console.log(`Batch complete. Total processed: ${totalProcessed}/${totalChunks}`)
+      
+      // Update progress in documents table
+      await supabase
+        .from('documents')
+        .update({ ingested_chunks: totalProcessed })
+        .eq('id', documentId)
+        
+      console.log(`Batch complete. Total processed: ${totalProcessed}/${chunks.length}`)
     }
 
-    console.log(`Successfully indexed ${totalProcessed} chunks`)
+    // Mark as complete
+    await supabase
+      .from('documents')
+      .update({ 
+        ingestion_status: 'complete',
+        ingested_chunks: totalProcessed
+      })
+      .eq('id', documentId)
+
+    console.log(`Successfully indexed ${totalProcessed} chunks for document ${documentId}`)
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        chunksCount: totalProcessed 
+        chunksCount: totalProcessed,
+        totalChunks: chunks.length
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -101,6 +114,18 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error('Error processing document:', error)
     const message = error instanceof Error ? error.message : 'Unknown error occurred'
+    
+    // Mark as failed
+    if (documentId) {
+      await supabase
+        .from('documents')
+        .update({ 
+          ingestion_status: 'failed',
+          ingestion_error: message
+        })
+        .eq('id', documentId)
+    }
+    
     return new Response(
       JSON.stringify({ error: message }),
       { 
@@ -126,7 +151,6 @@ function chunkText(text: string, chunkSize: number, overlap: number): string[] {
 }
 
 async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  // Use Lovable AI's free models via LOVABLE_API_KEY
   const response = await fetch('https://api.lovable.app/v1/embeddings', {
     method: 'POST',
     headers: {
