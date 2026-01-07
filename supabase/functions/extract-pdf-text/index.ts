@@ -18,18 +18,17 @@ Deno.serve(async (req) => {
 
     console.log(`Extracting text from PDF: ${file.name}`)
 
-    // For MVP, we'll use a simple extraction approach
-    // In production, you'd use a proper PDF parsing library
     const arrayBuffer = await file.arrayBuffer()
-    const text = await extractTextFromPDF(arrayBuffer)
+    const { text, pageCount } = await extractTextFromPDF(arrayBuffer)
 
-    console.log(`Extracted ${text.length} characters`)
+    console.log(`Extracted ${text.length} characters from approximately ${pageCount} pages`)
 
     return new Response(
       JSON.stringify({ 
         success: true,
         text,
-        filename: file.name
+        filename: file.name,
+        pageCount
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -49,17 +48,21 @@ Deno.serve(async (req) => {
   }
 })
 
-async function extractTextFromPDF(arrayBuffer: ArrayBuffer): Promise<string> {
-  // Simple text extraction - looks for text content in PDF
+async function extractTextFromPDF(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   const uint8Array = new Uint8Array(arrayBuffer)
   const decoder = new TextDecoder('utf-8', { fatal: false })
-  let text = decoder.decode(uint8Array)
+  let rawText = decoder.decode(uint8Array)
+  
+  // Estimate page count by looking for PDF page markers
+  // Common patterns: /Type /Page, /Count N (for page tree)
+  const pageMatches = rawText.match(/\/Type\s*\/Page[^s]/g)
+  const pageCount = pageMatches ? pageMatches.length : 1
   
   // Clean up PDF formatting
-  text = text
+  const text = rawText
     .replace(/[\x00-\x1F\x7F-\x9F]/g, ' ') // Remove control characters
     .replace(/\s+/g, ' ') // Normalize whitespace
     .trim()
   
-  return text
+  return { text, pageCount }
 }

@@ -1,18 +1,87 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Upload, FileText, Loader2 } from "lucide-react";
+import { Upload, FileText, Loader2, CheckCircle, XCircle, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface DocumentUploadProps {
   onIndexComplete: (documentsCount: number, chunksCount: number) => void;
 }
 
+interface Document {
+  id: string;
+  filename: string;
+  doc_type: string | null;
+  page_count: number | null;
+  ingested_chunks: number | null;
+  ingestion_status: string | null;
+  ingestion_error: string | null;
+  uploaded_at: string | null;
+}
+
 export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [documents, setDocuments] = useState<Document[]>([]);
   const { toast } = useToast();
+
+  // Fetch documents on mount and set up realtime subscription
+  useEffect(() => {
+    fetchDocuments();
+    
+    // Subscribe to document changes
+    const channel = supabase
+      .channel('documents-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'documents' },
+        () => {
+          fetchDocuments();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const fetchDocuments = async () => {
+    const { data, error } = await supabase
+      .from('documents')
+      .select('id, filename, doc_type, page_count, ingested_chunks, ingestion_status, ingestion_error, uploaded_at')
+      .order('uploaded_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching documents:', error);
+      return;
+    }
+
+    setDocuments(data || []);
+    
+    // Update parent with total chunks
+    const { count } = await supabase
+      .from('chunks')
+      .select('*', { count: 'exact', head: true });
+    
+    onIndexComplete(data?.length || 0, count || 0);
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -51,37 +120,35 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
 
         if (extractResponse.error) throw extractResponse.error;
 
-        const { text } = extractResponse.data as { text: string };
+        const { text, pageCount } = extractResponse.data as { text: string; pageCount?: number };
 
-        // Limit text size on the client before sending to the Edge function
-        const MAX_TEXT_LENGTH = 40000;
-        const truncatedText =
-          typeof text === "string" ? text.slice(0, MAX_TEXT_LENGTH) : "";
-
-        if (!truncatedText) {
+        if (!text) {
           throw new Error("No text could be extracted from this PDF.");
         }
 
-        // 2. Create document record
+        // 2. Create document record with pending status
         const { data: document, error: docError } = await supabase
           .from("documents")
           .insert({
             filename: file.name,
             doc_type: inferDocType(file.name),
+            ingestion_status: 'pending',
+            page_count: pageCount || null,
           })
           .select()
           .single();
 
         if (docError) throw docError;
 
-        // 3. Process document (chunk and embed)
+        // 3. Process document - pass full text without truncation
         const processResponse = await supabase.functions.invoke(
           "process-document",
           {
             body: {
               documentId: document.id,
               filename: file.name,
-              content: truncatedText,
+              content: text,
+              pageCount: pageCount,
             },
           }
         );
@@ -96,8 +163,8 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
         description: `Indexed ${totalChunks} chunks from ${files.length} documents.`,
       });
 
-      onIndexComplete(files.length, totalChunks);
       setFiles([]);
+      fetchDocuments();
     } catch (error: any) {
       console.error("Error building knowledge base:", error);
       toast({
@@ -105,6 +172,7 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
         description: error.message || "An unexpected error occurred.",
         variant: "destructive",
       });
+      fetchDocuments();
     } finally {
       setIsProcessing(false);
     }
@@ -119,9 +187,56 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
     return "unknown";
   };
 
+  const getStatusBadge = (doc: Document) => {
+    const status = doc.ingestion_status || 'pending';
+    
+    if (status === 'complete') {
+      return (
+        <Badge variant="default" className="bg-green-600 hover:bg-green-600">
+          <CheckCircle className="h-3 w-3 mr-1" />
+          Complete ({doc.ingested_chunks || 0} chunks)
+        </Badge>
+      );
+    }
+    
+    if (status === 'in_progress') {
+      return (
+        <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+          Processing ({doc.ingested_chunks || 0} chunks)
+        </Badge>
+      );
+    }
+    
+    if (status === 'failed') {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge variant="destructive">
+                <XCircle className="h-3 w-3 mr-1" />
+                Failed
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-xs">{doc.ingestion_error || 'Unknown error'}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+    
+    return (
+      <Badge variant="outline">
+        <Clock className="h-3 w-3 mr-1" />
+        Pending
+      </Badge>
+    );
+  };
+
   return (
     <Card className="p-6">
-      <div className="space-y-4">
+      <div className="space-y-6">
         <div>
           <h2 className="text-lg font-semibold text-foreground mb-1">
             Upload Documents
@@ -190,6 +305,39 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
             "Build Knowledge Base"
           )}
         </Button>
+
+        {/* Documents Table */}
+        {documents.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium text-foreground">
+              Indexed Documents ({documents.length})
+            </h3>
+            <div className="border rounded-lg overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Filename</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Pages</TableHead>
+                    <TableHead>Ingestion Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {documents.map((doc) => (
+                    <TableRow key={doc.id}>
+                      <TableCell className="font-medium max-w-[200px] truncate">
+                        {doc.filename}
+                      </TableCell>
+                      <TableCell>{doc.doc_type || 'unknown'}</TableCell>
+                      <TableCell>{doc.page_count || '—'}</TableCell>
+                      <TableCell>{getStatusBadge(doc)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );
