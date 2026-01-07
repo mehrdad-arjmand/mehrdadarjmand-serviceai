@@ -65,6 +65,10 @@ export type Database = {
           equipment_model: string | null
           filename: string
           id: string
+          ingested_chunks: number | null
+          ingestion_error: string | null
+          ingestion_status: string | null
+          page_count: number | null
           site: string | null
           upload_date: string | null
           uploaded_at: string | null
@@ -75,6 +79,10 @@ export type Database = {
           equipment_model?: string | null
           filename: string
           id?: string
+          ingested_chunks?: number | null
+          ingestion_error?: string | null
+          ingestion_status?: string | null
+          page_count?: number | null
           site?: string | null
           upload_date?: string | null
           uploaded_at?: string | null
@@ -85,6 +93,10 @@ export type Database = {
           equipment_model?: string | null
           filename?: string
           id?: string
+          ingested_chunks?: number | null
+          ingestion_error?: string | null
+          ingestion_status?: string | null
+          page_count?: number | null
           site?: string | null
           upload_date?: string | null
           uploaded_at?: string | null
