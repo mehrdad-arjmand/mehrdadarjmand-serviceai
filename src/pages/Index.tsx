@@ -10,21 +10,32 @@ const Index = () => {
   const [chunksCount, setChunksCount] = useState(0);
   const [hasDocuments, setHasDocuments] = useState(false);
 
+  const fetchStats = async () => {
+    const { count: docsCount } = await supabase
+      .from('documents')
+      .select('*', { count: 'exact', head: true });
+    
+    const { count: chunksCount } = await supabase
+      .from('chunks')
+      .select('*', { count: 'exact', head: true });
+
+    setHasDocuments((docsCount || 0) > 0);
+    setChunksCount(chunksCount || 0);
+  };
+
   useEffect(() => {
-    const fetchStats = async () => {
-      const { count: docsCount } = await supabase
-        .from('documents')
-        .select('*', { count: 'exact', head: true });
-      
-      const { count: chunksCount } = await supabase
-        .from('chunks')
-        .select('*', { count: 'exact', head: true });
-
-      setHasDocuments((docsCount || 0) > 0);
-      setChunksCount(chunksCount || 0);
-    };
-
     fetchStats();
+
+    // Subscribe to realtime changes
+    const docsChannel = supabase
+      .channel('docs-stats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchStats)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(docsChannel);
+    };
   }, []);
 
   return (
