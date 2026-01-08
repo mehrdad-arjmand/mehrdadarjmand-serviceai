@@ -25,16 +25,30 @@ Deno.serve(async (req) => {
       throw new Error('documentId is required')
     }
 
-    // Get chunks without embeddings for this document
-    const { data: chunks, error: fetchError } = await supabase
-      .from('chunks')
-      .select('id, text')
-      .eq('document_id', documentId)
-      .is('embedding', null)
-      .order('chunk_index')
-      .limit(BATCH_SIZE)
+    // Retry logic for transient connection errors
+    const fetchWithRetry = async (retries = 3, delay = 1000) => {
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          const { data: chunks, error: fetchError } = await supabase
+            .from('chunks')
+            .select('id, text')
+            .eq('document_id', documentId)
+            .is('embedding', null)
+            .order('chunk_index')
+            .limit(BATCH_SIZE)
 
-    if (fetchError) throw fetchError
+          if (fetchError) throw fetchError
+          return chunks
+        } catch (err) {
+          if (attempt === retries) throw err
+          console.log(`Attempt ${attempt} failed, retrying in ${delay}ms...`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          delay *= 2 // exponential backoff
+        }
+      }
+    }
+
+    const chunks = await fetchWithRetry()
 
     if (!chunks || chunks.length === 0) {
       // All chunks have embeddings, mark as complete
