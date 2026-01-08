@@ -103,19 +103,17 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
     }
 
     setIsProcessing(true);
-    let totalChunks = 0;
+    const documentIds: string[] = [];
 
     try {
+      // PHASE 1: Extract text and create chunks for all files
       for (const file of files) {
-        // 1. Extract text from PDF
         const formData = new FormData();
         formData.append("file", file);
 
         const extractResponse = await supabase.functions.invoke(
           "extract-pdf-text",
-          {
-            body: formData,
-          }
+          { body: formData }
         );
 
         if (extractResponse.error) throw extractResponse.error;
@@ -126,7 +124,7 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
           throw new Error("No text could be extracted from this PDF.");
         }
 
-        // 2. Create document record with pending status
+        // Create document record
         const { data: document, error: docError } = await supabase
           .from("documents")
           .insert({
@@ -140,7 +138,7 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
 
         if (docError) throw docError;
 
-        // 3. Process document - pass full text without truncation
+        // Process document - saves chunks without embeddings
         const processResponse = await supabase.functions.invoke(
           "process-document",
           {
@@ -154,17 +152,50 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
         );
 
         if (processResponse.error) throw processResponse.error;
-
-        totalChunks += processResponse.data.chunksCount;
+        documentIds.push(document.id);
       }
 
       toast({
-        title: "Knowledge base built successfully",
-        description: `Indexed ${totalChunks} chunks from ${files.length} documents.`,
+        title: "Documents uploaded",
+        description: `Processing embeddings for ${files.length} documents...`,
       });
 
       setFiles([]);
       fetchDocuments();
+
+      // PHASE 2: Generate embeddings in background (in batches to avoid CPU timeout)
+      for (const docId of documentIds) {
+        let complete = false;
+        let attempts = 0;
+        const maxAttempts = 100; // Safety limit
+
+        while (!complete && attempts < maxAttempts) {
+          attempts++;
+          const embedResponse = await supabase.functions.invoke(
+            "generate-embeddings",
+            { body: { documentId: docId } }
+          );
+
+          if (embedResponse.error) {
+            console.error("Embedding error:", embedResponse.error);
+            break;
+          }
+
+          complete = embedResponse.data.complete;
+          
+          if (!complete) {
+            // Small delay between batches
+            await new Promise(r => setTimeout(r, 100));
+          }
+        }
+      }
+
+      fetchDocuments();
+      toast({
+        title: "Knowledge base complete",
+        description: `All documents have been fully indexed.`,
+      });
+
     } catch (error: any) {
       console.error("Error building knowledge base:", error);
       toast({
@@ -199,11 +230,11 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
       );
     }
     
-    if (status === 'in_progress') {
+    if (status === 'in_progress' || status === 'processing_embeddings') {
       return (
         <Badge variant="secondary" className="bg-blue-100 text-blue-800">
           <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-          Processing ({doc.ingested_chunks || 0} chunks)
+          {status === 'processing_embeddings' ? 'Embeddings' : 'Processing'} ({doc.ingested_chunks || 0} chunks)
         </Badge>
       );
     }
