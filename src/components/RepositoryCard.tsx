@@ -1,4 +1,4 @@
-import { Upload, FileText, Trash2, CalendarIcon } from "lucide-react";
+import { Upload, FileText, Trash2, CalendarIcon, Loader2, CheckCircle, AlertCircle, Clock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -29,6 +29,10 @@ interface Document {
   textLength: number;
   error: string | null;
   createdAt: string;
+  pageCount: number | null;
+  ingestedChunks: number;
+  ingestionStatus: string;
+  ingestionError: string | null;
 }
 
 interface RepositoryCardProps {
@@ -79,61 +83,74 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
   const [newEquipmentMake, setNewEquipmentMake] = useState("");
   const [newEquipmentModel, setNewEquipmentModel] = useState("");
 
-  // Fetch documents from database on mount
-  useEffect(() => {
-    const fetchDocuments = async () => {
-      try {
-        const { data: docs, error } = await supabase
-          .from('documents')
-          .select('*')
-          .order('uploaded_at', { ascending: false });
+  const fetchDocuments = async () => {
+    try {
+      const { data: docs, error } = await supabase
+        .from('documents')
+        .select('*')
+        .order('uploaded_at', { ascending: false });
 
-        if (error) throw error;
+      if (error) throw error;
 
-        if (docs) {
-          // Fetch chunks for each document to reconstruct full text
-          const documentsWithText = await Promise.all(
-            docs.map(async (doc) => {
-              const { data: chunks, error: chunksError } = await supabase
-                .from('chunks')
-                .select('text, chunk_index, equipment')
-                .eq('document_id', doc.id)
-                .order('chunk_index');
+      if (docs) {
+        // Fetch chunks for each document to reconstruct full text
+        const documentsWithText = await Promise.all(
+          docs.map(async (doc) => {
+            const { data: chunks, error: chunksError } = await supabase
+              .from('chunks')
+              .select('text, chunk_index, equipment')
+              .eq('document_id', doc.id)
+              .order('chunk_index');
 
-              if (chunksError) {
-                console.error('Error fetching chunks:', chunksError);
-                return null;
-              }
+            if (chunksError) {
+              console.error('Error fetching chunks:', chunksError);
+              return null;
+            }
 
-              const extractedText = chunks?.map(c => c.text).join('') || '';
-              const equipment = chunks?.[0]?.equipment || 'unknown';
+            const extractedText = chunks?.map(c => c.text).join('') || '';
+            const equipment = chunks?.[0]?.equipment || 'unknown';
 
-              return {
-                id: doc.id,
-                fileName: doc.filename,
-                fileType: doc.filename.split('.').pop() || 'unknown',
-                docType: doc.doc_type || 'unknown',
-                uploadDate: doc.upload_date || null,
-                site: doc.site || null,
-                equipmentType: equipment,
-                equipmentMake: doc.equipment_make || null,
-                equipmentModel: doc.equipment_model || null,
-                extractedText,
-                textLength: extractedText.length,
-                error: null,
-                createdAt: doc.uploaded_at || new Date().toISOString(),
-              };
-            })
-          );
+            return {
+              id: doc.id,
+              fileName: doc.filename,
+              fileType: doc.filename.split('.').pop() || 'unknown',
+              docType: doc.doc_type || 'unknown',
+              uploadDate: doc.upload_date || null,
+              site: doc.site || null,
+              equipmentType: equipment,
+              equipmentMake: doc.equipment_make || null,
+              equipmentModel: doc.equipment_model || null,
+              extractedText,
+              textLength: extractedText.length,
+              error: null,
+              createdAt: doc.uploaded_at || new Date().toISOString(),
+              pageCount: doc.page_count || null,
+              ingestedChunks: doc.ingested_chunks || 0,
+              ingestionStatus: doc.ingestion_status || 'pending',
+              ingestionError: doc.ingestion_error || null,
+            };
+          })
+        );
 
-          setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
-        }
-      } catch (error) {
-        console.error('Error fetching documents:', error);
+        setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
       }
-    };
+    } catch (error) {
+      console.error('Error fetching documents:', error);
+    }
+  };
 
+  // Fetch documents and subscribe to realtime updates
+  useEffect(() => {
     fetchDocuments();
+
+    const channel = supabase
+      .channel('repository-docs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -281,6 +298,43 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
       });
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleGenerateEmbeddings = async (docId: string, fileName: string) => {
+    toast({
+      title: "Generating embeddings",
+      description: `Starting embedding generation for "${fileName}"...`,
+    });
+
+    try {
+      let hasMore = true;
+      while (hasMore) {
+        const { data, error } = await supabase.functions.invoke('generate-embeddings', {
+          body: { documentId: docId },
+        });
+
+        if (error) throw error;
+
+        if (data.remaining === 0) {
+          hasMore = false;
+        } else {
+          // Small delay between batches
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      toast({
+        title: "Embeddings complete",
+        description: `"${fileName}" is now fully indexed.`,
+      });
+    } catch (error: any) {
+      console.error('Embedding generation error:', error);
+      toast({
+        title: "Embedding generation failed",
+        description: error.message || "Unknown error",
+        variant: "destructive",
+      });
     }
   };
 
@@ -651,6 +705,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                       <TableHead>Equipment type</TableHead>
                       <TableHead>Equipment make</TableHead>
                       <TableHead>Equipment model</TableHead>
+                      <TableHead>Ingestion</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -677,6 +732,45 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                         <TableCell className="capitalize">{doc.equipmentType}</TableCell>
                         <TableCell>{doc.equipmentMake || '—'}</TableCell>
                         <TableCell>{doc.equipmentModel || '—'}</TableCell>
+                        <TableCell>
+                          {doc.ingestionStatus === 'complete' && (
+                            <div className="flex items-center gap-1 text-green-600">
+                              <CheckCircle className="h-4 w-4" />
+                              <span className="text-xs">{doc.ingestedChunks} chunks</span>
+                            </div>
+                          )}
+                          {doc.ingestionStatus === 'failed' && (
+                            <div className="flex items-center gap-1 text-destructive" title={doc.ingestionError || 'Unknown error'}>
+                              <AlertCircle className="h-4 w-4" />
+                              <span className="text-xs">Failed</span>
+                            </div>
+                          )}
+                          {(doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') && (
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1 text-amber-600">
+                                <Clock className="h-4 w-4" />
+                                <span className="text-xs">{doc.ingestedChunks}/{doc.pageCount || '?'} pages</span>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 text-xs"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleGenerateEmbeddings(doc.id, doc.fileName);
+                                }}
+                              >
+                                Generate
+                              </Button>
+                            </div>
+                          )}
+                          {doc.ingestionStatus === 'pending' && (
+                            <div className="flex items-center gap-1 text-muted-foreground">
+                              <Clock className="h-4 w-4" />
+                              <span className="text-xs">Pending</span>
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Button
                             variant="ghost"
