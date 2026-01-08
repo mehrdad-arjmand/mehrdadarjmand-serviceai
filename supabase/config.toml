@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.extract-pdf-text]
 verify_jwt = false
+
+[functions.generate-embeddings]
+verify_jwt = false
+
+[functions.ingest]
+verify_jwt = false

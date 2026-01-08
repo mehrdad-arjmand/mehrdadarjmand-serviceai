@@ -39,83 +39,47 @@ Deno.serve(async (req) => {
       })
       .eq('id', documentId)
 
-    // Process ALL content - no truncation
-    // Chunk with 800 chars and 200 overlap for better retrieval
+    // Chunk text - 800 chars with 200 overlap
     const chunks = chunkText(content, 800, 200)
     console.log(`Created ${chunks.length} chunks from ${content.length} characters`)
 
-    // Process ALL chunks in batches
-    const BATCH_SIZE = 10
-    let totalProcessed = 0
-    
-    for (let batchStart = 0; batchStart < chunks.length; batchStart += BATCH_SIZE) {
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, chunks.length)
-      const batchChunks = chunks.slice(batchStart, batchEnd)
+    // PHASE 1: Save all chunks WITHOUT embeddings (fast, avoids CPU timeout)
+    const BATCH_SIZE = 50
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const batch = chunks.slice(i, i + BATCH_SIZE).map((text, idx) => ({
+        document_id: documentId,
+        chunk_index: i + idx,
+        text,
+        embedding: null
+      }))
       
-      console.log(`Processing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(chunks.length / BATCH_SIZE)}`)
-      
-      // Generate embeddings for this batch
-      const embeddings = await generateEmbeddings(batchChunks)
-      const chunksWithEmbeddings = []
-      
-      for (let i = 0; i < batchChunks.length; i++) {
-        const globalIndex = batchStart + i
-        chunksWithEmbeddings.push({
-          document_id: documentId,
-          chunk_index: globalIndex,
-          text: batchChunks[i],
-          embedding: embeddings[i],
-        })
-      }
-
-      // Insert this batch into database
-      const { error: insertError } = await supabase
-        .from('chunks')
-        .insert(chunksWithEmbeddings)
-
-      if (insertError) {
-        console.error(`Error inserting batch at index ${batchStart}:`, insertError)
-        throw insertError
-      }
-      
-      totalProcessed += chunksWithEmbeddings.length
-      
-      // Update progress in documents table
-      await supabase
-        .from('documents')
-        .update({ ingested_chunks: totalProcessed })
-        .eq('id', documentId)
-        
-      console.log(`Batch complete. Total processed: ${totalProcessed}/${chunks.length}`)
+      const { error } = await supabase.from('chunks').insert(batch)
+      if (error) throw error
     }
 
-    // Mark as complete
+    // Update status - chunks saved, embeddings pending
     await supabase
       .from('documents')
       .update({ 
-        ingestion_status: 'complete',
-        ingested_chunks: totalProcessed
+        ingestion_status: 'processing_embeddings',
+        ingested_chunks: chunks.length
       })
       .eq('id', documentId)
 
-    console.log(`Successfully indexed ${totalProcessed} chunks for document ${documentId}`)
+    console.log(`Saved ${chunks.length} chunks, embeddings will be generated separately`)
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        chunksCount: totalProcessed,
-        totalChunks: chunks.length
+        chunksCount: chunks.length,
+        status: 'processing_embeddings'
       }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200 
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
     console.error('Error processing document:', error)
     const message = error instanceof Error ? error.message : 'Unknown error occurred'
     
-    // Mark as failed
     if (documentId) {
       await supabase
         .from('documents')
@@ -128,10 +92,7 @@ Deno.serve(async (req) => {
     
     return new Response(
       JSON.stringify({ error: message }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500 
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     )
   }
 })
@@ -148,27 +109,4 @@ function chunkText(text: string, chunkSize: number, overlap: number): string[] {
   }
 
   return chunks
-}
-
-async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const response = await fetch('https://api.lovable.app/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`
-    },
-    body: JSON.stringify({
-      input: texts,
-      model: 'text-embedding-004'
-    })
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    console.error('Embedding API error:', error)
-    throw new Error(`Failed to generate embeddings: ${error}`)
-  }
-
-  const data = await response.json()
-  return data.data.map((item: { embedding: number[] }) => item.embedding)
 }
