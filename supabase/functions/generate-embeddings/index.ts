@@ -103,17 +103,25 @@ Deno.serve(async (req) => {
 })
 
 async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const response = await fetch('https://api.lovable.app/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`
-    },
-    body: JSON.stringify({
-      input: texts,
-      model: 'text-embedding-004'
-    })
-  })
+  const apiKey = Deno.env.get('GOOGLE_API_KEY')
+  if (!apiKey) {
+    throw new Error('GOOGLE_API_KEY is not configured')
+  }
+
+  // Use Google's batch embedding endpoint
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requests: texts.map(text => ({
+          model: 'models/text-embedding-004',
+          content: { parts: [{ text }] }
+        }))
+      })
+    }
+  )
 
   if (!response.ok) {
     const error = await response.text()
@@ -121,5 +129,5 @@ async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   }
 
   const data = await response.json()
-  return data.data.map((item: { embedding: number[] }) => item.embedding)
+  return data.embeddings.map((item: { values: number[] }) => item.values)
 }
