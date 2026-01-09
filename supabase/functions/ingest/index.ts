@@ -180,12 +180,27 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
   for (let i = 1; i <= document.numPages; i++) {
     const page = await document.getPage(i)
     const content = await page.getTextContent()
+    // Join items with proper spacing consideration
     const pageText = content.items.map((item: any) => item.str).join(' ')
     textParts.push(pageText)
   }
   
+  // Normalize text: fix broken character spacing (e.g., "T i a n j i n" -> "Tianjin")
+  let text = textParts.join('\n\n')
+  
+  // Fix single-character spacing pattern (common in PDF table extraction)
+  // Match sequences where single letters are separated by single spaces
+  text = text.replace(/\b([A-Za-z])\s+(?=[A-Za-z]\s+[A-Za-z])/g, (match, char) => {
+    return char
+  })
+  // Additional pass to clean remaining single-char spaces
+  text = text.replace(/(?<=[A-Za-z])\s(?=[A-Za-z](?:\s[A-Za-z])+\b)/g, '')
+  
+  // Final cleanup
+  text = text.replace(/\s+/g, ' ').trim()
+  
   return {
-    text: textParts.join('\n\n').replace(/\s+/g, ' ').trim(),
+    text,
     pageCount: document.numPages
   }
 }
