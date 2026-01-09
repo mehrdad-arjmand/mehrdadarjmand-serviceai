@@ -70,6 +70,7 @@ export type Database = {
           ingestion_status: string | null
           page_count: number | null
           site: string | null
+          total_chunks: number | null
           upload_date: string | null
           uploaded_at: string | null
         }
@@ -84,6 +85,7 @@ export type Database = {
           ingestion_status?: string | null
           page_count?: number | null
           site?: string | null
+          total_chunks?: number | null
           upload_date?: string | null
           uploaded_at?: string | null
         }
@@ -98,6 +100,7 @@ export type Database = {
           ingestion_status?: string | null
           page_count?: number | null
           site?: string | null
+          total_chunks?: number | null
           upload_date?: string | null
           uploaded_at?: string | null
         }
