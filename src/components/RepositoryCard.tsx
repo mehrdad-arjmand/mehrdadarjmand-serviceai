@@ -30,7 +30,8 @@ interface Document {
   error: string | null;
   createdAt: string;
   pageCount: number | null;
-  ingestedChunks: number;
+  totalChunks: number;
+  embeddedChunks: number;
   ingestionStatus: string;
   ingestionError: string | null;
 }
@@ -93,12 +94,12 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
       if (error) throw error;
 
       if (docs) {
-        // Fetch chunks for each document to reconstruct full text
+        // Fetch chunks for each document to reconstruct full text and count embeddings
         const documentsWithText = await Promise.all(
           docs.map(async (doc) => {
             const { data: chunks, error: chunksError } = await supabase
               .from('chunks')
-              .select('text, chunk_index, equipment')
+              .select('text, chunk_index, equipment, embedding')
               .eq('document_id', doc.id)
               .order('chunk_index');
 
@@ -109,6 +110,8 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
 
             const extractedText = chunks?.map(c => c.text).join('') || '';
             const equipment = chunks?.[0]?.equipment || 'unknown';
+            // Count chunks that have embeddings
+            const embeddedChunks = chunks?.filter(c => c.embedding !== null).length || 0;
 
             return {
               id: doc.id,
@@ -125,7 +128,8 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
               error: null,
               createdAt: doc.uploaded_at || new Date().toISOString(),
               pageCount: doc.page_count || null,
-              ingestedChunks: doc.ingested_chunks || 0,
+              totalChunks: doc.total_chunks || chunks?.length || 0,
+              embeddedChunks,
               ingestionStatus: doc.ingestion_status || 'pending',
               ingestionError: doc.ingestion_error || null,
             };
@@ -238,54 +242,26 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
       if (error) throw error;
 
       if (data.success) {
-        // Refresh documents list
-        const { data: docs } = await supabase
-          .from('documents')
-          .select('*')
-          .order('uploaded_at', { ascending: false });
-
-        if (docs) {
-          const documentsWithText = await Promise.all(
-            docs.map(async (doc) => {
-              const { data: chunks } = await supabase
-                .from('chunks')
-                .select('text, chunk_index, equipment')
-                .eq('document_id', doc.id)
-                .order('chunk_index');
-
-              const extractedText = chunks?.map(c => c.text).join('') || '';
-              const equipment = chunks?.[0]?.equipment || 'unknown';
-
-              return {
-                id: doc.id,
-                fileName: doc.filename,
-                fileType: doc.filename.split('.').pop() || 'unknown',
-                docType: doc.doc_type || 'unknown',
-                uploadDate: doc.upload_date || null,
-                site: doc.site || null,
-                equipmentType: equipment,
-                equipmentMake: doc.equipment_make || null,
-                equipmentModel: doc.equipment_model || null,
-                extractedText,
-                textLength: extractedText.length,
-                error: null,
-                createdAt: doc.uploaded_at || new Date().toISOString(),
-              };
-            })
-          );
-
-          setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
-        }
-
         toast({
           title: "Upload successful",
-          description: `Processed ${data.documents.length} file(s)`,
+          description: `Processed ${data.documents.length} file(s). Generating embeddings...`,
         });
 
         // Reset form
         setSelectedFiles([]);
         const fileInput = document.getElementById('file-upload') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
+
+        // Auto-trigger embedding generation for each uploaded document
+        for (const doc of data.documents) {
+          if (doc.id && !doc.error) {
+            // Run embedding generation in background (don't await)
+            runEmbeddingGeneration(doc.id, doc.fileName);
+          }
+        }
+
+        // Refresh documents list
+        await fetchDocuments();
       } else {
         throw new Error(data.error || 'Upload failed');
       }
@@ -301,12 +277,8 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
     }
   };
 
-  const handleGenerateEmbeddings = async (docId: string, fileName: string) => {
-    toast({
-      title: "Generating embeddings",
-      description: `Starting embedding generation for "${fileName}"...`,
-    });
-
+  // Background embedding generation - runs until complete
+  const runEmbeddingGeneration = async (docId: string, fileName: string) => {
     try {
       let hasMore = true;
       while (hasMore) {
@@ -316,7 +288,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
 
         if (error) throw error;
 
-        if (data.remaining === 0) {
+        if (data.complete || data.remaining === 0) {
           hasMore = false;
         } else {
           // Small delay between batches
@@ -325,17 +297,33 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
       }
 
       toast({
-        title: "Embeddings complete",
+        title: "Indexing complete",
         description: `"${fileName}" is now fully indexed.`,
       });
     } catch (error: any) {
       console.error('Embedding generation error:', error);
       toast({
-        title: "Embedding generation failed",
-        description: error.message || "Unknown error",
+        title: "Indexing failed",
+        description: `${fileName}: ${error.message || "Unknown error"}`,
         variant: "destructive",
       });
     }
+  };
+
+  // Retry embedding generation for failed documents
+  const handleRetryEmbeddings = async (docId: string, fileName: string) => {
+    toast({
+      title: "Retrying indexing",
+      description: `Resuming embedding generation for "${fileName}"...`,
+    });
+    
+    // Reset status to processing
+    await supabase
+      .from('documents')
+      .update({ ingestion_status: 'processing_embeddings', ingestion_error: null })
+      .eq('id', docId);
+    
+    runEmbeddingGeneration(docId, fileName);
   };
 
   const handleDelete = async (docId: string, fileName: string) => {
@@ -736,20 +724,14 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                           {doc.ingestionStatus === 'complete' && (
                             <div className="flex items-center gap-1 text-green-600">
                               <CheckCircle className="h-4 w-4" />
-                              <span className="text-xs">{doc.ingestedChunks} chunks</span>
+                              <span className="text-xs">Complete ({doc.embeddedChunks}/{doc.totalChunks} chunks)</span>
                             </div>
                           )}
                           {doc.ingestionStatus === 'failed' && (
-                            <div className="flex items-center gap-1 text-destructive" title={doc.ingestionError || 'Unknown error'}>
-                              <AlertCircle className="h-4 w-4" />
-                              <span className="text-xs">Failed</span>
-                            </div>
-                          )}
-                          {(doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') && (
                             <div className="flex items-center gap-2">
-                              <div className="flex items-center gap-1 text-amber-600">
-                                <Clock className="h-4 w-4" />
-                                <span className="text-xs">{doc.ingestedChunks}/{doc.pageCount || '?'} pages</span>
+                              <div className="flex items-center gap-1 text-destructive" title={doc.ingestionError || 'Unknown error'}>
+                                <AlertCircle className="h-4 w-4" />
+                                <span className="text-xs">Failed ({doc.embeddedChunks}/{doc.totalChunks})</span>
                               </div>
                               <Button
                                 variant="outline"
@@ -757,11 +739,17 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                                 className="h-6 text-xs"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleGenerateEmbeddings(doc.id, doc.fileName);
+                                  handleRetryEmbeddings(doc.id, doc.fileName);
                                 }}
                               >
-                                Generate
+                                Retry
                               </Button>
+                            </div>
+                          )}
+                          {(doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') && (
+                            <div className="flex items-center gap-1 text-amber-600">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span className="text-xs">Indexing... ({doc.embeddedChunks}/{doc.totalChunks} chunks)</span>
                             </div>
                           )}
                           {doc.ingestionStatus === 'pending' && (

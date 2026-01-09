@@ -26,29 +26,50 @@ Deno.serve(async (req) => {
     }
 
     // Retry logic for transient connection errors
-    const fetchWithRetry = async (retries = 3, delay = 1000) => {
+    const fetchWithRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> => {
       for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-          const { data: chunks, error: fetchError } = await supabase
-            .from('chunks')
-            .select('id, text')
-            .eq('document_id', documentId)
-            .is('embedding', null)
-            .order('chunk_index')
-            .limit(BATCH_SIZE)
-
-          if (fetchError) throw fetchError
-          return chunks
+          return await fn()
         } catch (err) {
           if (attempt === retries) throw err
           console.log(`Attempt ${attempt} failed, retrying in ${delay}ms...`)
           await new Promise(resolve => setTimeout(resolve, delay))
-          delay *= 2 // exponential backoff
+          delay *= 2
         }
       }
+      throw new Error('All retries exhausted')
     }
 
-    const chunks = await fetchWithRetry()
+    // Get chunks without embeddings for this document
+    const chunks = await fetchWithRetry(async () => {
+      const { data, error } = await supabase
+        .from('chunks')
+        .select('id, text')
+        .eq('document_id', documentId)
+        .is('embedding', null)
+        .order('chunk_index')
+        .limit(BATCH_SIZE)
+      if (error) throw error
+      return data
+    })
+
+    // Get document info for progress tracking
+    const { data: doc } = await supabase
+      .from('documents')
+      .select('total_chunks')
+      .eq('id', documentId)
+      .single()
+
+    const totalChunks = doc?.total_chunks || 0
+
+    // Count chunks that already have embeddings
+    const { count: embeddedCount } = await supabase
+      .from('chunks')
+      .select('id', { count: 'exact', head: true })
+      .eq('document_id', documentId)
+      .not('embedding', 'is', null)
+
+    const chunksWithEmbeddings = embeddedCount || 0
 
     if (!chunks || chunks.length === 0) {
       // All chunks have embeddings, mark as complete
@@ -58,57 +79,81 @@ Deno.serve(async (req) => {
         .eq('id', documentId)
 
       return new Response(
-        JSON.stringify({ success: true, processed: 0, complete: true }),
+        JSON.stringify({ 
+          success: true, 
+          processed: 0, 
+          embedded: totalChunks,
+          total: totalChunks,
+          complete: true 
+        }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log(`Generating embeddings for ${chunks.length} chunks of document ${documentId}`)
+    console.log(`Generating embeddings for ${chunks.length} chunks of document ${documentId} (${chunksWithEmbeddings}/${totalChunks} done)`)
 
-    // Generate embeddings using Lovable API
+    // Generate embeddings using Google API directly
     const embeddings = await generateEmbeddings(chunks.map(c => c.text))
 
     // Update each chunk with its embedding
     for (let i = 0; i < chunks.length; i++) {
-      const { error: updateError } = await supabase
-        .from('chunks')
-        .update({ embedding: embeddings[i] })
-        .eq('id', chunks[i].id)
-
-      if (updateError) {
-        console.error(`Failed to update chunk ${chunks[i].id}:`, updateError)
-      }
+      await fetchWithRetry(async () => {
+        const { error: updateError } = await supabase
+          .from('chunks')
+          .update({ embedding: embeddings[i] })
+          .eq('id', chunks[i].id)
+        if (updateError) throw updateError
+      })
     }
 
-    // Check if more chunks need processing
-    const { count } = await supabase
+    // Get updated count of chunks with embeddings
+    const { count: newEmbeddedCount } = await supabase
       .from('chunks')
       .select('id', { count: 'exact', head: true })
       .eq('document_id', documentId)
-      .is('embedding', null)
+      .not('embedding', 'is', null)
 
-    const hasMore = (count ?? 0) > 0
+    const newChunksWithEmbeddings = newEmbeddedCount || 0
+    const remaining = totalChunks - newChunksWithEmbeddings
+    const isComplete = remaining === 0
 
-    if (!hasMore) {
+    if (isComplete) {
       await supabase
         .from('documents')
         .update({ ingestion_status: 'complete' })
         .eq('id', documentId)
     }
 
-    console.log(`Processed ${chunks.length} embeddings, ${count ?? 0} remaining`)
+    console.log(`Processed ${chunks.length} embeddings, ${newChunksWithEmbeddings}/${totalChunks} complete`)
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         processed: chunks.length, 
-        remaining: count ?? 0,
-        complete: !hasMore 
+        embedded: newChunksWithEmbeddings,
+        total: totalChunks,
+        remaining,
+        complete: isComplete 
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
     console.error('Error generating embeddings:', error)
+    
+    // Try to mark document as failed
+    try {
+      const { documentId } = await req.clone().json()
+      if (documentId) {
+        await supabase
+          .from('documents')
+          .update({ 
+            ingestion_status: 'failed',
+            ingestion_error: error instanceof Error ? error.message : 'Unknown error'
+          })
+          .eq('id', documentId)
+      }
+    } catch {}
+    
     return new Response(
       JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
