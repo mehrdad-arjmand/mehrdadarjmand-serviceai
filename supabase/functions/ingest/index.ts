@@ -64,25 +64,7 @@ Deno.serve(async (req) => {
 
         console.log(`Extracted ${extractedText.length} characters, ${pageCount} pages from ${file.name}`)
         
-        // Save document to database with pending status
-        const { error: docError } = await supabase
-          .from('documents')
-          .insert({
-            id: docId,
-            filename: file.name,
-            doc_type: docType || 'unknown',
-            upload_date: uploadDate || null,
-            site: site || null,
-            equipment_make: equipmentMake || null,
-            equipment_model: equipmentModel || null,
-            page_count: pageCount,
-            ingestion_status: 'pending',
-            ingested_chunks: 0,
-          })
-
-        if (docError) throw docError
-
-        // Split text into chunks
+        // Split text into chunks FIRST to know total_chunks
         const chunkSize = 800
         const overlapSize = 200
         const chunks = []
@@ -100,9 +82,29 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Save all chunks WITHOUT embeddings first (fast)
+        const totalChunks = chunks.length
+
+        // Save document to database with total_chunks known upfront
+        const { error: docError } = await supabase
+          .from('documents')
+          .insert({
+            id: docId,
+            filename: file.name,
+            doc_type: docType || 'unknown',
+            upload_date: uploadDate || null,
+            site: site || null,
+            equipment_make: equipmentMake || null,
+            equipment_model: equipmentModel || null,
+            page_count: pageCount,
+            total_chunks: totalChunks,
+            ingested_chunks: 0,
+            ingestion_status: 'in_progress',
+          })
+
+        if (docError) throw docError
+
+        // Save all chunks WITHOUT embeddings
         if (chunks.length > 0) {
-          // Insert in batches to avoid payload limits
           const CHUNK_BATCH = 50
           for (let i = 0; i < chunks.length; i += CHUNK_BATCH) {
             const batch = chunks.slice(i, i + CHUNK_BATCH)
@@ -110,12 +112,12 @@ Deno.serve(async (req) => {
             if (chunksError) throw chunksError
           }
 
-          // Update status to show chunks are saved, embeddings pending
+          // Update ingested_chunks to reflect all chunks are stored (but not yet embedded)
           await supabase
             .from('documents')
             .update({ 
-              ingestion_status: 'processing_embeddings',
-              ingested_chunks: chunks.length 
+              ingested_chunks: totalChunks,
+              ingestion_status: 'processing_embeddings'
             })
             .eq('id', docId)
         }
@@ -124,8 +126,8 @@ Deno.serve(async (req) => {
           id: docId,
           fileName: file.name,
           pageCount,
-          chunkCount: chunks.length,
-          status: 'chunks_saved'
+          totalChunks,
+          status: 'processing_embeddings'
         })
 
       } catch (err) {
@@ -134,11 +136,12 @@ Deno.serve(async (req) => {
         
         await supabase
           .from('documents')
-          .update({ 
+          .upsert({
+            id: docId,
+            filename: file.name,
             ingestion_status: 'failed',
             ingestion_error: error 
           })
-          .eq('id', docId)
 
         documents.push({
           id: docId,
