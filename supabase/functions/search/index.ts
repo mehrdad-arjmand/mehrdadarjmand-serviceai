@@ -5,6 +5,18 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Input validation helpers
+function sanitizeQuery(query: string): string {
+  // Trim and limit length
+  const trimmed = query.trim().slice(0, 500)
+  // Escape LIKE pattern special characters to prevent wildcard injection
+  return trimmed.replace(/[%_\\]/g, (char) => `\\${char}`)
+}
+
+function isValidQuery(query: unknown): query is string {
+  return typeof query === 'string' && query.trim().length > 0 && query.length <= 1000
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -15,15 +27,38 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    const { query } = await req.json()
-
-    if (!query || query.trim().length === 0) {
-      throw new Error('Query is required')
+    // Validate content-type
+    const contentType = req.headers.get('content-type')
+    if (!contentType?.includes('application/json')) {
+      throw new Error('Content-Type must be application/json')
     }
 
-    console.log(`Searching for: "${query}"`)
+    // Parse and validate request body
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      throw new Error('Invalid JSON body')
+    }
+
+    if (typeof body !== 'object' || body === null) {
+      throw new Error('Request body must be an object')
+    }
+
+    const { query } = body as { query?: unknown }
+
+    // Validate query input
+    if (!isValidQuery(query)) {
+      throw new Error('Query must be a non-empty string with max 1000 characters')
+    }
+
+    // Sanitize query for LIKE pattern use
+    const sanitizedQuery = sanitizeQuery(query)
+
+    console.log(`Searching for: "${sanitizedQuery.slice(0, 50)}..."`)
 
     // Search for chunks containing the query (case-insensitive)
+    // Use escaped pattern to prevent wildcard injection
     const { data: chunks, error } = await supabase
       .from('chunks')
       .select(`
@@ -34,7 +69,7 @@ Deno.serve(async (req) => {
         document_id,
         documents!inner(filename)
       `)
-      .ilike('text', `%${query}%`)
+      .ilike('text', `%${sanitizedQuery}%`)
       .limit(10)
 
     if (error) {
