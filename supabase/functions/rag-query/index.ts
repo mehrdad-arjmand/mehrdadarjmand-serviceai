@@ -24,6 +24,50 @@ interface RAGQueryRequest {
   isConversationMode?: boolean
 }
 
+// Input validation constants
+const MAX_QUESTION_LENGTH = 2000
+const MAX_FILTER_LENGTH = 200
+const MAX_HISTORY_LENGTH = 20
+const MAX_HISTORY_CONTENT_LENGTH = 5000
+
+// Validation helpers
+function isValidString(value: unknown, maxLength: number): value is string {
+  return typeof value === 'string' && value.length <= maxLength
+}
+
+function isValidOptionalString(value: unknown, maxLength: number): boolean {
+  return value === undefined || value === null || isValidString(value, maxLength)
+}
+
+function isValidDate(value: unknown): boolean {
+  if (value === undefined || value === null) return true
+  if (typeof value !== 'string') return false
+  // Basic ISO date format check (YYYY-MM-DD)
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function isValidHistory(history: unknown): history is ConversationMessage[] {
+  if (!Array.isArray(history)) return false
+  if (history.length > MAX_HISTORY_LENGTH) return false
+  return history.every(item => 
+    typeof item === 'object' && 
+    item !== null &&
+    (item.role === 'user' || item.role === 'assistant') &&
+    typeof item.content === 'string' &&
+    item.content.length <= MAX_HISTORY_CONTENT_LENGTH
+  )
+}
+
+function sanitizeString(value: string | undefined | null): string | undefined {
+  if (value === undefined || value === null) return undefined
+  return value.trim().slice(0, MAX_FILTER_LENGTH)
+}
+
+// Sanitize query for LIKE patterns to prevent wildcard injection
+function sanitizeLikePattern(query: string): string {
+  return query.replace(/[%_\\]/g, (char) => `\\${char}`)
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -35,6 +79,74 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
+    // Validate content-type
+    const contentType = req.headers.get('content-type')
+    if (!contentType?.includes('application/json')) {
+      throw new Error('Content-Type must be application/json')
+    }
+
+    // Parse request body with error handling
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      throw new Error('Invalid JSON body')
+    }
+
+    if (typeof body !== 'object' || body === null) {
+      throw new Error('Request body must be an object')
+    }
+
+    const rawRequest = body as Record<string, unknown>
+
+    // Validate question (required)
+    if (!isValidString(rawRequest.question, MAX_QUESTION_LENGTH)) {
+      throw new Error(`Question must be a string with max ${MAX_QUESTION_LENGTH} characters`)
+    }
+
+    // Validate optional filters
+    if (!isValidOptionalString(rawRequest.documentType, MAX_FILTER_LENGTH)) {
+      throw new Error(`documentType must be a string with max ${MAX_FILTER_LENGTH} characters`)
+    }
+    if (!isValidDate(rawRequest.uploadDate)) {
+      throw new Error('uploadDate must be a valid date in YYYY-MM-DD format')
+    }
+    if (!isValidOptionalString(rawRequest.filterSite, MAX_FILTER_LENGTH)) {
+      throw new Error(`filterSite must be a string with max ${MAX_FILTER_LENGTH} characters`)
+    }
+    if (!isValidOptionalString(rawRequest.equipmentType, MAX_FILTER_LENGTH)) {
+      throw new Error(`equipmentType must be a string with max ${MAX_FILTER_LENGTH} characters`)
+    }
+    if (!isValidOptionalString(rawRequest.equipmentMake, MAX_FILTER_LENGTH)) {
+      throw new Error(`equipmentMake must be a string with max ${MAX_FILTER_LENGTH} characters`)
+    }
+    if (!isValidOptionalString(rawRequest.equipmentModel, MAX_FILTER_LENGTH)) {
+      throw new Error(`equipmentModel must be a string with max ${MAX_FILTER_LENGTH} characters`)
+    }
+
+    // Validate history if provided
+    if (rawRequest.history !== undefined && !isValidHistory(rawRequest.history)) {
+      throw new Error(`history must be an array of max ${MAX_HISTORY_LENGTH} messages with valid role and content`)
+    }
+
+    // Validate isConversationMode
+    if (rawRequest.isConversationMode !== undefined && typeof rawRequest.isConversationMode !== 'boolean') {
+      throw new Error('isConversationMode must be a boolean')
+    }
+
+    // Build validated request
+    const request: RAGQueryRequest = {
+      question: (rawRequest.question as string).trim().slice(0, MAX_QUESTION_LENGTH),
+      documentType: sanitizeString(rawRequest.documentType as string | undefined),
+      uploadDate: rawRequest.uploadDate as string | undefined,
+      filterSite: sanitizeString(rawRequest.filterSite as string | undefined),
+      equipmentType: sanitizeString(rawRequest.equipmentType as string | undefined),
+      equipmentMake: sanitizeString(rawRequest.equipmentMake as string | undefined),
+      equipmentModel: sanitizeString(rawRequest.equipmentModel as string | undefined),
+      history: rawRequest.history as ConversationMessage[] | undefined,
+      isConversationMode: rawRequest.isConversationMode as boolean | undefined
+    }
+
     const { 
       question, 
       documentType,
@@ -45,10 +157,10 @@ Deno.serve(async (req) => {
       equipmentModel,
       history,
       isConversationMode
-    }: RAGQueryRequest = await req.json()
+    } = request
     
     console.log('RAG Query:', { 
-      question, 
+      question: question.slice(0, 100), 
       filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel },
       isConversationMode,
       historyLength: history?.length || 0
@@ -328,15 +440,17 @@ async function enrichWithKeywordFallback(
       return initialChunks
     }
 
-    // Use multiple keywords
+    // Use multiple keywords - sanitize each for LIKE patterns
     const sortedTokens = [...tokens].sort((a, b) => b.length - a.length).slice(0, 4)
-    console.log('Keyword fallback search using:', sortedTokens)
+    const sanitizedTokens = sortedTokens.map(sanitizeLikePattern)
+    console.log('Keyword fallback search using:', sanitizedTokens)
 
     // Query chunks with document join to get filename
+    // Build the OR filter with sanitized tokens
     let query = supabase
       .from('chunks')
       .select('id, document_id, chunk_index, text, site, equipment, fault_code, documents!inner(filename)')
-      .or(sortedTokens.map(kw => `text.ilike.%${kw}%`).join(','))
+      .or(sanitizedTokens.map(kw => `text.ilike.%${kw}%`).join(','))
       .limit(50)
 
     const { data, error } = await query

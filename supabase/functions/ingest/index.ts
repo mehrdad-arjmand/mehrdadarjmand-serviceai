@@ -6,6 +6,41 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Input validation constants
+const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
+const MAX_FILES = 10
+const MAX_METADATA_LENGTH = 500
+const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt']
+
+// Validation helpers
+function isValidMetadata(value: FormDataEntryValue | null, maxLength: number): boolean {
+  if (value === null) return true
+  if (typeof value !== 'string') return false
+  return value.length <= maxLength
+}
+
+function sanitizeMetadata(value: FormDataEntryValue | null): string | null {
+  if (value === null) return null
+  if (typeof value !== 'string') return null
+  return value.trim().slice(0, MAX_METADATA_LENGTH)
+}
+
+function isValidDate(value: FormDataEntryValue | null): boolean {
+  if (value === null) return true
+  if (typeof value !== 'string') return true // Will be validated as string
+  // Basic ISO date format check (YYYY-MM-DD)
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) || value === ''
+}
+
+function getFileExtension(fileName: string): string {
+  return fileName.toLowerCase().split('.').pop() || 'unknown'
+}
+
+function isAllowedFileType(fileName: string): boolean {
+  const ext = getFileExtension(fileName)
+  return ALLOWED_EXTENSIONS.includes(ext)
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -16,18 +51,75 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    const formData = await req.formData()
-    const files = formData.getAll('files') as File[]
-    const docType = formData.get('docType') as string
-    const uploadDate = formData.get('uploadDate') as string
-    const site = formData.get('site') as string
-    const equipmentType = formData.get('equipmentType') as string
-    const equipmentMake = formData.get('equipmentMake') as string
-    const equipmentModel = formData.get('equipmentModel') as string
+    // Validate content-type
+    const contentType = req.headers.get('content-type')
+    if (!contentType?.includes('multipart/form-data')) {
+      throw new Error('Content-Type must be multipart/form-data')
+    }
 
+    let formData: FormData
+    try {
+      formData = await req.formData()
+    } catch {
+      throw new Error('Invalid form data')
+    }
+
+    const files = formData.getAll('files') as File[]
+    const docType = formData.get('docType')
+    const uploadDate = formData.get('uploadDate')
+    const site = formData.get('site')
+    const equipmentType = formData.get('equipmentType')
+    const equipmentMake = formData.get('equipmentMake')
+    const equipmentModel = formData.get('equipmentModel')
+
+    // Validate file count
     if (!files || files.length === 0) {
       throw new Error('No files provided')
     }
+    if (files.length > MAX_FILES) {
+      throw new Error(`Maximum ${MAX_FILES} files allowed per upload`)
+    }
+
+    // Validate each file
+    for (const file of files) {
+      if (!(file instanceof File)) {
+        throw new Error('Invalid file format')
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        throw new Error(`File "${file.name}" exceeds maximum size of ${MAX_FILE_SIZE / 1024 / 1024}MB`)
+      }
+      if (!isAllowedFileType(file.name)) {
+        throw new Error(`File "${file.name}" has unsupported type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`)
+      }
+    }
+
+    // Validate metadata
+    if (!isValidMetadata(docType, MAX_METADATA_LENGTH)) {
+      throw new Error(`docType exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
+    }
+    if (!isValidDate(uploadDate)) {
+      throw new Error('uploadDate must be in YYYY-MM-DD format')
+    }
+    if (!isValidMetadata(site, MAX_METADATA_LENGTH)) {
+      throw new Error(`site exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
+    }
+    if (!isValidMetadata(equipmentType, MAX_METADATA_LENGTH)) {
+      throw new Error(`equipmentType exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
+    }
+    if (!isValidMetadata(equipmentMake, MAX_METADATA_LENGTH)) {
+      throw new Error(`equipmentMake exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
+    }
+    if (!isValidMetadata(equipmentModel, MAX_METADATA_LENGTH)) {
+      throw new Error(`equipmentModel exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
+    }
+
+    // Sanitize metadata
+    const sanitizedDocType = sanitizeMetadata(docType) || 'unknown'
+    const sanitizedUploadDate = sanitizeMetadata(uploadDate)
+    const sanitizedSite = sanitizeMetadata(site)
+    const sanitizedEquipmentType = sanitizeMetadata(equipmentType)
+    const sanitizedEquipmentMake = sanitizeMetadata(equipmentMake)
+    const sanitizedEquipmentModel = sanitizeMetadata(equipmentModel)
 
     console.log(`Processing ${files.length} files`)
 
@@ -35,7 +127,7 @@ Deno.serve(async (req) => {
 
     for (const file of files) {
       const docId = crypto.randomUUID()
-      const fileType = getFileType(file.name)
+      const fileType = getFileExtension(file.name)
       
       let extractedText = ''
       let pageCount = 0
@@ -77,7 +169,7 @@ Deno.serve(async (req) => {
               document_id: docId,
               chunk_index: chunkIndex++,
               text: chunkText,
-              equipment: equipmentType || null,
+              equipment: sanitizedEquipmentType || null,
             })
           }
         }
@@ -89,12 +181,12 @@ Deno.serve(async (req) => {
           .from('documents')
           .insert({
             id: docId,
-            filename: file.name,
-            doc_type: docType || 'unknown',
-            upload_date: uploadDate || null,
-            site: site || null,
-            equipment_make: equipmentMake || null,
-            equipment_model: equipmentModel || null,
+            filename: file.name.slice(0, 500), // Limit filename length
+            doc_type: sanitizedDocType,
+            upload_date: sanitizedUploadDate || null,
+            site: sanitizedSite || null,
+            equipment_make: sanitizedEquipmentMake || null,
+            equipment_model: sanitizedEquipmentModel || null,
             page_count: pageCount,
             total_chunks: totalChunks,
             ingested_chunks: 0,
@@ -138,9 +230,9 @@ Deno.serve(async (req) => {
           .from('documents')
           .upsert({
             id: docId,
-            filename: file.name,
+            filename: file.name.slice(0, 500),
             ingestion_status: 'failed',
-            ingestion_error: error 
+            ingestion_error: error.slice(0, 1000) // Limit error message length
           })
 
         documents.push({
@@ -163,10 +255,6 @@ Deno.serve(async (req) => {
     )
   }
 })
-
-function getFileType(fileName: string): string {
-  return fileName.toLowerCase().split('.').pop() || 'unknown'
-}
 
 async function extractTextFromTxt(arrayBuffer: ArrayBuffer): Promise<string> {
   return new TextDecoder('utf-8').decode(arrayBuffer)
