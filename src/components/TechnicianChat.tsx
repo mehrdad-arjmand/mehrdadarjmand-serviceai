@@ -66,12 +66,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   // Dictation mode state (separate from conversation)
   const [isDictating, setIsDictating] = useState(false);
 
+  // Silence detection threshold in milliseconds
+  // Adjust this value to control how long to wait after speech stops before sending
+  const SILENCE_THRESHOLD_MS = 1200;
+
   // Refs
   const recognitionRef = useRef<any>(null);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const utteranceQueueRef = useRef<number>(0);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const conversationActiveRef = useRef(false);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentTranscriptRef = useRef<string>("");
 
   // Filter states
   const [filterDocType, setFilterDocType] = useState<string>("");
@@ -95,7 +101,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
   }, [chatHistory]);
 
-  // Initialize voice
+  // Initialize voice and cleanup on unmount
   useEffect(() => {
     const initVoice = () => {
       selectedVoiceRef.current = selectBestVoice();
@@ -105,6 +111,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       window.speechSynthesis.onvoiceschanged = initVoice;
     }
     return () => {
+      // Cleanup silence timer
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
       stopListening();
       stopSpeaking();
     };
@@ -145,6 +156,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
   // Stop listening
   const stopListening = useCallback(() => {
+    // Clear any pending silence timer
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -154,6 +170,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       recognitionRef.current = null;
     }
     setIsDictating(false);
+    currentTranscriptRef.current = '';
   }, []);
 
   // Stop speaking
@@ -224,9 +241,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     speakNext();
   }, [toast]);
 
-  // Start listening for conversation mode - continuous loop
+  // Clear any pending silence timer
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  // Start listening for conversation mode - with silence detection
   const startConversationListening = useCallback(() => {
     if (!conversationActiveRef.current) return;
+    
+    // Clear any existing timer
+    clearSilenceTimer();
     
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({
@@ -241,39 +269,61 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
 
-    recognition.continuous = false; // Single utterance at a time
+    // Use continuous mode to avoid cutting off mid-sentence
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    let finalTranscript = '';
-    let hasResult = false;
+    // Track transcript accumulation
+    currentTranscriptRef.current = '';
+    let lastResultTime = Date.now();
 
     recognition.onstart = () => {
       setConversationState("listening");
       setQuestion("");
-      finalTranscript = '';
-      hasResult = false;
+      currentTranscriptRef.current = '';
     };
 
     recognition.onresult = (event: any) => {
-      let interimTranscript = '';
+      // Reset silence timer on every result (speech detected)
+      clearSilenceTimer();
+      lastResultTime = Date.now();
       
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript + ' ';
-          hasResult = true;
-        } else {
-          interimTranscript += transcript;
-        }
+      let fullTranscript = '';
+      
+      // Accumulate all results
+      for (let i = 0; i < event.results.length; i++) {
+        fullTranscript += event.results[i][0].transcript;
       }
       
-      // Show live transcription
-      setQuestion(finalTranscript + interimTranscript);
+      currentTranscriptRef.current = fullTranscript;
+      setQuestion(fullTranscript);
+      
+      // Start silence detection timer
+      // Only finalize after SILENCE_THRESHOLD_MS of no new speech
+      silenceTimerRef.current = setTimeout(() => {
+        const transcript = currentTranscriptRef.current.trim();
+        
+        if (transcript && conversationActiveRef.current && recognitionRef.current) {
+          // Stop recognition and process
+          try {
+            recognitionRef.current.stop();
+          } catch (e) {
+            // Ignore stop errors
+          }
+          recognitionRef.current = null;
+          
+          // Process the complete utterance
+          setConversationState("processing");
+          setQuestion("");
+          processConversationMessage(transcript);
+        }
+      }, SILENCE_THRESHOLD_MS);
     };
 
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
+      clearSilenceTimer();
       
       if (event.error === 'not-allowed') {
         toast({
@@ -285,7 +335,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         setIsConversationMode(false);
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
-        // No speech detected, restart listening
+        // No speech detected for a while, restart listening
+        recognitionRef.current = null;
         setTimeout(() => {
           if (conversationActiveRef.current) {
             startConversationListening();
@@ -293,28 +344,26 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         }, 300);
       } else if (event.error !== 'aborted' && conversationActiveRef.current) {
         // Other error, try to restart
+        recognitionRef.current = null;
         setTimeout(() => {
           if (conversationActiveRef.current) {
             startConversationListening();
           }
         }, 500);
+      } else {
+        recognitionRef.current = null;
       }
-      
-      recognitionRef.current = null;
     };
 
     recognition.onend = () => {
+      // Only restart if we didn't intentionally stop (via silence timer)
+      // and conversation is still active
+      const hadTranscript = currentTranscriptRef.current.trim().length > 0;
       recognitionRef.current = null;
       
-      const trimmedTranscript = finalTranscript.trim();
-      
-      if (hasResult && trimmedTranscript && conversationActiveRef.current) {
-        // Got a transcript - process it
-        setConversationState("processing");
-        setQuestion("");
-        processConversationMessage(trimmedTranscript);
-      } else if (conversationActiveRef.current) {
-        // No transcript, restart listening
+      // If there's a pending transcript that wasn't sent yet (edge case), 
+      // and we're still in conversation mode, restart listening
+      if (conversationActiveRef.current && conversationState === "listening" && !hadTranscript) {
         setTimeout(() => {
           if (conversationActiveRef.current) {
             startConversationListening();
@@ -324,7 +373,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     };
 
     recognition.start();
-  }, [toast]);
+  }, [toast, clearSilenceTimer, conversationState]);
 
   // Process a conversation message
   const processConversationMessage = useCallback(async (text: string) => {
