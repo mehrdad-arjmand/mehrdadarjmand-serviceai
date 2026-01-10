@@ -7,6 +7,14 @@ const corsHeaders = {
 
 // Process embeddings in small batches to avoid CPU timeout
 const BATCH_SIZE = 15
+const MAX_CHUNK_TEXT_LENGTH = 10000 // Maximum text length per chunk for embedding
+
+// UUID validation
+function isValidUUID(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  return uuidRegex.test(value)
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -19,10 +27,29 @@ Deno.serve(async (req) => {
   )
 
   try {
-    const { documentId } = await req.json()
+    // Validate content-type
+    const contentType = req.headers.get('content-type')
+    if (!contentType?.includes('application/json')) {
+      throw new Error('Content-Type must be application/json')
+    }
 
-    if (!documentId) {
-      throw new Error('documentId is required')
+    // Parse and validate request body
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      throw new Error('Invalid JSON body')
+    }
+
+    if (typeof body !== 'object' || body === null) {
+      throw new Error('Request body must be an object')
+    }
+
+    const { documentId } = body as { documentId?: unknown }
+
+    // Validate documentId
+    if (!isValidUUID(documentId)) {
+      throw new Error('documentId must be a valid UUID')
     }
 
     // Retry logic for transient connection errors
@@ -92,8 +119,18 @@ Deno.serve(async (req) => {
 
     console.log(`Generating embeddings for ${chunks.length} chunks of document ${documentId} (${chunksWithEmbeddings}/${totalChunks} done)`)
 
+    // Validate and truncate chunk text before sending to API
+    const textsToEmbed = chunks.map(c => {
+      const text = c.text
+      if (typeof text !== 'string' || text.trim().length === 0) {
+        return 'empty chunk' // Fallback for invalid text
+      }
+      // Truncate if too long
+      return text.slice(0, MAX_CHUNK_TEXT_LENGTH)
+    })
+
     // Generate embeddings using Google API directly
-    const embeddings = await generateEmbeddings(chunks.map(c => c.text))
+    const embeddings = await generateEmbeddings(textsToEmbed)
 
     // Update each chunk with its embedding
     for (let i = 0; i < chunks.length; i++) {
@@ -142,13 +179,14 @@ Deno.serve(async (req) => {
     
     // Try to mark document as failed
     try {
-      const { documentId } = await req.clone().json()
-      if (documentId) {
+      const bodyClone = await req.clone().json()
+      const documentId = bodyClone?.documentId
+      if (isValidUUID(documentId)) {
         await supabase
           .from('documents')
           .update({ 
             ingestion_status: 'failed',
-            ingestion_error: error instanceof Error ? error.message : 'Unknown error'
+            ingestion_error: error instanceof Error ? error.message.slice(0, 1000) : 'Unknown error'
           })
           .eq('id', documentId)
       }
