@@ -3,11 +3,12 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, Plus, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
+import { useChatHistory, ChatMessage } from "@/hooks/useChatHistory";
 import {
   Select,
   SelectContent,
@@ -30,14 +31,6 @@ interface TechnicianChatProps {
   chunksCount: number;
 }
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  inputMode?: "text" | "dictation" | "voice";
-  timestamp: Date;
-}
-
 interface Source {
   filename: string;
   chunkIndex: number;
@@ -47,23 +40,38 @@ interface Source {
 
 export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProps) => {
   const [question, setQuestion] = useState("");
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const { toast } = useToast();
 
-  // Unified state for all modes
-  const [isListening, setIsListening] = useState(false);
+  // Use persistent chat history hook
+  const {
+    messages: chatHistory,
+    addMessage,
+    startNewConversation,
+    clearCurrentConversation,
+    ensureActiveConversation,
+  } = useChatHistory();
+
+  // Ensure we have an active conversation on mount
+  useEffect(() => {
+    ensureActiveConversation();
+  }, [ensureActiveConversation]);
+
+  // Conversation mode state
   const [isConversationMode, setIsConversationMode] = useState(false);
   const [conversationState, setConversationState] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
+
+  // Dictation mode state (separate from conversation)
+  const [isDictating, setIsDictating] = useState(false);
 
   // Refs
   const recognitionRef = useRef<any>(null);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const utteranceQueueRef = useRef<number>(0);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const shouldAutoListenRef = useRef(false);
+  const conversationActiveRef = useRef(false);
 
   // Filter states
   const [filterDocType, setFilterDocType] = useState<string>("");
@@ -138,10 +146,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   // Stop listening
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        // Ignore errors from stopping
+      }
       recognitionRef.current = null;
     }
-    setIsListening(false);
+    setIsDictating(false);
   }, []);
 
   // Stop speaking
@@ -212,11 +224,207 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     speakNext();
   }, [toast]);
 
-  // Send message to API
+  // Start listening for conversation mode - continuous loop
+  const startConversationListening = useCallback(() => {
+    if (!conversationActiveRef.current) return;
+    
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast({
+        title: "Speech recognition not supported",
+        description: "Your browser doesn't support speech recognition.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+
+    recognition.continuous = false; // Single utterance at a time
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    let finalTranscript = '';
+    let hasResult = false;
+
+    recognition.onstart = () => {
+      setConversationState("listening");
+      setQuestion("");
+      finalTranscript = '';
+      hasResult = false;
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+          hasResult = true;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      
+      // Show live transcription
+      setQuestion(finalTranscript + interimTranscript);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      
+      if (event.error === 'not-allowed') {
+        toast({
+          title: "Microphone permission denied",
+          description: "Please enable mic access in your browser.",
+          variant: "destructive",
+        });
+        conversationActiveRef.current = false;
+        setIsConversationMode(false);
+        setConversationState("idle");
+      } else if (event.error === 'no-speech' && conversationActiveRef.current) {
+        // No speech detected, restart listening
+        setTimeout(() => {
+          if (conversationActiveRef.current) {
+            startConversationListening();
+          }
+        }, 300);
+      } else if (event.error !== 'aborted' && conversationActiveRef.current) {
+        // Other error, try to restart
+        setTimeout(() => {
+          if (conversationActiveRef.current) {
+            startConversationListening();
+          }
+        }, 500);
+      }
+      
+      recognitionRef.current = null;
+    };
+
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      
+      const trimmedTranscript = finalTranscript.trim();
+      
+      if (hasResult && trimmedTranscript && conversationActiveRef.current) {
+        // Got a transcript - process it
+        setConversationState("processing");
+        setQuestion("");
+        processConversationMessage(trimmedTranscript);
+      } else if (conversationActiveRef.current) {
+        // No transcript, restart listening
+        setTimeout(() => {
+          if (conversationActiveRef.current) {
+            startConversationListening();
+          }
+        }, 300);
+      }
+    };
+
+    recognition.start();
+  }, [toast]);
+
+  // Process a conversation message
+  const processConversationMessage = useCallback(async (text: string) => {
+    if (!hasDocuments) {
+      toast({
+        title: "No documents indexed",
+        description: "Please upload and index documents first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Add user message
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: text.trim(),
+      inputMode: "voice",
+      timestamp: new Date(),
+    };
+    
+    addMessage(userMessage);
+    setIsQuerying(true);
+    setSources([]);
+
+    // Get recent history for context
+    const recentHistory = chatHistory.slice(-8).map(msg => ({
+      role: msg.role,
+      content: msg.content,
+    }));
+
+    try {
+      const { data, error } = await supabase.functions.invoke("rag-query", {
+        body: {
+          question: text.trim(),
+          documentType: filterDocType || undefined,
+          uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
+          filterSite: filterSite || undefined,
+          equipmentType: filterEquipmentType || undefined,
+          equipmentMake: filterEquipmentMake || undefined,
+          equipmentModel: filterEquipmentModel || undefined,
+          history: recentHistory,
+          isConversationMode: true,
+        },
+      });
+
+      if (error) throw error;
+
+      // Add assistant message
+      const assistantMessage: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        content: data.answer,
+        timestamp: new Date(),
+      };
+      
+      addMessage(assistantMessage);
+      setSources(data.sources || []);
+
+      // Speak the response
+      if (data.answer && conversationActiveRef.current) {
+        setConversationState("speaking");
+        speakText(data.answer, () => {
+          // After speaking, resume listening if still in conversation mode
+          if (conversationActiveRef.current) {
+            setTimeout(() => {
+              if (conversationActiveRef.current) {
+                startConversationListening();
+              }
+            }, 300);
+          }
+        });
+      }
+
+    } catch (error: any) {
+      console.error("Error querying assistant:", error);
+      toast({
+        title: "Error querying assistant",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      });
+      
+      // Resume listening on error if still in conversation mode
+      if (conversationActiveRef.current) {
+        setConversationState("idle");
+        setTimeout(() => {
+          if (conversationActiveRef.current) {
+            startConversationListening();
+          }
+        }, 1000);
+      }
+    } finally {
+      setIsQuerying(false);
+    }
+  }, [hasDocuments, chatHistory, filterDocType, filterUploadDate, filterSite, filterEquipmentType, filterEquipmentMake, filterEquipmentModel, addMessage, speakText, startConversationListening, toast]);
+
+  // Send text message to API
   const sendMessage = useCallback(async (
     text: string,
-    inputMode: "text" | "dictation" | "voice",
-    speakResponse: boolean = false
+    inputMode: "text" | "dictation"
   ) => {
     if (!hasDocuments) {
       toast({
@@ -238,7 +446,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       timestamp: new Date(),
     };
     
-    setChatHistory(prev => [...prev, userMessage]);
+    addMessage(userMessage);
     setQuestion("");
     setIsQuerying(true);
     setSources([]);
@@ -260,7 +468,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           equipmentMake: filterEquipmentMake || undefined,
           equipmentModel: filterEquipmentModel || undefined,
           history: recentHistory,
-          isConversationMode: inputMode === "voice",
+          isConversationMode: false,
         },
       });
 
@@ -274,25 +482,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         timestamp: new Date(),
       };
       
-      setChatHistory(prev => [...prev, assistantMessage]);
+      addMessage(assistantMessage);
       setSources(data.sources || []);
-
-      // Speak if requested
-      if (speakResponse && data.answer) {
-        if (isConversationMode) {
-          setConversationState("speaking");
-        }
-        speakText(data.answer, () => {
-          // In conversation mode, resume listening after speaking
-          if (isConversationMode && shouldAutoListenRef.current) {
-            setTimeout(() => {
-              if (shouldAutoListenRef.current) {
-                startListening(true);
-              }
-            }, 300);
-          }
-        });
-      }
 
       toast({
         title: "Answer generated",
@@ -305,17 +496,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         description: error.message || "An unexpected error occurred.",
         variant: "destructive",
       });
-      
-      if (isConversationMode) {
-        setConversationState("idle");
-      }
     } finally {
       setIsQuerying(false);
     }
-  }, [hasDocuments, chatHistory, filterDocType, filterUploadDate, filterSite, filterEquipmentType, filterEquipmentMake, filterEquipmentModel, isConversationMode, speakText, toast]);
+  }, [hasDocuments, chatHistory, filterDocType, filterUploadDate, filterSite, filterEquipmentType, filterEquipmentMake, filterEquipmentModel, addMessage, toast]);
 
-  // Start listening (used for both dictation and conversation)
-  const startListening = useCallback((forConversation: boolean = false) => {
+  // Start dictation (one-shot, user reviews and sends)
+  const startDictation = useCallback(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({
         title: "Speech recognition not supported",
@@ -336,10 +523,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     let finalTranscript = '';
 
     recognition.onstart = () => {
-      setIsListening(true);
-      if (forConversation) {
-        setConversationState("listening");
-      }
+      setIsDictating(true);
     };
 
     recognition.onresult = (event: any) => {
@@ -354,7 +538,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         }
       }
       
-      // Show live transcription in textarea
       setQuestion(finalTranscript + interimTranscript);
     };
 
@@ -375,55 +558,24 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         });
       }
       
-      setIsListening(false);
-      if (forConversation) {
-        setConversationState("idle");
-      }
+      setIsDictating(false);
       recognitionRef.current = null;
     };
 
     recognition.onend = () => {
-      setIsListening(false);
+      setIsDictating(false);
       recognitionRef.current = null;
-      
-      const trimmedTranscript = finalTranscript.trim();
-      
-      if (forConversation && trimmedTranscript) {
-        // In conversation mode, auto-send
-        setConversationState("processing");
-        setQuestion("");
-        sendMessage(trimmedTranscript, "voice", true);
-      } else if (forConversation && !trimmedTranscript && shouldAutoListenRef.current) {
-        // No speech detected in conversation mode
-        toast({
-          title: "No speech detected",
-          description: "Listening again...",
-        });
-        setTimeout(() => {
-          if (shouldAutoListenRef.current) {
-            startListening(true);
-          }
-        }, 500);
-      } else if (!forConversation && !trimmedTranscript) {
-        toast({
-          title: "No speech detected",
-          description: "Please try again.",
-          variant: "destructive",
-        });
-        setQuestion("");
-      }
-      // For dictation mode with transcript, leave text in textarea for user to send
     };
 
     recognition.start();
-  }, [toast, sendMessage]);
+  }, [toast]);
 
   // Handle dictation button click
   const handleDictateToggle = () => {
-    if (isListening) {
+    if (isDictating) {
       stopListening();
     } else {
-      startListening(false);
+      startDictation();
     }
   };
 
@@ -431,18 +583,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const handleConversationToggle = () => {
     if (isConversationMode) {
       // End conversation
-      shouldAutoListenRef.current = false;
+      conversationActiveRef.current = false;
       stopListening();
       stopSpeaking();
       setIsConversationMode(false);
       setConversationState("idle");
-    } else {
-      // Start conversation - immediately begin listening
-      setIsConversationMode(true);
-      shouldAutoListenRef.current = true;
       setQuestion("");
+    } else {
+      // Start conversation
+      conversationActiveRef.current = true;
+      setIsConversationMode(true);
+      setQuestion("");
+      // Start listening immediately
       setTimeout(() => {
-        startListening(true);
+        startConversationListening();
       }, 100);
     }
   };
@@ -450,14 +604,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   // Handle send button
   const handleSend = () => {
     if (question.trim()) {
-      sendMessage(question, isListening ? "dictation" : "text", false);
+      sendMessage(question, isDictating ? "dictation" : "text");
     }
   };
 
   // Determine which buttons to show
   const hasText = question.trim().length > 0;
   const showSendButton = hasText && !isConversationMode;
-  const showConversationButton = !hasText && !isConversationMode && !isListening;
+  const showConversationButton = !hasText && !isConversationMode && !isDictating;
 
   // Get user label based on input mode
   const getUserLabel = (msg: ChatMessage) => {
@@ -470,14 +624,39 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     <div className="space-y-6">
       <Card className="p-6">
         <div className="space-y-4">
-          {/* Header */}
-          <div>
-            <h2 className="text-lg font-semibold text-foreground mb-1">
-              Technician Assistant
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Ask questions about your equipment and procedures
-            </p>
+          {/* Header with New Conversation button */}
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground mb-1">
+                Technician Assistant
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Ask questions about your equipment and procedures
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={startNewConversation}
+                className="h-8"
+                title="Start new conversation"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                New
+              </Button>
+              {chatHistory.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearCurrentConversation}
+                  className="h-8 text-muted-foreground hover:text-destructive"
+                  title="Clear current conversation"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Filters Section */}
@@ -729,8 +908,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               <div className="text-xs text-muted-foreground">
                 {!hasDocuments ? (
                   <span>Upload documents to start ({chunksCount} chunks indexed)</span>
-                ) : isListening && !isConversationMode ? (
-                  <span className="text-primary animate-pulse">Recording... Click mic to stop and review</span>
+                ) : isDictating ? (
+                  <span className="text-primary animate-pulse">Recording... Click mic to stop</span>
                 ) : isConversationMode ? (
                   <span className={cn(
                     conversationState === "listening" && "text-primary animate-pulse",
@@ -743,7 +922,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                 ) : null}
               </div>
               
-              {/* Right side - action buttons (max 2) */}
+              {/* Right side - action buttons */}
               <div className="flex items-center gap-1">
                 {/* Conversation mode active: show Stop only */}
                 {isConversationMode && (
@@ -765,13 +944,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                     <Button
                       onClick={handleDictateToggle}
                       disabled={isQuerying || !hasDocuments}
-                      variant={isListening ? "destructive" : "ghost"}
+                      variant={isDictating ? "destructive" : "ghost"}
                       size="icon"
                       className={cn(
                         "h-9 w-9 rounded-full",
-                        isListening && "animate-pulse"
+                        isDictating && "animate-pulse"
                       )}
-                      title={isListening ? "Stop recording" : "Start dictation"}
+                      title={isDictating ? "Stop recording" : "Start dictation"}
                     >
                       <Mic className="h-4 w-4" />
                     </Button>
