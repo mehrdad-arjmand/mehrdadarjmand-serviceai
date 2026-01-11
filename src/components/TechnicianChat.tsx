@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, Plus, Trash2 } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
 import { useChatHistory, ChatMessage } from "@/hooks/useChatHistory";
+import { ConversationSidebar } from "@/components/ConversationSidebar";
 import {
   Select,
   SelectContent,
@@ -48,9 +48,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   // Use persistent chat history hook
   const {
     messages: chatHistory,
+    conversations,
+    activeConversationId,
     addMessage,
     startNewConversation,
-    clearCurrentConversation,
+    deleteConversation,
+    switchConversation,
     ensureActiveConversation,
   } = useChatHistory();
 
@@ -67,7 +70,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const [isDictating, setIsDictating] = useState(false);
 
   // Silence detection threshold in milliseconds
-  // Adjust this value to control how long to wait after speech stops before sending
   const SILENCE_THRESHOLD_MS = 1200;
 
   // Refs
@@ -111,7 +113,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       window.speechSynthesis.onvoiceschanged = initVoice;
     }
     return () => {
-      // Cleanup silence timer
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = null;
@@ -156,7 +157,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
   // Stop listening
   const stopListening = useCallback(() => {
-    // Clear any pending silence timer
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
@@ -253,7 +253,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const startConversationListening = useCallback(() => {
     if (!conversationActiveRef.current) return;
     
-    // Clear any existing timer
     clearSilenceTimer();
     
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -269,14 +268,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
 
-    // Use continuous mode to avoid cutting off mid-sentence
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    // Track transcript accumulation
     currentTranscriptRef.current = '';
-    let lastResultTime = Date.now();
 
     recognition.onstart = () => {
       setConversationState("listening");
@@ -285,13 +281,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     };
 
     recognition.onresult = (event: any) => {
-      // Reset silence timer on every result (speech detected)
       clearSilenceTimer();
-      lastResultTime = Date.now();
       
       let fullTranscript = '';
       
-      // Accumulate all results
       for (let i = 0; i < event.results.length; i++) {
         fullTranscript += event.results[i][0].transcript;
       }
@@ -299,13 +292,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       currentTranscriptRef.current = fullTranscript;
       setQuestion(fullTranscript);
       
-      // Start silence detection timer
-      // Only finalize after SILENCE_THRESHOLD_MS of no new speech
       silenceTimerRef.current = setTimeout(() => {
         const transcript = currentTranscriptRef.current.trim();
         
         if (transcript && conversationActiveRef.current && recognitionRef.current) {
-          // Stop recognition and process
           try {
             recognitionRef.current.stop();
           } catch (e) {
@@ -313,7 +303,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           }
           recognitionRef.current = null;
           
-          // Process the complete utterance
           setConversationState("processing");
           setQuestion("");
           processConversationMessage(transcript);
@@ -335,7 +324,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         setIsConversationMode(false);
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
-        // No speech detected for a while, restart listening
         recognitionRef.current = null;
         setTimeout(() => {
           if (conversationActiveRef.current) {
@@ -343,7 +331,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           }
         }, 300);
       } else if (event.error !== 'aborted' && conversationActiveRef.current) {
-        // Other error, try to restart
         recognitionRef.current = null;
         setTimeout(() => {
           if (conversationActiveRef.current) {
@@ -356,13 +343,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     };
 
     recognition.onend = () => {
-      // Only restart if we didn't intentionally stop (via silence timer)
-      // and conversation is still active
       const hadTranscript = currentTranscriptRef.current.trim().length > 0;
       recognitionRef.current = null;
       
-      // If there's a pending transcript that wasn't sent yet (edge case), 
-      // and we're still in conversation mode, restart listening
       if (conversationActiveRef.current && conversationState === "listening" && !hadTranscript) {
         setTimeout(() => {
           if (conversationActiveRef.current) {
@@ -386,7 +369,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       return;
     }
 
-    // Add user message
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -399,7 +381,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     setIsQuerying(true);
     setSources([]);
 
-    // Get recent history for context
     const recentHistory = chatHistory.slice(-8).map(msg => ({
       role: msg.role,
       content: msg.content,
@@ -422,7 +403,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
       if (error) throw error;
 
-      // Add assistant message
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
@@ -433,11 +413,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       addMessage(assistantMessage);
       setSources(data.sources || []);
 
-      // Speak the response
       if (data.answer && conversationActiveRef.current) {
         setConversationState("speaking");
         speakText(data.answer, () => {
-          // After speaking, resume listening if still in conversation mode
           if (conversationActiveRef.current) {
             setTimeout(() => {
               if (conversationActiveRef.current) {
@@ -456,7 +434,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         variant: "destructive",
       });
       
-      // Resume listening on error if still in conversation mode
       if (conversationActiveRef.current) {
         setConversationState("idle");
         setTimeout(() => {
@@ -486,7 +463,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
     if (!text.trim()) return;
 
-    // Add user message to chat
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -500,7 +476,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     setIsQuerying(true);
     setSources([]);
 
-    // Get recent history for context
     const recentHistory = chatHistory.slice(-8).map(msg => ({
       role: msg.role,
       content: msg.content,
@@ -523,7 +498,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
       if (error) throw error;
 
-      // Add assistant message to chat
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
@@ -631,7 +605,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   // Handle conversation mode toggle
   const handleConversationToggle = () => {
     if (isConversationMode) {
-      // End conversation
       conversationActiveRef.current = false;
       stopListening();
       stopSpeaking();
@@ -639,11 +612,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       setConversationState("idle");
       setQuestion("");
     } else {
-      // Start conversation
       conversationActiveRef.current = true;
       setIsConversationMode(true);
       setQuestion("");
-      // Start listening immediately
       setTimeout(() => {
         startConversationListening();
       }, 100);
@@ -670,232 +641,240 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   };
 
   return (
-    <div className="space-y-6">
-      <Card className="p-6">
-        <div className="space-y-4">
-          {/* Header with New Conversation button */}
-          <div className="flex items-start justify-between">
+    <div className="flex h-[calc(100vh-12rem)] min-h-[500px] border border-border rounded-lg overflow-hidden bg-card">
+      {/* Left sidebar - Conversation list */}
+      <div className="w-64 flex-shrink-0 hidden md:block">
+        <ConversationSidebar
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onNewConversation={startNewConversation}
+          onSelectConversation={switchConversation}
+          onDeleteConversation={deleteConversation}
+        />
+      </div>
+
+      {/* Main chat panel */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <div className="p-4 border-b border-border bg-card flex-shrink-0">
+          <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-foreground mb-1">
+              <h2 className="text-lg font-semibold text-foreground">
                 Technician Assistant
               </h2>
               <p className="text-sm text-muted-foreground">
                 Ask questions about your equipment and procedures
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={startNewConversation}
-                className="h-8"
-                title="Start new conversation"
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                New
-              </Button>
-              {chatHistory.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearCurrentConversation}
-                  className="h-8 text-muted-foreground hover:text-destructive"
-                  title="Clear current conversation"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
+            {/* Mobile: New conversation button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={startNewConversation}
+              className="h-8 md:hidden"
+              title="Start new conversation"
+            >
+              New
+            </Button>
+          </div>
+        </div>
+
+        {/* Filters Section */}
+        {hasDocuments && (
+          <div className="p-4 border-b border-border bg-muted/30 flex-shrink-0">
+            <div className="flex items-center justify-between mb-3">
+              <Label className="text-sm font-medium">Optional Filters</Label>
+              <span className="text-xs text-muted-foreground">Leave empty to search all documents</span>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* Document Type */}
+              <div className="space-y-1.5">
+                <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
+                <Select value={filterDocType || "__all__"} onValueChange={(v) => setFilterDocType(v === "__all__" ? "" : v)}>
+                  <SelectTrigger id="filter-doc-type" className="h-9">
+                    <SelectValue placeholder="All types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All types</SelectItem>
+                    {docTypes.map((type) => (
+                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Upload Date */}
+              <div className="space-y-1.5">
+                <Label htmlFor="filter-upload-date" className="text-xs">Upload Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="filter-upload-date"
+                      variant="outline"
+                      className={cn(
+                        "h-9 w-full justify-between text-left font-normal",
+                        !filterUploadDate && "text-muted-foreground"
+                      )}
+                    >
+                      {filterUploadDate ? format(filterUploadDate, "PPP") : "Any date"}
+                      <CalendarIcon className="h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={filterUploadDate}
+                      onSelect={setFilterUploadDate}
+                      initialFocus
+                      className="pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Site */}
+              <div className="space-y-1.5">
+                <Label htmlFor="filter-site" className="text-xs">Site</Label>
+                <Select value={filterSite || "__all__"} onValueChange={(v) => setFilterSite(v === "__all__" ? "" : v)}>
+                  <SelectTrigger id="filter-site" className="h-9">
+                    <SelectValue placeholder="All sites" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All sites</SelectItem>
+                    {sites.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Equipment Type */}
+              <div className="space-y-1.5">
+                <Label htmlFor="filter-equipment-type" className="text-xs">Equipment Type</Label>
+                <Select value={filterEquipmentType || "__all__"} onValueChange={(v) => setFilterEquipmentType(v === "__all__" ? "" : v)}>
+                  <SelectTrigger id="filter-equipment-type" className="h-9">
+                    <SelectValue placeholder="All types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All types</SelectItem>
+                    {equipmentTypes.map((type) => (
+                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Equipment Make */}
+              <div className="space-y-1.5">
+                <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
+                <Select value={filterEquipmentMake || "__all__"} onValueChange={(v) => setFilterEquipmentMake(v === "__all__" ? "" : v)}>
+                  <SelectTrigger id="filter-equipment-make" className="h-9">
+                    <SelectValue placeholder="All makes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All makes</SelectItem>
+                    {equipmentMakes.map((make) => (
+                      <SelectItem key={make} value={make}>{make}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Equipment Model */}
+              <div className="space-y-1.5">
+                <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
+                <Select value={filterEquipmentModel || "__all__"} onValueChange={(v) => setFilterEquipmentModel(v === "__all__" ? "" : v)}>
+                  <SelectTrigger id="filter-equipment-model" className="h-9">
+                    <SelectValue placeholder="All models" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All models</SelectItem>
+                    {equipmentModels.map((model) => (
+                      <SelectItem key={model} value={model}>{model}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Filters Section */}
-          {hasDocuments && (
-            <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium">Optional Filters</Label>
-                <span className="text-xs text-muted-foreground">Leave empty to search all documents</span>
+        {/* Scrollable chat area */}
+        <div className="flex-1 overflow-hidden flex flex-col p-4">
+          {/* Chat History */}
+          <div 
+            ref={chatContainerRef}
+            className="flex-1 overflow-y-auto space-y-3 p-3 bg-muted/20 rounded-lg border border-border"
+          >
+            {chatHistory.length === 0 && !isQuerying ? (
+              <div className="flex-1 flex items-center justify-center h-full text-muted-foreground text-sm">
+                Start a conversation by typing or speaking a question
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {/* Document Type */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
-                  <Select value={filterDocType || "__all__"} onValueChange={(v) => setFilterDocType(v === "__all__" ? "" : v)}>
-                    <SelectTrigger id="filter-doc-type" className="h-9">
-                      <SelectValue placeholder="All types" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All types</SelectItem>
-                      {docTypes.map((type) => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Upload Date */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="filter-upload-date" className="text-xs">Upload Date</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        id="filter-upload-date"
-                        variant="outline"
-                        className={cn(
-                          "h-9 w-full justify-between text-left font-normal",
-                          !filterUploadDate && "text-muted-foreground"
-                        )}
-                      >
-                        {filterUploadDate ? format(filterUploadDate, "PPP") : "Any date"}
-                        <CalendarIcon className="h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={filterUploadDate}
-                        onSelect={setFilterUploadDate}
-                        initialFocus
-                        className="pointer-events-auto"
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                {/* Site */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="filter-site" className="text-xs">Site</Label>
-                  <Select value={filterSite || "__all__"} onValueChange={(v) => setFilterSite(v === "__all__" ? "" : v)}>
-                    <SelectTrigger id="filter-site" className="h-9">
-                      <SelectValue placeholder="All sites" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All sites</SelectItem>
-                      {sites.map((s) => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Equipment Type */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="filter-equipment-type" className="text-xs">Equipment Type</Label>
-                  <Select value={filterEquipmentType || "__all__"} onValueChange={(v) => setFilterEquipmentType(v === "__all__" ? "" : v)}>
-                    <SelectTrigger id="filter-equipment-type" className="h-9">
-                      <SelectValue placeholder="All types" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All types</SelectItem>
-                      {equipmentTypes.map((type) => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Equipment Make */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
-                  <Select value={filterEquipmentMake || "__all__"} onValueChange={(v) => setFilterEquipmentMake(v === "__all__" ? "" : v)}>
-                    <SelectTrigger id="filter-equipment-make" className="h-9">
-                      <SelectValue placeholder="All makes" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All makes</SelectItem>
-                      {equipmentMakes.map((make) => (
-                        <SelectItem key={make} value={make}>{make}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Equipment Model */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
-                  <Select value={filterEquipmentModel || "__all__"} onValueChange={(v) => setFilterEquipmentModel(v === "__all__" ? "" : v)}>
-                    <SelectTrigger id="filter-equipment-model" className="h-9">
-                      <SelectValue placeholder="All models" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All models</SelectItem>
-                      {equipmentModels.map((model) => (
-                        <SelectItem key={model} value={model}>{model}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Unified Chat History */}
-          {chatHistory.length > 0 && (
-            <div 
-              ref={chatContainerRef}
-              className="space-y-3 max-h-96 overflow-y-auto p-3 bg-muted/20 rounded-lg border border-border"
-            >
-              {chatHistory.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={cn(
-                    "p-3 rounded-lg text-sm",
-                    msg.role === "user" 
-                      ? "bg-primary/10 ml-8" 
-                      : "bg-muted mr-8"
-                  )}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-muted-foreground">
-                      {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
-                    </span>
-                    {msg.role === "assistant" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
-                        className="h-6 px-2 text-xs"
-                      >
-                        {isSpeaking ? (
-                          <>
-                            <VolumeX className="h-3 w-3 mr-1" />
-                            Stop
-                          </>
-                        ) : (
-                          <>
-                            <Volume2 className="h-3 w-3 mr-1" />
-                            Listen
-                          </>
-                        )}
-                      </Button>
+            ) : (
+              <>
+                {chatHistory.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={cn(
+                      "p-3 rounded-lg text-sm",
+                      msg.role === "user" 
+                        ? "bg-primary/10 ml-8" 
+                        : "bg-muted mr-8"
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-muted-foreground">
+                        {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
+                      </span>
+                      {msg.role === "assistant" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
+                          className="h-6 px-2 text-xs"
+                        >
+                          {isSpeaking ? (
+                            <>
+                              <VolumeX className="h-3 w-3 mr-1" />
+                              Stop
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="h-3 w-3 mr-1" />
+                              Listen
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                    {msg.role === "assistant" ? (
+                      <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <span className="text-foreground">{msg.content}</span>
                     )}
                   </div>
-                  {msg.role === "assistant" ? (
-                    <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                ))}
+                
+                {/* Loading indicator */}
+                {isQuerying && (
+                  <div className="p-3 rounded-lg text-sm bg-muted mr-8">
+                    <span className="text-xs text-muted-foreground block mb-1">Service AI</span>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Thinking...</span>
                     </div>
-                  ) : (
-                    <span className="text-foreground">{msg.content}</span>
-                  )}
-                </div>
-              ))}
-              
-              {/* Loading indicator */}
-              {isQuerying && (
-                <div className="p-3 rounded-lg text-sm bg-muted mr-8">
-                  <span className="text-xs text-muted-foreground block mb-1">Service AI</span>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Thinking...</span>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </>
+            )}
+          </div>
 
           {/* Sources */}
           {sources.length > 0 && (
-            <div className="space-y-2">
+            <div className="mt-3 space-y-2 flex-shrink-0">
               <h4 className="text-sm font-medium text-muted-foreground">
                 Referenced Context ({sources.length} sources)
               </h4>
@@ -923,8 +902,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               </div>
             </div>
           )}
+        </div>
 
-          {/* Input Area */}
+        {/* Input Area - fixed at bottom */}
+        <div className="p-4 border-t border-border bg-card flex-shrink-0">
           <div className="space-y-2">
             <Textarea
               value={question}
@@ -1037,7 +1018,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
             </div>
           </div>
         </div>
-      </Card>
+      </div>
     </div>
   );
 };
