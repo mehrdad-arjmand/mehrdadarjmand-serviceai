@@ -8,16 +8,38 @@ export interface ChatMessage {
   timestamp: Date;
 }
 
+export interface ConversationFilters {
+  docType: string;
+  uploadDate: string | undefined;
+  site: string;
+  equipmentType: string;
+  equipmentMake: string;
+  equipmentModel: string;
+}
+
 export interface Conversation {
   id: string;
   title: string;
   messages: ChatMessage[];
+  filters: ConversationFilters;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const STORAGE_KEY = "service-ai-conversations";
 const ACTIVE_CONVERSATION_KEY = "service-ai-active-conversation";
+
+// Default empty filters
+export function getDefaultFilters(): ConversationFilters {
+  return {
+    docType: "",
+    uploadDate: undefined,
+    site: "",
+    equipmentType: "",
+    equipmentMake: "",
+    equipmentModel: "",
+  };
+}
 
 // Generate a title from the first user message
 function generateTitle(messages: ChatMessage[]): string {
@@ -33,6 +55,7 @@ function createNewConversation(): Conversation {
     id: `conv-${Date.now()}`,
     title: "New conversation",
     messages: [],
+    filters: getDefaultFilters(),
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -46,6 +69,7 @@ function loadConversations(): Conversation[] {
     const parsed = JSON.parse(stored);
     return parsed.map((conv: any) => ({
       ...conv,
+      filters: conv.filters || getDefaultFilters(),
       createdAt: new Date(conv.createdAt),
       updatedAt: new Date(conv.updatedAt),
       messages: conv.messages.map((msg: any) => ({
@@ -103,6 +127,7 @@ export function useChatHistory() {
   // Get current conversation
   const currentConversation = conversations.find(c => c.id === activeConversationId) || null;
   const messages = currentConversation?.messages || [];
+  const filters = currentConversation?.filters || getDefaultFilters();
 
   // Persist conversations whenever they change
   useEffect(() => {
@@ -145,6 +170,22 @@ export function useChatHistory() {
         return conv;
       });
     });
+  }, [activeConversationId]);
+
+  // Update filters for the current conversation
+  const updateFilters = useCallback((newFilters: Partial<ConversationFilters>) => {
+    if (!activeConversationId) return;
+    
+    setConversations(prev => prev.map(conv => {
+      if (conv.id === activeConversationId) {
+        return {
+          ...conv,
+          filters: { ...conv.filters, ...newFilters },
+          updatedAt: new Date(),
+        };
+      }
+      return conv;
+    }));
   }, [activeConversationId]);
 
   // Start a new conversation
@@ -207,10 +248,12 @@ export function useChatHistory() {
 
   return {
     messages,
+    filters,
     conversations,
     currentConversation,
     activeConversationId,
     addMessage,
+    updateFilters,
     startNewConversation,
     clearCurrentConversation,
     deleteConversation,
