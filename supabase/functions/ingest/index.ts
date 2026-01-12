@@ -1,3 +1,4 @@
+import { getDocument } from 'https://esm.sh/pdfjs-serverless@0.2.2'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
@@ -10,9 +11,6 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 const MAX_FILES = 10
 const MAX_METADATA_LENGTH = 500
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt']
-
-// PDF processing limits to avoid CPU timeout
-const MAX_PAGES_PER_REQUEST = 50 // Process max 50 pages at a time
 
 // Validation helpers
 function isValidMetadata(value: FormDataEntryValue | null, maxLength: number): boolean {
@@ -29,7 +27,8 @@ function sanitizeMetadata(value: FormDataEntryValue | null): string | null {
 
 function isValidDate(value: FormDataEntryValue | null): boolean {
   if (value === null) return true
-  if (typeof value !== 'string') return true
+  if (typeof value !== 'string') return true // Will be validated as string
+  // Basic ISO date format check (YYYY-MM-DD)
   return /^\d{4}-\d{2}-\d{2}$/.test(value) || value === ''
 }
 
@@ -52,6 +51,7 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
+    // Validate content-type
     const contentType = req.headers.get('content-type')
     if (!contentType?.includes('multipart/form-data')) {
       throw new Error('Content-Type must be multipart/form-data')
@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
     const equipmentMake = formData.get('equipmentMake')
     const equipmentModel = formData.get('equipmentModel')
 
+    // Validate file count
     if (!files || files.length === 0) {
       throw new Error('No files provided')
     }
@@ -79,6 +80,7 @@ Deno.serve(async (req) => {
       throw new Error(`Maximum ${MAX_FILES} files allowed per upload`)
     }
 
+    // Validate each file
     for (const file of files) {
       if (!(file instanceof File)) {
         throw new Error('Invalid file format')
@@ -91,6 +93,7 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Validate metadata
     if (!isValidMetadata(docType, MAX_METADATA_LENGTH)) {
       throw new Error(`docType exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
     }
@@ -110,6 +113,7 @@ Deno.serve(async (req) => {
       throw new Error(`equipmentModel exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
     }
 
+    // Sanitize metadata
     const sanitizedDocType = sanitizeMetadata(docType) || 'unknown'
     const sanitizedUploadDate = sanitizeMetadata(uploadDate)
     const sanitizedSite = sanitizeMetadata(site)
@@ -138,14 +142,13 @@ Deno.serve(async (req) => {
             pageCount = 1
             break
           case 'pdf':
-            // Use lightweight extraction for large PDFs to avoid CPU timeout
-            const pdfResult = await extractTextFromPdfLightweight(arrayBuffer)
+            const pdfResult = await extractTextFromPdf(arrayBuffer)
             extractedText = pdfResult.text
             pageCount = pdfResult.pageCount
             break
           case 'docx':
             extractedText = await extractTextFromDocx(arrayBuffer)
-            pageCount = Math.ceil(extractedText.length / 3000)
+            pageCount = Math.ceil(extractedText.length / 3000) // Estimate
             break
           default:
             throw new Error(`Unsupported file type: ${fileType}`)
@@ -153,6 +156,7 @@ Deno.serve(async (req) => {
 
         console.log(`Extracted ${extractedText.length} characters, ${pageCount} pages from ${file.name}`)
         
+        // Split text into chunks FIRST to know total_chunks
         const chunkSize = 800
         const overlapSize = 200
         const chunks = []
@@ -172,11 +176,12 @@ Deno.serve(async (req) => {
 
         const totalChunks = chunks.length
 
+        // Save document to database with total_chunks known upfront
         const { error: docError } = await supabase
           .from('documents')
           .insert({
             id: docId,
-            filename: file.name.slice(0, 500),
+            filename: file.name.slice(0, 500), // Limit filename length
             doc_type: sanitizedDocType,
             upload_date: sanitizedUploadDate || null,
             site: sanitizedSite || null,
@@ -190,6 +195,7 @@ Deno.serve(async (req) => {
 
         if (docError) throw docError
 
+        // Save all chunks WITHOUT embeddings
         if (chunks.length > 0) {
           const CHUNK_BATCH = 50
           for (let i = 0; i < chunks.length; i += CHUNK_BATCH) {
@@ -198,6 +204,7 @@ Deno.serve(async (req) => {
             if (chunksError) throw chunksError
           }
 
+          // Update ingested_chunks to reflect all chunks are stored (but not yet embedded)
           await supabase
             .from('documents')
             .update({ 
@@ -225,7 +232,7 @@ Deno.serve(async (req) => {
             id: docId,
             filename: file.name.slice(0, 500),
             ingestion_status: 'failed',
-            ingestion_error: error.slice(0, 1000)
+            ingestion_error: error.slice(0, 1000) // Limit error message length
           })
 
         documents.push({
@@ -253,70 +260,37 @@ async function extractTextFromTxt(arrayBuffer: ArrayBuffer): Promise<string> {
   return new TextDecoder('utf-8').decode(arrayBuffer)
 }
 
-// Lightweight PDF extraction that doesn't use pdfjs-serverless page-by-page processing
-// This avoids CPU timeout for large documents by using raw byte parsing
-async function extractTextFromPdfLightweight(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
+async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   const uint8Array = new Uint8Array(arrayBuffer)
-  const decoder = new TextDecoder('utf-8', { fatal: false })
-  const rawContent = decoder.decode(uint8Array)
+  const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
   
-  // Count pages from PDF structure
-  const pageMatches = rawContent.match(/\/Type\s*\/Page[^s]/g)
-  const pageCount = pageMatches ? pageMatches.length : 1
-  
-  // Extract text streams from PDF
   const textParts: string[] = []
-  
-  // Match text content between stream markers (common PDF structure)
-  const streamRegex = /stream\s*([\s\S]*?)\s*endstream/g
-  let match
-  while ((match = streamRegex.exec(rawContent)) !== null) {
-    const streamContent = match[1]
-    // Extract readable text (skip binary content)
-    const textMatches = streamContent.match(/\(([^)]+)\)/g)
-    if (textMatches) {
-      for (const textMatch of textMatches) {
-        const text = textMatch.slice(1, -1) // Remove parentheses
-        if (text && /[a-zA-Z0-9]/.test(text)) {
-          textParts.push(text)
-        }
-      }
-    }
-    // Also match Tj/TJ operators for text
-    const tjMatches = streamContent.match(/\[([^\]]+)\]\s*TJ/g)
-    if (tjMatches) {
-      for (const tjMatch of tjMatches) {
-        const innerText = tjMatch.match(/\(([^)]+)\)/g)
-        if (innerText) {
-          for (const t of innerText) {
-            const cleaned = t.slice(1, -1)
-            if (cleaned && /[a-zA-Z0-9]/.test(cleaned)) {
-              textParts.push(cleaned)
-            }
-          }
-        }
-      }
-    }
+  for (let i = 1; i <= document.numPages; i++) {
+    const page = await document.getPage(i)
+    const content = await page.getTextContent()
+    // Join items with proper spacing consideration
+    const pageText = content.items.map((item: any) => item.str).join(' ')
+    textParts.push(pageText)
   }
   
-  // Fallback: extract any readable ASCII sequences if streams didn't yield much
-  if (textParts.join(' ').length < 1000) {
-    // Find readable text patterns in the raw content
-    const readableMatches = rawContent.match(/[A-Za-z][A-Za-z0-9\s.,;:!?'"()-]{10,}/g)
-    if (readableMatches) {
-      textParts.push(...readableMatches.filter(m => !m.includes('obj') && !m.includes('endobj')))
-    }
+  // Normalize text: fix broken character spacing (e.g., "T i a n j i n" -> "Tianjin")
+  let text = textParts.join('\n\n')
+  
+  // Fix single-character spacing pattern (common in PDF table extraction)
+  // Match sequences where single letters are separated by single spaces
+  text = text.replace(/\b([A-Za-z])\s+(?=[A-Za-z]\s+[A-Za-z])/g, (match, char) => {
+    return char
+  })
+  // Additional pass to clean remaining single-char spaces
+  text = text.replace(/(?<=[A-Za-z])\s(?=[A-Za-z](?:\s[A-Za-z])+\b)/g, '')
+  
+  // Final cleanup
+  text = text.replace(/\s+/g, ' ').trim()
+  
+  return {
+    text,
+    pageCount: document.numPages
   }
-  
-  // Clean up extracted text
-  let text = textParts.join(' ')
-    .replace(/[\x00-\x1F\x7F-\x9F]/g, ' ') // Remove control characters
-    .replace(/\s+/g, ' ') // Normalize whitespace
-    .replace(/\\n/g, ' ') // Handle escaped newlines
-    .replace(/\\r/g, ' ')
-    .trim()
-  
-  return { text, pageCount }
 }
 
 async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
