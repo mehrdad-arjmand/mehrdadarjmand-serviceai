@@ -143,19 +143,39 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
     }
   };
 
-  // Fetch documents and subscribe to realtime updates
+  // Fetch documents and subscribe to realtime updates + polling for chunks
   useEffect(() => {
     fetchDocuments();
 
-    const channel = supabase
+    // Subscribe to documents changes
+    const docsChannel = supabase
       .channel('repository-docs')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments)
       .subscribe();
 
+    // Subscribe to chunks changes for real-time embedding progress
+    const chunksChannel = supabase
+      .channel('repository-chunks')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments)
+      .subscribe();
+
+    // Also poll every 3 seconds for in-progress documents (in case subscription misses updates)
+    const pollInterval = setInterval(() => {
+      // Check if any documents are still in progress
+      const hasInProgress = documents.some(
+        doc => doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings'
+      );
+      if (hasInProgress) {
+        fetchDocuments();
+      }
+    }, 3000);
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(docsChannel);
+      supabase.removeChannel(chunksChannel);
+      clearInterval(pollInterval);
     };
-  }, []);
+  }, [documents]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
