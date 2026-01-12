@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
-import { useChatHistory, ChatMessage } from "@/hooks/useChatHistory";
+import { useChatHistory, ChatMessage, ConversationFilters } from "@/hooks/useChatHistory";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
 import {
   Select,
@@ -23,7 +23,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
-import { format } from "date-fns";
+import { format, parse } from "date-fns";
 import { cn } from "@/lib/utils";
 
 interface TechnicianChatProps {
@@ -48,9 +48,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   // Use persistent chat history hook
   const {
     messages: chatHistory,
+    filters: conversationFilters,
     conversations,
     activeConversationId,
     addMessage,
+    updateFilters,
     startNewConversation,
     deleteConversation,
     switchConversation,
@@ -81,15 +83,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentTranscriptRef = useRef<string>("");
 
-  // Filter states
-  const [filterDocType, setFilterDocType] = useState<string>("");
-  const [filterUploadDate, setFilterUploadDate] = useState<Date | undefined>();
-  const [filterSite, setFilterSite] = useState<string>("");
-  const [filterEquipmentType, setFilterEquipmentType] = useState<string>("");
-  const [filterEquipmentMake, setFilterEquipmentMake] = useState<string>("");
-  const [filterEquipmentModel, setFilterEquipmentModel] = useState<string>("");
-
-  // Filter options
+  // Filter options (populated from documents)
   const [docTypes, setDocTypes] = useState<string[]>([]);
   const [sites, setSites] = useState<string[]>([]);
   const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
@@ -390,12 +384,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: {
           question: text.trim(),
-          documentType: filterDocType || undefined,
-          uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
-          filterSite: filterSite || undefined,
-          equipmentType: filterEquipmentType || undefined,
-          equipmentMake: filterEquipmentMake || undefined,
-          equipmentModel: filterEquipmentModel || undefined,
+          documentType: conversationFilters.docType || undefined,
+          uploadDate: conversationFilters.uploadDate || undefined,
+          filterSite: conversationFilters.site || undefined,
+          equipmentType: conversationFilters.equipmentType || undefined,
+          equipmentMake: conversationFilters.equipmentMake || undefined,
+          equipmentModel: conversationFilters.equipmentModel || undefined,
           history: recentHistory,
           isConversationMode: true,
         },
@@ -445,13 +439,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     } finally {
       setIsQuerying(false);
     }
-  }, [hasDocuments, chatHistory, filterDocType, filterUploadDate, filterSite, filterEquipmentType, filterEquipmentMake, filterEquipmentModel, addMessage, speakText, startConversationListening, toast]);
+  }, [hasDocuments, chatHistory, conversationFilters, addMessage, speakText, startConversationListening, toast]);
 
   // Send text message to API
   const sendMessage = useCallback(async (
     text: string,
     inputMode: "text" | "dictation"
   ) => {
+    // CRITICAL: Stop dictation before sending to prevent TTS from being transcribed
+    stopListening();
+    
     if (!hasDocuments) {
       toast({
         title: "No documents indexed",
@@ -485,12 +482,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: {
           question: text.trim(),
-          documentType: filterDocType || undefined,
-          uploadDate: filterUploadDate ? format(filterUploadDate, 'yyyy-MM-dd') : undefined,
-          filterSite: filterSite || undefined,
-          equipmentType: filterEquipmentType || undefined,
-          equipmentMake: filterEquipmentMake || undefined,
-          equipmentModel: filterEquipmentModel || undefined,
+          documentType: conversationFilters.docType || undefined,
+          uploadDate: conversationFilters.uploadDate || undefined,
+          filterSite: conversationFilters.site || undefined,
+          equipmentType: conversationFilters.equipmentType || undefined,
+          equipmentMake: conversationFilters.equipmentMake || undefined,
+          equipmentModel: conversationFilters.equipmentModel || undefined,
           history: recentHistory,
           isConversationMode: false,
         },
@@ -522,7 +519,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     } finally {
       setIsQuerying(false);
     }
-  }, [hasDocuments, chatHistory, filterDocType, filterUploadDate, filterSite, filterEquipmentType, filterEquipmentMake, filterEquipmentModel, addMessage, toast]);
+  }, [hasDocuments, chatHistory, conversationFilters, addMessage, stopListening, toast]);
 
   // Start dictation (one-shot, user reviews and sends)
   const startDictation = useCallback(() => {
@@ -628,6 +625,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
   };
 
+  // Handle filter changes - persist to conversation
+  const handleFilterChange = (key: keyof ConversationFilters, value: string | undefined) => {
+    updateFilters({ [key]: value === "__all__" ? "" : value });
+  };
+
   // Determine which buttons to show
   const hasText = question.trim().length > 0;
   const showSendButton = hasText && !isConversationMode;
@@ -691,7 +693,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               {/* Document Type */}
               <div className="space-y-1.5">
                 <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
-                <Select value={filterDocType || "__all__"} onValueChange={(v) => setFilterDocType(v === "__all__" ? "" : v)}>
+                <Select 
+                  value={conversationFilters.docType || "__all__"} 
+                  onValueChange={(v) => handleFilterChange("docType", v)}
+                >
                   <SelectTrigger id="filter-doc-type" className="h-9">
                     <SelectValue placeholder="All types" />
                   </SelectTrigger>
@@ -714,18 +719,22 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                       variant="outline"
                       className={cn(
                         "h-9 w-full justify-between text-left font-normal",
-                        !filterUploadDate && "text-muted-foreground"
+                        !conversationFilters.uploadDate && "text-muted-foreground"
                       )}
                     >
-                      {filterUploadDate ? format(filterUploadDate, "PPP") : "Any date"}
+                      {conversationFilters.uploadDate 
+                        ? format(parse(conversationFilters.uploadDate, 'yyyy-MM-dd', new Date()), "PPP") 
+                        : "Any date"}
                       <CalendarIcon className="h-4 w-4 opacity-50" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
-                      selected={filterUploadDate}
-                      onSelect={setFilterUploadDate}
+                      selected={conversationFilters.uploadDate 
+                        ? parse(conversationFilters.uploadDate, 'yyyy-MM-dd', new Date()) 
+                        : undefined}
+                      onSelect={(date) => handleFilterChange("uploadDate", date ? format(date, 'yyyy-MM-dd') : undefined)}
                       initialFocus
                       className="pointer-events-auto"
                     />
@@ -736,7 +745,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               {/* Site */}
               <div className="space-y-1.5">
                 <Label htmlFor="filter-site" className="text-xs">Site</Label>
-                <Select value={filterSite || "__all__"} onValueChange={(v) => setFilterSite(v === "__all__" ? "" : v)}>
+                <Select 
+                  value={conversationFilters.site || "__all__"} 
+                  onValueChange={(v) => handleFilterChange("site", v)}
+                >
                   <SelectTrigger id="filter-site" className="h-9">
                     <SelectValue placeholder="All sites" />
                   </SelectTrigger>
@@ -752,7 +764,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               {/* Equipment Type */}
               <div className="space-y-1.5">
                 <Label htmlFor="filter-equipment-type" className="text-xs">Equipment Type</Label>
-                <Select value={filterEquipmentType || "__all__"} onValueChange={(v) => setFilterEquipmentType(v === "__all__" ? "" : v)}>
+                <Select 
+                  value={conversationFilters.equipmentType || "__all__"} 
+                  onValueChange={(v) => handleFilterChange("equipmentType", v)}
+                >
                   <SelectTrigger id="filter-equipment-type" className="h-9">
                     <SelectValue placeholder="All types" />
                   </SelectTrigger>
@@ -768,7 +783,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               {/* Equipment Make */}
               <div className="space-y-1.5">
                 <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
-                <Select value={filterEquipmentMake || "__all__"} onValueChange={(v) => setFilterEquipmentMake(v === "__all__" ? "" : v)}>
+                <Select 
+                  value={conversationFilters.equipmentMake || "__all__"} 
+                  onValueChange={(v) => handleFilterChange("equipmentMake", v)}
+                >
                   <SelectTrigger id="filter-equipment-make" className="h-9">
                     <SelectValue placeholder="All makes" />
                   </SelectTrigger>
@@ -784,7 +802,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               {/* Equipment Model */}
               <div className="space-y-1.5">
                 <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
-                <Select value={filterEquipmentModel || "__all__"} onValueChange={(v) => setFilterEquipmentModel(v === "__all__" ? "" : v)}>
+                <Select 
+                  value={conversationFilters.equipmentModel || "__all__"} 
+                  onValueChange={(v) => handleFilterChange("equipmentModel", v)}
+                >
                   <SelectTrigger id="filter-equipment-model" className="h-9">
                     <SelectValue placeholder="All models" />
                   </SelectTrigger>
@@ -800,12 +821,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           </div>
         )}
 
-        {/* Scrollable chat area */}
-        <div className="flex-1 overflow-hidden flex flex-col p-4">
-          {/* Chat History */}
+        {/* Scrollable chat + sources area with fixed proportions */}
+        <div className="flex-1 overflow-hidden flex flex-col p-4 min-h-0">
+          {/* Chat History - guaranteed minimum height */}
           <div 
             ref={chatContainerRef}
-            className="flex-1 overflow-y-auto space-y-3 p-3 bg-muted/20 rounded-lg border border-border"
+            className="flex-1 min-h-[200px] overflow-y-auto space-y-3 p-3 bg-muted/20 rounded-lg border border-border"
           >
             {chatHistory.length === 0 && !isQuerying ? (
               <div className="flex-1 flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -872,13 +893,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
             )}
           </div>
 
-          {/* Sources */}
+          {/* Sources - constrained max height with scroll */}
           {sources.length > 0 && (
-            <div className="mt-3 space-y-2 flex-shrink-0">
-              <h4 className="text-sm font-medium text-muted-foreground">
+            <div className="mt-3 flex-shrink-0 max-h-[30%]">
+              <h4 className="text-sm font-medium text-muted-foreground mb-2">
                 Referenced Context ({sources.length} sources)
               </h4>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
+              <div className="space-y-2 max-h-32 overflow-y-auto">
                 {sources.map((source, idx) => (
                   <details key={idx} className="group">
                     <summary className="cursor-pointer list-none">
@@ -894,7 +915,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                         </div>
                       </div>
                     </summary>
-                    <div className="mt-1 ml-6 p-2 bg-background border border-border rounded text-xs text-muted-foreground">
+                    <div className="mt-1 ml-6 p-2 bg-background border border-border rounded text-xs text-muted-foreground max-h-24 overflow-y-auto">
                       {source.text}
                     </div>
                   </details>
