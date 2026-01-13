@@ -48,16 +48,27 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   // Use persistent chat history hook
   const {
     messages: chatHistory,
-    filters: conversationFilters,
     conversations,
     activeConversationId,
     addMessage,
-    updateFilters,
     startNewConversation,
     deleteConversation,
     switchConversation,
     ensureActiveConversation,
   } = useChatHistory();
+
+  // LOCAL filter state - these are dynamic and read at send time
+  const [currentFilters, setCurrentFilters] = useState<ConversationFilters>({
+    docType: "",
+    uploadDate: undefined,
+    site: "",
+    equipmentType: "",
+    equipmentMake: "",
+    equipmentModel: "",
+  });
+
+  // Lock filters while a request is in flight
+  const [filtersLocked, setFiltersLocked] = useState(false);
 
   // Ensure we have an active conversation on mount
   useEffect(() => {
@@ -352,7 +363,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     recognition.start();
   }, [toast, clearSilenceTimer, conversationState]);
 
-  // Process a conversation message
+  // Process a conversation message (voice mode)
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
       toast({
@@ -362,6 +373,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       });
       return;
     }
+
+    // Read current filters at send time (dynamic per question)
+    const filtersAtSendTime = { ...currentFilters };
+    setFiltersLocked(true);
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -384,12 +399,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: {
           question: text.trim(),
-          documentType: conversationFilters.docType || undefined,
-          uploadDate: conversationFilters.uploadDate || undefined,
-          filterSite: conversationFilters.site || undefined,
-          equipmentType: conversationFilters.equipmentType || undefined,
-          equipmentMake: conversationFilters.equipmentMake || undefined,
-          equipmentModel: conversationFilters.equipmentModel || undefined,
+          documentType: filtersAtSendTime.docType || undefined,
+          uploadDate: filtersAtSendTime.uploadDate || undefined,
+          filterSite: filtersAtSendTime.site || undefined,
+          equipmentType: filtersAtSendTime.equipmentType || undefined,
+          equipmentMake: filtersAtSendTime.equipmentMake || undefined,
+          equipmentModel: filtersAtSendTime.equipmentModel || undefined,
           history: recentHistory,
           isConversationMode: true,
         },
@@ -401,6 +416,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         id: `assistant-${Date.now()}`,
         role: "assistant",
         content: data.answer,
+        inputMode: "voice",
         timestamp: new Date(),
       };
       
@@ -410,6 +426,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       if (data.answer && conversationActiveRef.current) {
         setConversationState("speaking");
         speakText(data.answer, () => {
+          setFiltersLocked(false);
           if (conversationActiveRef.current) {
             setTimeout(() => {
               if (conversationActiveRef.current) {
@@ -418,6 +435,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
             }, 300);
           }
         });
+      } else {
+        setFiltersLocked(false);
       }
 
     } catch (error: any) {
@@ -427,6 +446,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         description: error.message || "An unexpected error occurred.",
         variant: "destructive",
       });
+      setFiltersLocked(false);
       
       if (conversationActiveRef.current) {
         setConversationState("idle");
@@ -439,7 +459,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     } finally {
       setIsQuerying(false);
     }
-  }, [hasDocuments, chatHistory, conversationFilters, addMessage, speakText, startConversationListening, toast]);
+  }, [hasDocuments, chatHistory, currentFilters, addMessage, speakText, startConversationListening, toast]);
 
   // Send text message to API
   const sendMessage = useCallback(async (
@@ -459,6 +479,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
 
     if (!text.trim()) return;
+
+    // Read current filters at send time (dynamic per question)
+    const filtersAtSendTime = { ...currentFilters };
+    setFiltersLocked(true);
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -482,12 +506,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: {
           question: text.trim(),
-          documentType: conversationFilters.docType || undefined,
-          uploadDate: conversationFilters.uploadDate || undefined,
-          filterSite: conversationFilters.site || undefined,
-          equipmentType: conversationFilters.equipmentType || undefined,
-          equipmentMake: conversationFilters.equipmentMake || undefined,
-          equipmentModel: conversationFilters.equipmentModel || undefined,
+          documentType: filtersAtSendTime.docType || undefined,
+          uploadDate: filtersAtSendTime.uploadDate || undefined,
+          filterSite: filtersAtSendTime.site || undefined,
+          equipmentType: filtersAtSendTime.equipmentType || undefined,
+          equipmentMake: filtersAtSendTime.equipmentMake || undefined,
+          equipmentModel: filtersAtSendTime.equipmentModel || undefined,
           history: recentHistory,
           isConversationMode: false,
         },
@@ -518,8 +542,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       });
     } finally {
       setIsQuerying(false);
+      setFiltersLocked(false);
     }
-  }, [hasDocuments, chatHistory, conversationFilters, addMessage, stopListening, toast]);
+  }, [hasDocuments, chatHistory, currentFilters, addMessage, stopListening, toast]);
 
   // Start dictation (one-shot, user reviews and sends)
   const startDictation = useCallback(() => {
@@ -625,9 +650,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     }
   };
 
-  // Handle filter changes - persist to conversation
+  // Handle filter changes - update local state (dynamic per question)
   const handleFilterChange = (key: keyof ConversationFilters, value: string | undefined) => {
-    updateFilters({ [key]: value === "__all__" ? "" : value });
+    setCurrentFilters(prev => ({
+      ...prev,
+      [key]: value === "__all__" ? "" : value
+    }));
   };
 
   // Determine which buttons to show
@@ -694,8 +722,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               <div className="space-y-1.5">
                 <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
                 <Select 
-                  value={conversationFilters.docType || "__all__"} 
+                  value={currentFilters.docType || "__all__"} 
                   onValueChange={(v) => handleFilterChange("docType", v)}
+                  disabled={filtersLocked}
                 >
                   <SelectTrigger id="filter-doc-type" className="h-9">
                     <SelectValue placeholder="All types" />
@@ -717,13 +746,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                     <Button
                       id="filter-upload-date"
                       variant="outline"
+                      disabled={filtersLocked}
                       className={cn(
                         "h-9 w-full justify-between text-left font-normal",
-                        !conversationFilters.uploadDate && "text-muted-foreground"
+                        !currentFilters.uploadDate && "text-muted-foreground"
                       )}
                     >
-                      {conversationFilters.uploadDate 
-                        ? format(parse(conversationFilters.uploadDate, 'yyyy-MM-dd', new Date()), "PPP") 
+                      {currentFilters.uploadDate 
+                        ? format(parse(currentFilters.uploadDate, 'yyyy-MM-dd', new Date()), "PPP") 
                         : "Any date"}
                       <CalendarIcon className="h-4 w-4 opacity-50" />
                     </Button>
@@ -731,8 +761,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                   <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
-                      selected={conversationFilters.uploadDate 
-                        ? parse(conversationFilters.uploadDate, 'yyyy-MM-dd', new Date()) 
+                      selected={currentFilters.uploadDate 
+                        ? parse(currentFilters.uploadDate, 'yyyy-MM-dd', new Date()) 
                         : undefined}
                       onSelect={(date) => handleFilterChange("uploadDate", date ? format(date, 'yyyy-MM-dd') : undefined)}
                       initialFocus
@@ -746,8 +776,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               <div className="space-y-1.5">
                 <Label htmlFor="filter-site" className="text-xs">Site</Label>
                 <Select 
-                  value={conversationFilters.site || "__all__"} 
+                  value={currentFilters.site || "__all__"} 
                   onValueChange={(v) => handleFilterChange("site", v)}
+                  disabled={filtersLocked}
                 >
                   <SelectTrigger id="filter-site" className="h-9">
                     <SelectValue placeholder="All sites" />
@@ -765,8 +796,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               <div className="space-y-1.5">
                 <Label htmlFor="filter-equipment-type" className="text-xs">Equipment Type</Label>
                 <Select 
-                  value={conversationFilters.equipmentType || "__all__"} 
+                  value={currentFilters.equipmentType || "__all__"} 
                   onValueChange={(v) => handleFilterChange("equipmentType", v)}
+                  disabled={filtersLocked}
                 >
                   <SelectTrigger id="filter-equipment-type" className="h-9">
                     <SelectValue placeholder="All types" />
@@ -784,8 +816,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               <div className="space-y-1.5">
                 <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
                 <Select 
-                  value={conversationFilters.equipmentMake || "__all__"} 
+                  value={currentFilters.equipmentMake || "__all__"} 
                   onValueChange={(v) => handleFilterChange("equipmentMake", v)}
+                  disabled={filtersLocked}
                 >
                   <SelectTrigger id="filter-equipment-make" className="h-9">
                     <SelectValue placeholder="All makes" />
@@ -803,8 +836,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               <div className="space-y-1.5">
                 <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
                 <Select 
-                  value={conversationFilters.equipmentModel || "__all__"} 
+                  value={currentFilters.equipmentModel || "__all__"} 
                   onValueChange={(v) => handleFilterChange("equipmentModel", v)}
+                  disabled={filtersLocked}
                 >
                   <SelectTrigger id="filter-equipment-model" className="h-9">
                     <SelectValue placeholder="All models" />
