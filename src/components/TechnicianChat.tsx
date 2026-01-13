@@ -93,6 +93,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   const conversationActiveRef = useRef(false);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentTranscriptRef = useRef<string>("");
+  // Ref for filters to ensure voice mode always reads the latest values
+  const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
+
+  // Keep the ref in sync with state
+  useEffect(() => {
+    currentFiltersRef.current = currentFilters;
+  }, [currentFilters]);
 
   // Filter options (populated from documents)
   const [docTypes, setDocTypes] = useState<string[]>([]);
@@ -374,8 +381,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       return;
     }
 
-    // Read current filters at send time (dynamic per question)
-    const filtersAtSendTime = { ...currentFilters };
+    // Read current filters at send time from REF (ensures latest value, not stale closure)
+    const filtersAtSendTime = { ...currentFiltersRef.current };
+    console.log("Voice query filters at send time:", filtersAtSendTime);
     setFiltersLocked(true);
 
     const userMessage: ChatMessage = {
@@ -459,7 +467,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     } finally {
       setIsQuerying(false);
     }
-  }, [hasDocuments, chatHistory, currentFilters, addMessage, speakText, startConversationListening, toast]);
+  }, [hasDocuments, chatHistory, addMessage, speakText, startConversationListening, toast]);
 
   // Send text message to API
   const sendMessage = useCallback(async (
@@ -480,8 +488,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
     if (!text.trim()) return;
 
-    // Read current filters at send time (dynamic per question)
-    const filtersAtSendTime = { ...currentFilters };
+    // Read current filters at send time from REF (ensures latest value, not stale closure)
+    const filtersAtSendTime = { ...currentFiltersRef.current };
+    console.log("Text query filters at send time:", filtersAtSendTime);
     setFiltersLocked(true);
 
     const userMessage: ChatMessage = {
@@ -544,7 +553,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       setIsQuerying(false);
       setFiltersLocked(false);
     }
-  }, [hasDocuments, chatHistory, currentFilters, addMessage, stopListening, toast]);
+  }, [hasDocuments, chatHistory, addMessage, stopListening, toast]);
 
   // Start dictation (one-shot, user reviews and sends)
   const startDictation = useCallback(() => {
