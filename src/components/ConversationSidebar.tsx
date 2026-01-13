@@ -94,7 +94,7 @@ export function ConversationSidebar({
                 <div
                   key={conv.id}
                   className={cn(
-                    "group relative flex items-start gap-2 p-2 rounded-lg cursor-pointer transition-colors",
+                    "group relative flex items-start gap-2 p-2 pr-1 rounded-lg cursor-pointer transition-colors",
                     conv.id === activeConversationId
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
@@ -103,7 +103,7 @@ export function ConversationSidebar({
                 >
                   <MessageSquare className="h-4 w-4 mt-0.5 flex-shrink-0 opacity-60" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
+                    <p className="text-sm font-medium truncate pr-1">
                       {conv.title}
                     </p>
                     <p className="text-xs opacity-60">
@@ -115,13 +115,13 @@ export function ConversationSidebar({
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      "h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0",
-                      "hover:bg-destructive/20 hover:text-destructive"
+                      "h-7 w-7 flex-shrink-0 opacity-60 hover:opacity-100",
+                      "hover:bg-destructive/20 hover:text-destructive text-muted-foreground"
                     )}
                     onClick={(e) => handleDeleteClick(e, conv.id)}
                     title="Delete conversation"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ))
