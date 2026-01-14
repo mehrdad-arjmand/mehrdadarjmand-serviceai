@@ -643,6 +643,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       setConversationState("idle");
       setQuestion("");
     } else {
+      // CRITICAL: Ensure we have an active conversation BEFORE starting voice mode
+      // This prevents the cold-start issue where voice messages aren't logged
+      ensureActiveConversation();
+      
       conversationActiveRef.current = true;
       setIsConversationMode(true);
       setQuestion("");
