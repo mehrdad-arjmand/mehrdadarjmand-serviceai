@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 export interface ChatMessage {
   id: string;
@@ -124,6 +124,19 @@ export function useChatHistory() {
     return null;
   });
 
+  // USE A REF to always have the latest activeConversationId
+  // This prevents stale closure issues in addMessage
+  const activeConversationIdRef = useRef(activeConversationId);
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  // Also keep conversations in a ref for addMessage
+  const conversationsRef = useRef(conversations);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
   // Get current conversation
   const currentConversation = conversations.find(c => c.id === activeConversationId) || null;
   const messages = currentConversation?.messages || [];
@@ -141,22 +154,54 @@ export function useChatHistory() {
     }
   }, [activeConversationId]);
 
+  // Ensure there's always an active conversation - returns the ID synchronously
+  const ensureActiveConversation = useCallback((): string => {
+    const currentId = activeConversationIdRef.current;
+    const currentConvs = conversationsRef.current;
+    
+    // If we have a valid active conversation, return it
+    if (currentId && currentConvs.find(c => c.id === currentId)) {
+      return currentId;
+    }
+    
+    // If there are conversations but no active one, select the first
+    if (currentConvs.length > 0) {
+      const firstId = currentConvs[0].id;
+      setActiveConversationId(firstId);
+      activeConversationIdRef.current = firstId;
+      return firstId;
+    }
+    
+    // No conversations exist - create one synchronously
+    const newConv = createNewConversation();
+    const newConvs = [newConv, ...currentConvs];
+    setConversations(newConvs);
+    conversationsRef.current = newConvs;
+    setActiveConversationId(newConv.id);
+    activeConversationIdRef.current = newConv.id;
+    return newConv.id;
+  }, []);
+
   // Add a message to the current conversation
+  // CRITICAL: Uses refs to avoid stale closure issues
   const addMessage = useCallback((message: ChatMessage) => {
+    // Get the latest active conversation ID from ref
+    let convId = activeConversationIdRef.current;
+    
     setConversations(prev => {
-      // If no active conversation OR active conversation doesn't exist in list, create one
-      let convId = activeConversationId;
       let updatedConvs = [...prev];
       
       // Check if convId is valid (exists in the list)
       const convExists = convId ? updatedConvs.some(c => c.id === convId) : false;
       
       if (!convId || !convExists) {
+        // Create a new conversation if needed
         const newConv = createNewConversation();
         convId = newConv.id;
         updatedConvs = [newConv, ...updatedConvs];
-        // Use setTimeout to avoid state update during render
-        setTimeout(() => setActiveConversationId(convId!), 0);
+        // Update ref immediately
+        activeConversationIdRef.current = convId;
+        setActiveConversationId(convId);
       }
 
       return updatedConvs.map(conv => {
@@ -174,14 +219,15 @@ export function useChatHistory() {
         return conv;
       });
     });
-  }, [activeConversationId]);
+  }, []);
 
   // Update filters for the current conversation
   const updateFilters = useCallback((newFilters: Partial<ConversationFilters>) => {
-    if (!activeConversationId) return;
+    const convId = activeConversationIdRef.current;
+    if (!convId) return;
     
     setConversations(prev => prev.map(conv => {
-      if (conv.id === activeConversationId) {
+      if (conv.id === convId) {
         return {
           ...conv,
           filters: { ...conv.filters, ...newFilters },
@@ -190,21 +236,43 @@ export function useChatHistory() {
       }
       return conv;
     }));
-  }, [activeConversationId]);
+  }, []);
+
+  // Rename a conversation
+  const renameConversation = useCallback((id: string, newTitle: string) => {
+    if (!newTitle.trim()) return;
+    
+    setConversations(prev => prev.map(conv => {
+      if (conv.id === id) {
+        return {
+          ...conv,
+          title: newTitle.trim(),
+          updatedAt: new Date(),
+        };
+      }
+      return conv;
+    }));
+  }, []);
 
   // Start a new conversation
   const startNewConversation = useCallback(() => {
     const newConv = createNewConversation();
-    setConversations(prev => [newConv, ...prev]);
+    setConversations(prev => {
+      const newConvs = [newConv, ...prev];
+      conversationsRef.current = newConvs;
+      return newConvs;
+    });
     setActiveConversationId(newConv.id);
+    activeConversationIdRef.current = newConv.id;
   }, []);
 
   // Clear current conversation (remove messages but keep the conversation slot)
   const clearCurrentConversation = useCallback(() => {
-    if (!activeConversationId) return;
+    const convId = activeConversationIdRef.current;
+    if (!convId) return;
     
     setConversations(prev => prev.map(conv => {
-      if (conv.id === activeConversationId) {
+      if (conv.id === convId) {
         return {
           ...conv,
           messages: [],
@@ -214,41 +282,33 @@ export function useChatHistory() {
       }
       return conv;
     }));
-  }, [activeConversationId]);
+  }, []);
 
   // Delete a conversation
   const deleteConversation = useCallback((id: string) => {
     setConversations(prev => {
       const filtered = prev.filter(c => c.id !== id);
+      conversationsRef.current = filtered;
+      
       // If we deleted the active one, switch to another or create new
-      if (id === activeConversationId) {
+      if (id === activeConversationIdRef.current) {
         if (filtered.length > 0) {
           setActiveConversationId(filtered[0].id);
+          activeConversationIdRef.current = filtered[0].id;
         } else {
           setActiveConversationId(null);
+          activeConversationIdRef.current = null;
         }
       }
       return filtered;
     });
-  }, [activeConversationId]);
+  }, []);
 
   // Switch to a conversation
   const switchConversation = useCallback((id: string) => {
     setActiveConversationId(id);
+    activeConversationIdRef.current = id;
   }, []);
-
-  // Ensure there's always an active conversation when needed
-  const ensureActiveConversation = useCallback(() => {
-    if (!activeConversationId || !conversations.find(c => c.id === activeConversationId)) {
-      if (conversations.length > 0) {
-        setActiveConversationId(conversations[0].id);
-      } else {
-        const newConv = createNewConversation();
-        setConversations([newConv]);
-        setActiveConversationId(newConv.id);
-      }
-    }
-  }, [activeConversationId, conversations]);
 
   return {
     messages,
@@ -258,6 +318,7 @@ export function useChatHistory() {
     activeConversationId,
     addMessage,
     updateFilters,
+    renameConversation,
     startNewConversation,
     clearCurrentConversation,
     deleteConversation,

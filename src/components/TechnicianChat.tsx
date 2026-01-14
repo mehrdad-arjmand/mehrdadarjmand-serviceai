@@ -55,6 +55,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
     deleteConversation,
     switchConversation,
     ensureActiveConversation,
+    renameConversation,
   } = useChatHistory();
 
   // LOCAL filter state - these are dynamic and read at send time
@@ -693,6 +694,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           onNewConversation={startNewConversation}
           onSelectConversation={switchConversation}
           onDeleteConversation={deleteConversation}
+          onRenameConversation={renameConversation}
         />
       </div>
 
