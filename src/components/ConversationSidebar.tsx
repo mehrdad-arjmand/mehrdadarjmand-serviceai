@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { Plus, MessageSquare, Trash2 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Plus, MessageSquare, Trash2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Conversation } from "@/hooks/useChatHistory";
 import {
@@ -21,6 +22,7 @@ interface ConversationSidebarProps {
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
+  onRenameConversation?: (id: string, newTitle: string) => void;
 }
 
 // Format relative time
@@ -44,9 +46,21 @@ export function ConversationSidebar({
   onNewConversation,
   onSelectConversation,
   onDeleteConversation,
+  onRenameConversation,
 }: ConversationSidebarProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus input when editing starts
+  useEffect(() => {
+    if (editingId && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingId]);
 
   const handleDeleteClick = (e: React.MouseEvent, convId: string) => {
     e.stopPropagation();
@@ -65,6 +79,36 @@ export function ConversationSidebar({
   const handleCancelDelete = () => {
     setDeleteDialogOpen(false);
     setConversationToDelete(null);
+  };
+
+  const handleTitleDoubleClick = (e: React.MouseEvent, conv: Conversation) => {
+    e.stopPropagation();
+    if (onRenameConversation) {
+      setEditingId(conv.id);
+      setEditingTitle(conv.title);
+    }
+  };
+
+  const handleRenameConfirm = () => {
+    if (editingId && onRenameConversation && editingTitle.trim()) {
+      onRenameConversation(editingId, editingTitle.trim());
+    }
+    setEditingId(null);
+    setEditingTitle("");
+  };
+
+  const handleRenameCancel = () => {
+    setEditingId(null);
+    setEditingTitle("");
+  };
+
+  const handleRenameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleRenameConfirm();
+    } else if (e.key === "Escape") {
+      handleRenameCancel();
+    }
   };
 
   return (
@@ -103,23 +147,61 @@ export function ConversationSidebar({
                 >
                   <MessageSquare className="h-4 w-4 flex-shrink-0 opacity-60" />
                   <div className="flex-1 min-w-0 overflow-hidden">
-                    <p className="text-sm font-medium truncate">
-                      {conv.title}
-                    </p>
-                    <p className="text-xs opacity-60 truncate">
-                      {formatRelativeTime(conv.updatedAt)}
-                      {conv.messages.length > 0 && ` · ${conv.messages.length} msg${conv.messages.length !== 1 ? 's' : ''}`}
-                    </p>
+                    {editingId === conv.id ? (
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <Input
+                          ref={inputRef}
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onKeyDown={handleRenameKeyDown}
+                          onBlur={handleRenameConfirm}
+                          className="h-6 text-sm py-0 px-1"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 flex-shrink-0"
+                          onClick={handleRenameConfirm}
+                        >
+                          <Check className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 flex-shrink-0"
+                          onClick={handleRenameCancel}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <p 
+                          className="text-sm font-medium truncate"
+                          onDoubleClick={(e) => handleTitleDoubleClick(e, conv)}
+                          title="Double-click to rename"
+                        >
+                          {conv.title}
+                        </p>
+                        <p className="text-xs opacity-60 truncate">
+                          {formatRelativeTime(conv.updatedAt)}
+                          {conv.messages.length > 0 && ` · ${conv.messages.length} msg${conv.messages.length !== 1 ? 's' : ''}`}
+                        </p>
+                      </>
+                    )}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 flex-shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/20"
-                    onClick={(e) => handleDeleteClick(e, conv.id)}
-                    title="Delete conversation"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {/* DELETE BUTTON - Always visible */}
+                  {editingId !== conv.id && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 flex-shrink-0 opacity-70 hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/20"
+                      onClick={(e) => handleDeleteClick(e, conv.id)}
+                      title="Delete conversation"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               ))
             )}
