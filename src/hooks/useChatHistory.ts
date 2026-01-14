@@ -144,15 +144,19 @@ export function useChatHistory() {
   // Add a message to the current conversation
   const addMessage = useCallback((message: ChatMessage) => {
     setConversations(prev => {
-      // If no active conversation, create one
+      // If no active conversation OR active conversation doesn't exist in list, create one
       let convId = activeConversationId;
       let updatedConvs = [...prev];
       
-      if (!convId) {
+      // Check if convId is valid (exists in the list)
+      const convExists = convId ? updatedConvs.some(c => c.id === convId) : false;
+      
+      if (!convId || !convExists) {
         const newConv = createNewConversation();
         convId = newConv.id;
         updatedConvs = [newConv, ...updatedConvs];
-        setActiveConversationId(convId);
+        // Use setTimeout to avoid state update during render
+        setTimeout(() => setActiveConversationId(convId!), 0);
       }
 
       return updatedConvs.map(conv => {

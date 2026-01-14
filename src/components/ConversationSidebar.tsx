@@ -94,19 +94,19 @@ export function ConversationSidebar({
                 <div
                   key={conv.id}
                   className={cn(
-                    "group relative flex items-start gap-2 p-2 pr-1 rounded-lg cursor-pointer transition-colors",
+                    "group relative flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors",
                     conv.id === activeConversationId
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                   )}
                   onClick={() => onSelectConversation(conv.id)}
                 >
-                  <MessageSquare className="h-4 w-4 mt-0.5 flex-shrink-0 opacity-60" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate pr-1">
+                  <MessageSquare className="h-4 w-4 flex-shrink-0 opacity-60" />
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <p className="text-sm font-medium truncate">
                       {conv.title}
                     </p>
-                    <p className="text-xs opacity-60">
+                    <p className="text-xs opacity-60 truncate">
                       {formatRelativeTime(conv.updatedAt)}
                       {conv.messages.length > 0 && ` · ${conv.messages.length} msg${conv.messages.length !== 1 ? 's' : ''}`}
                     </p>
@@ -114,14 +114,11 @@ export function ConversationSidebar({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={cn(
-                      "h-7 w-7 flex-shrink-0 opacity-60 hover:opacity-100",
-                      "hover:bg-destructive/20 hover:text-destructive text-muted-foreground"
-                    )}
+                    className="h-7 w-7 flex-shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/20"
                     onClick={(e) => handleDeleteClick(e, conv.id)}
                     title="Delete conversation"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               ))
