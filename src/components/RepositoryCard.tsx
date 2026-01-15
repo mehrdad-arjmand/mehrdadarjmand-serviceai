@@ -14,6 +14,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, parse } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface Document {
   id: string;
@@ -41,6 +42,7 @@ interface RepositoryCardProps {
 }
 
 export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
+  const { isAdmin } = useUserRole();
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -714,7 +716,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                       <TableHead>Equipment make</TableHead>
                       <TableHead>Equipment model</TableHead>
                       <TableHead>Ingestion</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
+                      {isAdmin && <TableHead className="w-[50px]"></TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -779,19 +781,22 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                             </div>
                           )}
                         </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDelete(doc.id, doc.fileName);
-                            }}
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
+                        {isAdmin && (
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(doc.id, doc.fileName);
+                              }}
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              title="Delete document (Admin only)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))}
                   </TableBody>
