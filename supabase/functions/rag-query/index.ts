@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -88,13 +88,19 @@ Deno.serve(async (req) => {
     }
 
     // Verify the user's JWT token using getUser
+    const token = authHeader.replace('Bearer ', '')
     const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } }
+      global: { headers: { Authorization: authHeader } },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      }
     })
     
-    const { data: { user }, error: authError } = await authClient.auth.getUser()
+    const { data: { user }, error: authError } = await authClient.auth.getUser(token)
     
     if (authError || !user) {
+      console.error('Auth error:', authError?.message || 'No user found')
       return new Response(
         JSON.stringify({ error: 'Unauthorized: Invalid token' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
