@@ -310,6 +310,17 @@ export function useChatHistory() {
     activeConversationIdRef.current = id;
   }, []);
 
+  // Reorder conversations (for drag-and-drop)
+  const reorderConversations = useCallback((fromIndex: number, toIndex: number) => {
+    setConversations(prev => {
+      const updated = [...prev];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
+      conversationsRef.current = updated;
+      return updated;
+    });
+  }, []);
+
   return {
     messages,
     filters,
@@ -324,5 +335,6 @@ export function useChatHistory() {
     deleteConversation,
     switchConversation,
     ensureActiveConversation,
+    reorderConversations,
   };
 }
