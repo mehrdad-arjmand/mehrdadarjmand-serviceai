@@ -146,7 +146,7 @@ export function ConversationSidebar({
                   onClick={() => onSelectConversation(conv.id)}
                 >
                   <MessageSquare className="h-4 w-4 flex-shrink-0 opacity-60" />
-                  <div className="flex-1 min-w-0 overflow-hidden">
+                  <div className="flex-1 min-w-0 pr-1">
                     {editingId === conv.id ? (
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <Input
@@ -177,9 +177,9 @@ export function ConversationSidebar({
                     ) : (
                       <>
                         <p 
-                          className="text-sm font-medium truncate"
+                          className="text-sm font-medium truncate max-w-[140px]"
                           onDoubleClick={(e) => handleTitleDoubleClick(e, conv)}
-                          title="Double-click to rename"
+                          title={conv.title}
                         >
                           {conv.title}
                         </p>
