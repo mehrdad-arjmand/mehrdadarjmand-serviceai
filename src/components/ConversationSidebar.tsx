@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, MessageSquare, Trash2, Check, X } from "lucide-react";
+import { Plus, MessageSquare, Trash2, Check, X, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ interface ConversationSidebarProps {
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onRenameConversation?: (id: string, newTitle: string) => void;
+  onReorderConversations?: (fromIndex: number, toIndex: number) => void;
 }
 
 // Format relative time
@@ -47,11 +48,14 @@ export function ConversationSidebar({
   onSelectConversation,
   onDeleteConversation,
   onRenameConversation,
+  onReorderConversations,
 }: ConversationSidebarProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Focus input when editing starts
@@ -111,6 +115,39 @@ export function ConversationSidebar({
     }
   };
 
+  // Drag handlers
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", index.toString());
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (draggedIndex !== null && draggedIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, toIndex: number) => {
+    e.preventDefault();
+    if (draggedIndex !== null && draggedIndex !== toIndex && onReorderConversations) {
+      onReorderConversations(draggedIndex, toIndex);
+    }
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   return (
     <>
       <div className="flex flex-col h-full bg-sidebar-background border-r border-sidebar-border">
@@ -134,17 +171,33 @@ export function ConversationSidebar({
                 No conversations yet
               </div>
             ) : (
-              conversations.map((conv) => (
+              conversations.map((conv, index) => (
                 <div
                   key={conv.id}
+                  draggable={editingId !== conv.id}
+                  onDragStart={(e) => handleDragStart(e, index)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, index)}
+                  onDragEnd={handleDragEnd}
                   className={cn(
-                    "group relative flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors",
+                    "group relative flex items-center gap-1.5 p-2 rounded-lg cursor-pointer transition-all",
                     conv.id === activeConversationId
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
+                      : "hover:bg-sidebar-accent/50 text-sidebar-foreground",
+                    draggedIndex === index && "opacity-50",
+                    dragOverIndex === index && "border-t-2 border-primary"
                   )}
                   onClick={() => onSelectConversation(conv.id)}
                 >
+                  {/* Drag handle */}
+                  <div 
+                    className="flex-shrink-0 cursor-grab active:cursor-grabbing opacity-40 hover:opacity-70"
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <GripVertical className="h-4 w-4" />
+                  </div>
+                  
                   <MessageSquare className="h-4 w-4 flex-shrink-0 opacity-60" />
                   <div className="flex-1 min-w-0 pr-1">
                     {editingId === conv.id ? (
@@ -177,7 +230,7 @@ export function ConversationSidebar({
                     ) : (
                       <>
                         <p 
-                          className="text-sm font-medium truncate max-w-[140px]"
+                          className="text-sm font-medium truncate max-w-[120px]"
                           onDoubleClick={(e) => handleTitleDoubleClick(e, conv)}
                           title={conv.title}
                         >
