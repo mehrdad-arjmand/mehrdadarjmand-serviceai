@@ -394,16 +394,16 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
   const selectedDoc = documents.find(doc => doc.id === selectedDocId);
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle>Upload documents</CardTitle>
-        <CardDescription>
+    <Card className="w-full border-border/50 shadow-premium bg-card">
+      <CardHeader className="pb-4">
+        <CardTitle className="text-xl tracking-tight">Upload documents</CardTitle>
+        <CardDescription className="text-muted-foreground font-normal">
           Add PDFs, Word files, or text documents to build your knowledge base.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Upload Area */}
-        <div className="border-2 border-dashed border-border rounded-lg p-12 text-center hover:border-muted-foreground/50 transition-colors cursor-pointer">
+      <CardContent className="space-y-8">
+        {/* Upload Area - Premium drop zone */}
+        <div className="relative border-2 border-dashed border-border/60 rounded-2xl p-16 text-center hover:border-muted-foreground/40 hover:bg-muted/30 transition-all duration-300 cursor-pointer group">
           <input
             type="file"
             id="file-upload"
@@ -412,22 +412,24 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
             className="hidden"
             onChange={handleFileChange}
           />
-          <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-3">
-            <Upload className="h-10 w-10 text-muted-foreground" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-foreground">
+          <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center group-hover:bg-accent transition-colors duration-300">
+              <Upload className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-base font-medium text-foreground">
                 {selectedFiles.length > 0 
                   ? `${selectedFiles.length} file(s) selected` 
                   : "Click to upload or drag and drop"}
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm text-muted-foreground font-normal">
                 PDF, DOCX, or TXT files (multiple allowed)
               </p>
             </div>
           </label>
         </div>
 
-        <Separator />
+        <Separator className="bg-border/50" />
 
         {/* Metadata Form */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
