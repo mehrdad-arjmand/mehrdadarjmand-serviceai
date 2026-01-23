@@ -686,9 +686,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
   };
 
   return (
-    <div className="flex h-[calc(100vh-12rem)] min-h-[500px] border border-border rounded-lg overflow-hidden bg-card">
+    <div className="flex h-[calc(100vh-14rem)] min-h-[500px] border border-border/50 rounded-2xl overflow-hidden bg-card shadow-premium">
       {/* Left sidebar - Conversation list */}
-      <div className="w-64 flex-shrink-0 hidden md:block">
+      <div className="w-72 flex-shrink-0 hidden md:block">
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -701,15 +701,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
       </div>
 
       {/* Main chat panel */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-background">
         {/* Header */}
-        <div className="p-4 border-b border-border bg-card flex-shrink-0">
+        <div className="px-6 py-5 border-b border-border/50 bg-card flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 className="text-lg font-semibold text-foreground tracking-tight">
                 Technician Assistant
               </h2>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground font-normal mt-0.5">
                 Ask questions about your equipment and procedures
               </p>
             </div>
@@ -718,7 +718,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               variant="outline"
               size="sm"
               onClick={startNewConversation}
-              className="h-8 md:hidden"
+              className="h-9 md:hidden rounded-lg"
               title="Start new conversation"
             >
               New
@@ -728,13 +728,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
         {/* Filters Section */}
         {hasDocuments && (
-          <div className="p-4 border-b border-border bg-muted/30 flex-shrink-0">
-            <div className="flex items-center justify-between mb-3">
+          <div className="px-6 py-4 border-b border-border/50 bg-muted/20 flex-shrink-0">
+            <div className="flex items-center justify-between mb-4">
               <Label className="text-sm font-medium">Optional Filters</Label>
-              <span className="text-xs text-muted-foreground">Leave empty to search all documents</span>
+              <span className="text-xs text-muted-foreground font-normal">Leave empty to search all documents</span>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Document Type */}
               <div className="space-y-1.5">
                 <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
@@ -873,11 +873,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         )}
 
         {/* Scrollable chat + sources area with fixed proportions */}
-        <div className="flex-1 overflow-hidden flex flex-col p-4 min-h-0">
+        <div className="flex-1 overflow-hidden flex flex-col p-6 min-h-0">
           {/* Chat History - guaranteed minimum height */}
           <div 
             ref={chatContainerRef}
-            className="flex-1 min-h-[200px] overflow-y-auto space-y-3 p-3 bg-muted/20 rounded-lg border border-border"
+            className="flex-1 min-h-[200px] overflow-y-auto space-y-4 p-4 bg-muted/10 rounded-xl border border-border/30"
           >
             {chatHistory.length === 0 && !isQuerying ? (
               <div className="flex-1 flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -889,14 +889,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                   <div
                     key={msg.id}
                     className={cn(
-                      "p-3 rounded-lg text-sm",
+                      "p-4 rounded-xl text-sm transition-all duration-200",
                       msg.role === "user" 
-                        ? "bg-primary/10 ml-8" 
-                        : "bg-muted mr-8"
+                        ? "bg-primary/5 ml-12 border border-primary/10" 
+                        : "bg-card mr-12 shadow-sm border border-border/30"
                     )}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-muted-foreground font-medium">
                         {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
                       </span>
                       {msg.role === "assistant" && (
@@ -904,16 +904,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                           variant="ghost"
                           size="sm"
                           onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
-                          className="h-6 px-2 text-xs"
+                          className="h-7 px-2.5 text-xs rounded-lg hover:bg-muted transition-colors"
                         >
                           {isSpeaking ? (
                             <>
-                              <VolumeX className="h-3 w-3 mr-1" />
+                              <VolumeX className="h-3.5 w-3.5 mr-1.5" />
                               Stop
                             </>
                           ) : (
                             <>
-                              <Volume2 className="h-3 w-3 mr-1" />
+                              <Volume2 className="h-3.5 w-3.5 mr-1.5" />
                               Listen
                             </>
                           )}
@@ -921,20 +921,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                       )}
                     </div>
                     {msg.role === "assistant" ? (
-                      <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1">
+                      <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1.5 prose-p:leading-relaxed">
                         <ReactMarkdown>{msg.content}</ReactMarkdown>
                       </div>
                     ) : (
-                      <span className="text-foreground">{msg.content}</span>
+                      <span className="text-foreground leading-relaxed">{msg.content}</span>
                     )}
                   </div>
                 ))}
                 
                 {/* Loading indicator */}
                 {isQuerying && (
-                  <div className="p-3 rounded-lg text-sm bg-muted mr-8">
-                    <span className="text-xs text-muted-foreground block mb-1">Service AI</span>
-                    <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="p-4 rounded-xl text-sm bg-card mr-12 shadow-sm border border-border/30">
+                    <span className="text-xs text-muted-foreground font-medium block mb-2">Service AI</span>
+                    <div className="flex items-center gap-2.5 text-muted-foreground">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       <span>Thinking...</span>
                     </div>
@@ -946,27 +946,27 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
           {/* Sources - constrained max height with scroll */}
           {sources.length > 0 && (
-            <div className="mt-3 flex-shrink-0 max-h-[30%]">
-              <h4 className="text-sm font-medium text-muted-foreground mb-2">
+            <div className="mt-4 flex-shrink-0 max-h-[30%]">
+              <h4 className="text-sm font-medium text-muted-foreground mb-3">
                 Referenced Context ({sources.length} sources)
               </h4>
               <div className="space-y-2 max-h-32 overflow-y-auto">
                 {sources.map((source, idx) => (
                   <details key={idx} className="group">
                     <summary className="cursor-pointer list-none">
-                      <div className="flex items-start gap-2 p-2 bg-muted/50 rounded hover:bg-muted transition-colors text-sm">
-                        <span className="font-medium text-primary">[{idx + 1}]</span>
+                      <div className="flex items-start gap-3 p-3 bg-muted/30 rounded-xl hover:bg-muted/50 transition-colors text-sm border border-border/20">
+                        <span className="font-semibold text-foreground">[{idx + 1}]</span>
                         <div className="flex-1">
                           <p className="font-medium text-foreground">
                             {source.filename} (Chunk {source.chunkIndex})
                           </p>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground mt-0.5">
                             Similarity: {(source.similarity * 100).toFixed(1)}%
                           </p>
                         </div>
                       </div>
                     </summary>
-                    <div className="mt-1 ml-6 p-2 bg-background border border-border rounded text-xs text-muted-foreground max-h-24 overflow-y-auto">
+                    <div className="mt-2 ml-8 p-3 bg-card border border-border/30 rounded-xl text-xs text-muted-foreground max-h-24 overflow-y-auto">
                       {source.text}
                     </div>
                   </details>
@@ -977,8 +977,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
         </div>
 
         {/* Input Area - fixed at bottom */}
-        <div className="p-4 border-t border-border bg-card flex-shrink-0">
-          <div className="space-y-2">
+        <div className="px-6 py-5 border-t border-border/50 bg-card flex-shrink-0">
+          <div className="space-y-3">
             <Textarea
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
@@ -1001,21 +1001,21 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                   handleSend();
                 }
               }}
-              className="resize-none"
+              className="resize-none rounded-xl border-border/50 bg-muted/30 focus:bg-background transition-colors"
             />
             
             {/* Control bar */}
             <div className="flex items-center justify-between">
               {/* Left side - status */}
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-muted-foreground font-normal">
                 {!hasDocuments ? (
                   <span>Upload documents to start ({chunksCount} chunks indexed)</span>
                 ) : isDictating ? (
-                  <span className="text-primary animate-pulse">Recording... Click mic to stop</span>
+                  <span className="text-foreground animate-pulse">Recording... Click mic to stop</span>
                 ) : isConversationMode ? (
                   <span className={cn(
-                    conversationState === "listening" && "text-primary animate-pulse",
-                    conversationState === "speaking" && "text-primary"
+                    conversationState === "listening" && "text-foreground animate-pulse",
+                    conversationState === "speaking" && "text-foreground"
                   )}>
                     Conversation: {conversationState === "listening" ? "Listening..." : 
                                    conversationState === "processing" ? "Thinking..." : 
@@ -1025,14 +1025,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               </div>
               
               {/* Right side - action buttons */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-2">
                 {/* Conversation mode active: show Stop only */}
                 {isConversationMode && (
                   <Button
                     onClick={handleConversationToggle}
                     variant="destructive"
                     size="icon"
-                    className="h-9 w-9 rounded-full"
+                    className="h-10 w-10 rounded-xl shadow-sm"
                     title="End conversation"
                   >
                     <Square className="h-4 w-4" />
@@ -1049,8 +1049,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                       variant={isDictating ? "destructive" : "ghost"}
                       size="icon"
                       className={cn(
-                        "h-9 w-9 rounded-full",
-                        isDictating && "animate-pulse"
+                        "h-10 w-10 rounded-xl transition-all duration-200",
+                        isDictating && "animate-pulse shadow-sm"
                       )}
                       title={isDictating ? "Stop recording" : "Start dictation"}
                     >
@@ -1064,7 +1064,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                         disabled={isQuerying || !hasDocuments}
                         variant="ghost"
                         size="icon"
-                        className="h-9 w-9 rounded-full"
+                        className="h-10 w-10 rounded-xl transition-all duration-200"
                         title="Start voice conversation"
                       >
                         <AudioWaveform className="h-4 w-4" />
@@ -1074,7 +1074,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
                         onClick={handleSend}
                         disabled={isQuerying || !hasDocuments || !hasText}
                         size="icon"
-                        className="h-9 w-9 rounded-full bg-primary text-primary-foreground"
+                        className="h-10 w-10 rounded-xl bg-foreground text-background hover:bg-foreground/90 shadow-sm transition-all duration-200"
                         title="Send question"
                       >
                         {isQuerying ? (

@@ -150,24 +150,24 @@ export function ConversationSidebar({
 
   return (
     <>
-      <div className="flex flex-col h-full bg-sidebar-background border-r border-sidebar-border">
+      <div className="flex flex-col h-full bg-sidebar-background border-r border-sidebar-border/50">
         {/* Header with New button */}
-        <div className="p-3 border-b border-sidebar-border">
+        <div className="p-4 border-b border-sidebar-border/50">
           <Button
             onClick={onNewConversation}
             variant="outline"
-            className="w-full justify-start gap-2 h-9 bg-sidebar-accent hover:bg-sidebar-accent/80"
+            className="w-full justify-start gap-2.5 h-10 bg-sidebar-accent/60 hover:bg-sidebar-accent border-sidebar-border/50 rounded-xl transition-all duration-200"
           >
             <Plus className="h-4 w-4" />
-            New conversation
+            <span className="font-medium">New conversation</span>
           </Button>
         </div>
 
         {/* Conversation list */}
         <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
+          <div className="p-3 space-y-1">
             {conversations.length === 0 ? (
-              <div className="p-4 text-center text-sm text-sidebar-foreground/60">
+              <div className="p-6 text-center text-sm text-sidebar-foreground/50 font-normal">
                 No conversations yet
               </div>
             ) : (
@@ -181,9 +181,9 @@ export function ConversationSidebar({
                   onDrop={(e) => handleDrop(e, index)}
                   onDragEnd={handleDragEnd}
                   className={cn(
-                    "group relative flex items-center gap-1.5 p-2 rounded-lg cursor-pointer transition-all",
+                    "group relative flex items-center gap-2 p-3 rounded-xl cursor-pointer transition-all duration-200",
                     conv.id === activeConversationId
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
                       : "hover:bg-sidebar-accent/50 text-sidebar-foreground",
                     draggedIndex === index && "opacity-50",
                     dragOverIndex === index && "border-t-2 border-primary"
