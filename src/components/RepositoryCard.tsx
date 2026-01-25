@@ -14,7 +14,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, parse } from "date-fns";
 import { cn } from "@/lib/utils";
-import { useUserRole } from "@/hooks/useUserRole";
+import { TabPermissions } from "@/hooks/usePermissions";
 
 interface Document {
   id: string;
@@ -39,10 +39,12 @@ interface Document {
 
 interface RepositoryCardProps {
   onDocumentSelect?: (id: string | null) => void;
+  permissions: TabPermissions;
 }
 
-export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
-  const { isAdmin } = useUserRole();
+export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCardProps) => {
+  const canWrite = permissions.write;
+  const canDelete = permissions.delete;
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -396,40 +398,46 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
   return (
     <Card className="w-full border-border/50 shadow-premium bg-card">
       <CardHeader className="pb-4">
-        <CardTitle className="text-xl tracking-tight">Upload documents</CardTitle>
+        <CardTitle className="text-xl tracking-tight">
+          {canWrite ? "Upload documents" : "Document Repository"}
+        </CardTitle>
         <CardDescription className="text-muted-foreground font-normal">
-          Add PDFs, Word files, or text documents to build your knowledge base.
+          {canWrite 
+            ? "Add PDFs, Word files, or text documents to build your knowledge base."
+            : "View documents in the knowledge base."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
-        {/* Upload Area - Premium drop zone */}
-        <div className="relative border-2 border-dashed border-border/60 rounded-2xl p-16 text-center hover:border-muted-foreground/40 hover:bg-muted/30 transition-all duration-300 cursor-pointer group">
-          <input
-            type="file"
-            id="file-upload"
-            multiple
-            accept=".pdf,.docx,.txt"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-          <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center group-hover:bg-accent transition-colors duration-300">
-              <Upload className="h-6 w-6 text-muted-foreground" />
+        {/* Upload Area - Only show if user has write permission */}
+        {canWrite && (
+          <>
+            <div className="relative border-2 border-dashed border-border/60 rounded-2xl p-16 text-center hover:border-muted-foreground/40 hover:bg-muted/30 transition-all duration-300 cursor-pointer group">
+              <input
+                type="file"
+                id="file-upload"
+                multiple
+                accept=".pdf,.docx,.txt"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center group-hover:bg-accent transition-colors duration-300">
+                  <Upload className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-base font-medium text-foreground">
+                    {selectedFiles.length > 0 
+                      ? `${selectedFiles.length} file(s) selected` 
+                      : "Click to upload or drag and drop"}
+                  </p>
+                  <p className="text-sm text-muted-foreground font-normal">
+                    PDF, DOCX, or TXT files (multiple allowed)
+                  </p>
+                </div>
+              </label>
             </div>
-            <div className="space-y-1.5">
-              <p className="text-base font-medium text-foreground">
-                {selectedFiles.length > 0 
-                  ? `${selectedFiles.length} file(s) selected` 
-                  : "Click to upload or drag and drop"}
-              </p>
-              <p className="text-sm text-muted-foreground font-normal">
-                PDF, DOCX, or TXT files (multiple allowed)
-              </p>
-            </div>
-          </label>
-        </div>
 
-        <Separator className="bg-border/50" />
+            <Separator className="bg-border/50" />
 
         {/* Metadata Form */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -699,6 +707,8 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
             {isUploading ? "Uploading..." : "Upload"}
           </Button>
         </div>
+          </>
+        )}
 
         {/* Documents Table */}
         {documents.length > 0 && (
@@ -718,7 +728,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                       <TableHead>Equipment make</TableHead>
                       <TableHead>Equipment model</TableHead>
                       <TableHead>Ingestion</TableHead>
-                      {isAdmin && <TableHead className="w-[50px]"></TableHead>}
+                      {canDelete && <TableHead className="w-[50px]"></TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -783,7 +793,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                             </div>
                           )}
                         </TableCell>
-                        {isAdmin && (
+                        {canDelete && (
                           <TableCell>
                             <Button
                               variant="ghost"
@@ -793,7 +803,7 @@ export const RepositoryCard = ({ onDocumentSelect }: RepositoryCardProps) => {
                                 handleDelete(doc.id, doc.fileName);
                               }}
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              title="Delete document (Admin only)"
+                              title="Delete document"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>

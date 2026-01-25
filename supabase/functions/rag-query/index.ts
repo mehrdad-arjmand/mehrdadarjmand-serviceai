@@ -112,6 +112,29 @@ Deno.serve(async (req) => {
     // Use service role client for database operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
+    // Check permission: assistant.write required for querying
+    const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
+      p_tab: 'assistant',
+      p_action: 'write',
+      p_user_id: user.id
+    })
+
+    if (permError) {
+      console.error('Permission check error:', permError)
+      return new Response(
+        JSON.stringify({ error: 'Permission check failed' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (!hasPermission) {
+      console.log(`User ${user.id} denied: assistant.write permission required`)
+      return new Response(
+        JSON.stringify({ error: 'Forbidden: You do not have permission to query the assistant' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Validate content-type
     const contentType = req.headers.get('content-type')
     if (!contentType?.includes('application/json')) {
