@@ -26,9 +26,12 @@ import { CalendarIcon } from "lucide-react";
 import { format, parse } from "date-fns";
 import { cn } from "@/lib/utils";
 
+import { TabPermissions } from "@/hooks/usePermissions";
+
 interface TechnicianChatProps {
   hasDocuments: boolean;
   chunksCount: number;
+  permissions: TabPermissions;
 }
 
 interface Source {
@@ -38,7 +41,9 @@ interface Source {
   similarity: number;
 }
 
-export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProps) => {
+export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: TechnicianChatProps) => {
+  const canWrite = permissions.write;
+  const canDelete = permissions.delete;
   const [question, setQuestion] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
@@ -697,6 +702,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
           onDeleteConversation={deleteConversation}
           onRenameConversation={renameConversation}
           onReorderConversations={reorderConversations}
+          canDelete={canDelete}
         />
       </div>
 
@@ -978,31 +984,37 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
 
         {/* Input Area - fixed at bottom */}
         <div className="px-6 py-5 border-t border-border/50 bg-card flex-shrink-0">
-          <div className="space-y-3">
-            <Textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder={
-                isConversationMode 
-                  ? conversationState === "listening" 
-                    ? "Listening..." 
-                    : conversationState === "processing" 
-                      ? "Processing..." 
-                      : conversationState === "speaking" 
-                        ? "Speaking..." 
-                        : "Voice conversation active..."
-                  : "What troubleshooting steps should I take?"
-              }
-              rows={3}
-              disabled={isQuerying || isConversationMode}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) {
-                  e.preventDefault();
-                  handleSend();
+          {!canWrite ? (
+            <div className="text-center py-4 text-muted-foreground">
+              <p className="text-sm">You have read-only access to the assistant.</p>
+              <p className="text-xs mt-1">Contact an administrator for write permissions.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Textarea
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder={
+                  isConversationMode 
+                    ? conversationState === "listening" 
+                      ? "Listening..." 
+                      : conversationState === "processing" 
+                        ? "Processing..." 
+                        : conversationState === "speaking" 
+                          ? "Speaking..." 
+                          : "Voice conversation active..."
+                    : "What troubleshooting steps should I take?"
                 }
-              }}
-              className="resize-none rounded-xl border-border/50 bg-muted/30 focus:bg-background transition-colors"
-            />
+                rows={3}
+                disabled={isQuerying || isConversationMode}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                className="resize-none rounded-xl border-border/50 bg-muted/30 focus:bg-background transition-colors"
+              />
             
             {/* Control bar */}
             <div className="flex items-center justify-between">
@@ -1089,6 +1101,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount }: TechnicianChatProp
               </div>
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>

@@ -61,11 +61,13 @@ Deno.serve(async (req) => {
     }
 
     // Verify the user's JWT token using getUser
+    const token = authHeader.replace('Bearer ', '')
     const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } }
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false, autoRefreshToken: false }
     })
     
-    const { data: { user }, error: authError } = await authClient.auth.getUser()
+    const { data: { user }, error: authError } = await authClient.auth.getUser(token)
     
     if (authError || !user) {
       return new Response(
@@ -78,6 +80,29 @@ Deno.serve(async (req) => {
 
     // Use service role client for database operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+    // Check permission: repository.write required for uploading
+    const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
+      p_tab: 'repository',
+      p_action: 'write',
+      p_user_id: user.id
+    })
+
+    if (permError) {
+      console.error('Permission check error:', permError)
+      return new Response(
+        JSON.stringify({ error: 'Permission check failed' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (!hasPermission) {
+      console.log(`User ${user.id} denied: repository.write permission required`)
+      return new Response(
+        JSON.stringify({ error: 'Forbidden: You do not have permission to upload documents' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     // Validate content-type
     const contentType = req.headers.get('content-type')
