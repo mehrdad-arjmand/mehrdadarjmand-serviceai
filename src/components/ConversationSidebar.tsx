@@ -24,6 +24,7 @@ interface ConversationSidebarProps {
   onDeleteConversation: (id: string) => void;
   onRenameConversation?: (id: string, newTitle: string) => void;
   onReorderConversations?: (fromIndex: number, toIndex: number) => void;
+  canDelete?: boolean;
 }
 
 // Format relative time
@@ -49,6 +50,7 @@ export function ConversationSidebar({
   onDeleteConversation,
   onRenameConversation,
   onReorderConversations,
+  canDelete = true,
 }: ConversationSidebarProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
@@ -243,8 +245,8 @@ export function ConversationSidebar({
                       </>
                     )}
                   </div>
-                  {/* DELETE BUTTON - Always visible */}
-                  {editingId !== conv.id && (
+                  {/* DELETE BUTTON - Only visible if canDelete */}
+                  {editingId !== conv.id && canDelete && (
                     <Button
                       variant="ghost"
                       size="icon"
