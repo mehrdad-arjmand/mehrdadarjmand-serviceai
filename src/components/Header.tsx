@@ -1,9 +1,8 @@
-import { LogOut } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
+import { UserMenu } from "@/components/UserMenu";
 
 export const Header = () => {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
 
   return (
     <header className="sticky top-0 z-50 glass border-b border-border/50">
@@ -23,22 +22,7 @@ export const Header = () => {
         </div>
 
         {/* User actions */}
-        {user && (
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground hidden sm:inline font-normal">
-              {user.email}
-            </span>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={signOut} 
-              className="gap-2 text-muted-foreground hover:text-foreground hover:bg-accent/80 transition-all duration-200"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">Sign out</span>
-            </Button>
-          </div>
-        )}
+        {user && <UserMenu />}
       </div>
     </header>
   );

@@ -112,6 +112,7 @@ export type Database = {
           assistant_read: boolean
           assistant_write: boolean
           created_at: string | null
+          description: string | null
           id: string
           repository_delete: boolean
           repository_read: boolean
@@ -124,6 +125,7 @@ export type Database = {
           assistant_read?: boolean
           assistant_write?: boolean
           created_at?: string | null
+          description?: string | null
           id?: string
           repository_delete?: boolean
           repository_read?: boolean
@@ -136,6 +138,7 @@ export type Database = {
           assistant_read?: boolean
           assistant_write?: boolean
           created_at?: string | null
+          description?: string | null
           id?: string
           repository_delete?: boolean
           repository_read?: boolean
@@ -171,6 +174,44 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      assign_user_role: {
+        Args: {
+          p_role: Database["public"]["Enums"]["app_role"]
+          p_user_id: string
+        }
+        Returns: undefined
+      }
+      create_role: {
+        Args: {
+          p_assistant_delete?: boolean
+          p_assistant_read?: boolean
+          p_assistant_write?: boolean
+          p_description?: string
+          p_repository_delete?: boolean
+          p_repository_read?: boolean
+          p_repository_write?: boolean
+          p_role: Database["public"]["Enums"]["app_role"]
+        }
+        Returns: undefined
+      }
+      delete_role: {
+        Args: { p_role: Database["public"]["Enums"]["app_role"] }
+        Returns: undefined
+      }
+      get_all_roles: {
+        Args: never
+        Returns: {
+          assistant_delete: boolean
+          assistant_read: boolean
+          assistant_write: boolean
+          description: string
+          repository_delete: boolean
+          repository_read: boolean
+          repository_write: boolean
+          role: Database["public"]["Enums"]["app_role"]
+          user_count: number
+        }[]
+      }
       get_user_permissions: {
         Args: { p_user_id?: string }
         Returns: {
@@ -195,6 +236,15 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: never; Returns: boolean }
+      list_users_with_roles: {
+        Args: never
+        Returns: {
+          email: string
+          role: Database["public"]["Enums"]["app_role"]
+          role_assigned_at: string
+          user_id: string
+        }[]
+      }
       match_chunks: {
         Args: {
           match_count?: number
@@ -212,6 +262,19 @@ export type Database = {
           site: string
           text: string
         }[]
+      }
+      update_role_permissions: {
+        Args: {
+          p_assistant_delete?: boolean
+          p_assistant_read?: boolean
+          p_assistant_write?: boolean
+          p_description?: string
+          p_repository_delete?: boolean
+          p_repository_read?: boolean
+          p_repository_write?: boolean
+          p_role: Database["public"]["Enums"]["app_role"]
+        }
+        Returns: undefined
       }
     }
     Enums: {
