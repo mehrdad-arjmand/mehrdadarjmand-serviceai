@@ -52,18 +52,28 @@ export const UserMenu = () => {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        
+        {/* Profile/Settings - available to all users */}
+        <DropdownMenuItem 
+          onClick={() => navigate('/settings')}
+          className="cursor-pointer"
+        >
+          <Settings className="mr-2 h-4 w-4" />
+          <span>Settings</span>
+        </DropdownMenuItem>
+        
+        {/* Admin-only: Roles Management */}
         {isAdmin && (
-          <>
-            <DropdownMenuItem 
-              onClick={() => navigate('/admin/roles')}
-              className="cursor-pointer"
-            >
-              <Shield className="mr-2 h-4 w-4" />
-              <span>Manage Roles & Permissions</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
+          <DropdownMenuItem 
+            onClick={() => navigate('/admin/roles')}
+            className="cursor-pointer"
+          >
+            <Shield className="mr-2 h-4 w-4" />
+            <span>Manage Roles & Permissions</span>
+          </DropdownMenuItem>
         )}
+        
+        <DropdownMenuSeparator />
         <DropdownMenuItem 
           onClick={signOut}
           className="cursor-pointer text-destructive focus:text-destructive"
