@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, ChevronDown, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
@@ -22,6 +22,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { CalendarIcon } from "lucide-react";
 import { format, parse } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -732,150 +733,158 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
           </div>
         </div>
 
-        {/* Filters Section */}
+        {/* Collapsible Filters Section */}
         {hasDocuments && (
-          <div className="px-6 py-4 border-b border-border/50 bg-muted/20 flex-shrink-0">
-            <div className="flex items-center justify-between mb-4">
-              <Label className="text-sm font-medium">Optional Filters</Label>
-              <span className="text-xs text-muted-foreground font-normal">Leave empty to search all documents</span>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Document Type */}
-              <div className="space-y-1.5">
-                <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
-                <Select 
-                  value={currentFilters.docType || "__all__"} 
-                  onValueChange={(v) => handleFilterChange("docType", v)}
-                  disabled={filtersLocked}
-                >
-                  <SelectTrigger id="filter-doc-type" className="h-9">
-                    <SelectValue placeholder="All types" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">All types</SelectItem>
-                    {docTypes.map((type) => (
-                      <SelectItem key={type} value={type}>{type}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Upload Date */}
-              <div className="space-y-1.5">
-                <Label htmlFor="filter-upload-date" className="text-xs">Upload Date</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      id="filter-upload-date"
-                      variant="outline"
+          <Collapsible defaultOpen={false} className="border-b border-border/50 bg-muted/20 flex-shrink-0">
+            <CollapsibleTrigger asChild>
+              <button className="w-full px-6 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors">
+                <div className="flex items-center gap-2">
+                  <ChevronRight className="h-4 w-4 transition-transform duration-200 [[data-state=open]>&]:rotate-90" />
+                  <Label className="text-sm font-medium cursor-pointer">Optional Filters</Label>
+                </div>
+                <span className="text-xs text-muted-foreground font-normal">Leave empty to search all documents</span>
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-6 pb-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Document Type */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
+                    <Select 
+                      value={currentFilters.docType || "__all__"} 
+                      onValueChange={(v) => handleFilterChange("docType", v)}
                       disabled={filtersLocked}
-                      className={cn(
-                        "h-9 w-full justify-between text-left font-normal",
-                        !currentFilters.uploadDate && "text-muted-foreground"
-                      )}
                     >
-                      {currentFilters.uploadDate 
-                        ? format(parse(currentFilters.uploadDate, 'yyyy-MM-dd', new Date()), "PPP") 
-                        : "Any date"}
-                      <CalendarIcon className="h-4 w-4 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={currentFilters.uploadDate 
-                        ? parse(currentFilters.uploadDate, 'yyyy-MM-dd', new Date()) 
-                        : undefined}
-                      onSelect={(date) => handleFilterChange("uploadDate", date ? format(date, 'yyyy-MM-dd') : undefined)}
-                      initialFocus
-                      className="pointer-events-auto"
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
+                      <SelectTrigger id="filter-doc-type" className="h-9">
+                        <SelectValue placeholder="All types" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All types</SelectItem>
+                        {docTypes.map((type) => (
+                          <SelectItem key={type} value={type}>{type}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              {/* Site */}
-              <div className="space-y-1.5">
-                <Label htmlFor="filter-site" className="text-xs">Site</Label>
-                <Select 
-                  value={currentFilters.site || "__all__"} 
-                  onValueChange={(v) => handleFilterChange("site", v)}
-                  disabled={filtersLocked}
-                >
-                  <SelectTrigger id="filter-site" className="h-9">
-                    <SelectValue placeholder="All sites" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">All sites</SelectItem>
-                    {sites.map((s) => (
-                      <SelectItem key={s} value={s}>{s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  {/* Upload Date */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="filter-upload-date" className="text-xs">Upload Date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          id="filter-upload-date"
+                          variant="outline"
+                          disabled={filtersLocked}
+                          className={cn(
+                            "h-9 w-full justify-between text-left font-normal",
+                            !currentFilters.uploadDate && "text-muted-foreground"
+                          )}
+                        >
+                          {currentFilters.uploadDate 
+                            ? format(parse(currentFilters.uploadDate, 'yyyy-MM-dd', new Date()), "PPP") 
+                            : "Any date"}
+                          <CalendarIcon className="h-4 w-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={currentFilters.uploadDate 
+                            ? parse(currentFilters.uploadDate, 'yyyy-MM-dd', new Date()) 
+                            : undefined}
+                          onSelect={(date) => handleFilterChange("uploadDate", date ? format(date, 'yyyy-MM-dd') : undefined)}
+                          initialFocus
+                          className="pointer-events-auto"
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
 
-              {/* Equipment Type */}
-              <div className="space-y-1.5">
-                <Label htmlFor="filter-equipment-type" className="text-xs">Equipment Type</Label>
-                <Select 
-                  value={currentFilters.equipmentType || "__all__"} 
-                  onValueChange={(v) => handleFilterChange("equipmentType", v)}
-                  disabled={filtersLocked}
-                >
-                  <SelectTrigger id="filter-equipment-type" className="h-9">
-                    <SelectValue placeholder="All types" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">All types</SelectItem>
-                    {equipmentTypes.map((type) => (
-                      <SelectItem key={type} value={type}>{type}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  {/* Site */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="filter-site" className="text-xs">Site</Label>
+                    <Select 
+                      value={currentFilters.site || "__all__"} 
+                      onValueChange={(v) => handleFilterChange("site", v)}
+                      disabled={filtersLocked}
+                    >
+                      <SelectTrigger id="filter-site" className="h-9">
+                        <SelectValue placeholder="All sites" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All sites</SelectItem>
+                        {sites.map((s) => (
+                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              {/* Equipment Make */}
-              <div className="space-y-1.5">
-                <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
-                <Select 
-                  value={currentFilters.equipmentMake || "__all__"} 
-                  onValueChange={(v) => handleFilterChange("equipmentMake", v)}
-                  disabled={filtersLocked}
-                >
-                  <SelectTrigger id="filter-equipment-make" className="h-9">
-                    <SelectValue placeholder="All makes" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">All makes</SelectItem>
-                    {equipmentMakes.map((make) => (
-                      <SelectItem key={make} value={make}>{make}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  {/* Equipment Type */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="filter-equipment-type" className="text-xs">Equipment Type</Label>
+                    <Select 
+                      value={currentFilters.equipmentType || "__all__"} 
+                      onValueChange={(v) => handleFilterChange("equipmentType", v)}
+                      disabled={filtersLocked}
+                    >
+                      <SelectTrigger id="filter-equipment-type" className="h-9">
+                        <SelectValue placeholder="All types" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All types</SelectItem>
+                        {equipmentTypes.map((type) => (
+                          <SelectItem key={type} value={type}>{type}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              {/* Equipment Model */}
-              <div className="space-y-1.5">
-                <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
-                <Select 
-                  value={currentFilters.equipmentModel || "__all__"} 
-                  onValueChange={(v) => handleFilterChange("equipmentModel", v)}
-                  disabled={filtersLocked}
-                >
-                  <SelectTrigger id="filter-equipment-model" className="h-9">
-                    <SelectValue placeholder="All models" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">All models</SelectItem>
-                    {equipmentModels.map((model) => (
-                      <SelectItem key={model} value={model}>{model}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  {/* Equipment Make */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
+                    <Select 
+                      value={currentFilters.equipmentMake || "__all__"} 
+                      onValueChange={(v) => handleFilterChange("equipmentMake", v)}
+                      disabled={filtersLocked}
+                    >
+                      <SelectTrigger id="filter-equipment-make" className="h-9">
+                        <SelectValue placeholder="All makes" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All makes</SelectItem>
+                        {equipmentMakes.map((make) => (
+                          <SelectItem key={make} value={make}>{make}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Equipment Model */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
+                    <Select 
+                      value={currentFilters.equipmentModel || "__all__"} 
+                      onValueChange={(v) => handleFilterChange("equipmentModel", v)}
+                      disabled={filtersLocked}
+                    >
+                      <SelectTrigger id="filter-equipment-model" className="h-9">
+                        <SelectValue placeholder="All models" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All models</SelectItem>
+                        {equipmentModels.map((model) => (
+                          <SelectItem key={model} value={model}>{model}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            </CollapsibleContent>
+          </Collapsible>
         )}
 
         {/* Scrollable chat + sources area with fixed proportions */}
