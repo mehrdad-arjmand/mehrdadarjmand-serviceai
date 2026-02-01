@@ -113,6 +113,7 @@ export type Database = {
           assistant_write: boolean
           created_at: string | null
           description: string | null
+          display_name: string | null
           id: string
           repository_delete: boolean
           repository_read: boolean
@@ -126,6 +127,7 @@ export type Database = {
           assistant_write?: boolean
           created_at?: string | null
           description?: string | null
+          display_name?: string | null
           id?: string
           repository_delete?: boolean
           repository_read?: boolean
@@ -139,6 +141,7 @@ export type Database = {
           assistant_write?: boolean
           created_at?: string | null
           description?: string | null
+          display_name?: string | null
           id?: string
           repository_delete?: boolean
           repository_read?: boolean
