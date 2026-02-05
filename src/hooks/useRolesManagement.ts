@@ -167,6 +167,99 @@ export function useRolesManagement() {
     }
   };
 
+  const createRole = async (
+    role: AppRole,
+    permissions: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>> = {}
+  ) => {
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase.rpc('create_role', {
+        p_role: role,
+        p_description: permissions.description || null,
+        p_repository_read: permissions.repository_read ?? false,
+        p_repository_write: permissions.repository_write ?? false,
+        p_repository_delete: permissions.repository_delete ?? false,
+        p_assistant_read: permissions.assistant_read ?? false,
+        p_assistant_write: permissions.assistant_write ?? false,
+        p_assistant_delete: permissions.assistant_delete ?? false,
+      });
+
+      if (error) {
+        console.error('Error creating role:', error);
+        toast({
+          title: "Error",
+          description: error.message || "Failed to create role.",
+          variant: "destructive",
+        });
+        return false;
+      }
+
+      toast({
+        title: "Success",
+        description: `Created ${role} role.`,
+      });
+      
+      await fetchRoles();
+      return true;
+    } catch (err) {
+      console.error('Error creating role:', err);
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred.",
+        variant: "destructive",
+      });
+      return false;
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const deleteRole = async (role: AppRole) => {
+    if (role === 'admin') {
+      toast({
+        title: "Error",
+        description: "Cannot delete the admin role.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase.rpc('delete_role', {
+        p_role: role,
+      });
+
+      if (error) {
+        console.error('Error deleting role:', error);
+        toast({
+          title: "Error",
+          description: error.message || "Failed to delete role.",
+          variant: "destructive",
+        });
+        return false;
+      }
+
+      toast({
+        title: "Success",
+        description: `Deleted ${role} role.`,
+      });
+      
+      await fetchRoles();
+      return true;
+    } catch (err) {
+      console.error('Error deleting role:', err);
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred.",
+        variant: "destructive",
+      });
+      return false;
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return {
     roles,
     users,
@@ -175,5 +268,7 @@ export function useRolesManagement() {
     refetch,
     updateRolePermissions,
     assignUserRole,
+    createRole,
+    deleteRole,
   };
 }
