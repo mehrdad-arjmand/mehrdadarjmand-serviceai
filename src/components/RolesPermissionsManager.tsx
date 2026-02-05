@@ -21,9 +21,29 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Pencil, Users } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Loader2, Pencil, Plus, Trash2, Users } from "lucide-react";
 import type { RoleWithPermissions } from "@/hooks/useRolesManagement";
 import type { AppRole } from "@/hooks/usePermissions";
+import { Constants } from "@/integrations/supabase/types";
+
+const ALL_ROLES = Constants.public.Enums.app_role as readonly AppRole[];
 
 interface RolesPermissionsManagerProps {
   roles: RoleWithPermissions[];
@@ -32,15 +52,31 @@ interface RolesPermissionsManagerProps {
     role: AppRole,
     updates: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>>
   ) => Promise<boolean>;
+  onCreateRole: (
+    role: AppRole,
+    permissions?: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>>
+  ) => Promise<boolean>;
+  onDeleteRole: (role: AppRole) => Promise<boolean>;
 }
 
 export const RolesPermissionsManager = ({
   roles,
   isUpdating,
   onUpdateRole,
+  onCreateRole,
+  onDeleteRole,
 }: RolesPermissionsManagerProps) => {
   const [editingRole, setEditingRole] = useState<RoleWithPermissions | null>(null);
   const [editForm, setEditForm] = useState<Partial<RoleWithPermissions>>({});
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [newRole, setNewRole] = useState<AppRole | ''>('');
+  const [newRoleDescription, setNewRoleDescription] = useState('');
+  const [deletingRole, setDeletingRole] = useState<RoleWithPermissions | null>(null);
+
+  // Get available roles that haven't been created yet
+  const availableRoles = ALL_ROLES.filter(
+    (role) => !roles.some((r) => r.role === role)
+  );
 
   const handleEditClick = (role: RoleWithPermissions) => {
     setEditingRole(role);
@@ -83,14 +119,42 @@ export const RolesPermissionsManager = ({
     </Badge>
   );
 
+  const handleCreateRole = async () => {
+    if (!newRole) return;
+    
+    const success = await onCreateRole(newRole, { description: newRoleDescription || null });
+    if (success) {
+      setIsCreateDialogOpen(false);
+      setNewRole('');
+      setNewRoleDescription('');
+    }
+  };
+
+  const handleDeleteRole = async () => {
+    if (!deletingRole) return;
+    
+    const success = await onDeleteRole(deletingRole.role);
+    if (success) {
+      setDeletingRole(null);
+    }
+  };
+
   return (
     <>
       <Card className="border border-border/60 shadow-sm">
-        <div className="p-6 border-b border-border/60">
-          <h3 className="text-lg font-semibold text-foreground">Role Definitions</h3>
-          <p className="text-sm text-muted-foreground mt-1">
-            Configure permissions for each role. Changes apply immediately to all users with that role.
-          </p>
+        <div className="p-6 border-b border-border/60 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-foreground">Role Definitions</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Configure permissions for each role. Changes apply immediately to all users with that role.
+            </p>
+          </div>
+          {availableRoles.length > 0 && (
+            <Button onClick={() => setIsCreateDialogOpen(true)} disabled={isUpdating}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Role
+            </Button>
+          )}
         </div>
         
         <div className="overflow-x-auto">
@@ -102,7 +166,7 @@ export const RolesPermissionsManager = ({
                 <TableHead className="text-center">Repository<br /><span className="text-xs font-normal">R / W / D</span></TableHead>
                 <TableHead className="text-center">Assistant<br /><span className="text-xs font-normal">R / W / D</span></TableHead>
                 <TableHead className="text-center w-[80px]">Users</TableHead>
-                <TableHead className="w-[80px]"></TableHead>
+                <TableHead className="w-[100px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -133,14 +197,28 @@ export const RolesPermissionsManager = ({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleEditClick(role)}
-                      disabled={isUpdating}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEditClick(role)}
+                        disabled={isUpdating}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      {role.role !== 'admin' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDeletingRole(role)}
+                          disabled={isUpdating || role.user_count > 0}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          title={role.user_count > 0 ? "Cannot delete: users assigned" : "Delete role"}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -259,6 +337,80 @@ export const RolesPermissionsManager = ({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Create Role Dialog */}
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="sm:max-w-[400px] bg-background">
+          <DialogHeader>
+            <DialogTitle>Add New Role</DialogTitle>
+            <DialogDescription>
+              Create a new role from available role types. You can configure permissions after creation.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-role">Role Type</Label>
+              <Select value={newRole} onValueChange={(value) => setNewRole(value as AppRole)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a role type..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableRoles.map((role) => (
+                    <SelectItem key={role} value={role} className="capitalize">
+                      {role}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="new-role-description">Description (optional)</Label>
+              <Input
+                id="new-role-description"
+                placeholder="Brief description of this role..."
+                value={newRoleDescription}
+                onChange={(e) => setNewRoleDescription(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} disabled={isUpdating}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateRole} disabled={isUpdating || !newRole}>
+              {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Create Role
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Role Confirmation */}
+      <AlertDialog open={!!deletingRole} onOpenChange={(open) => !open && setDeletingRole(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Role</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the <span className="font-semibold capitalize">{deletingRole?.role}</span> role? 
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isUpdating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleDeleteRole}
+              disabled={isUpdating}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };
