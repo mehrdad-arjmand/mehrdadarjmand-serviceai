@@ -103,6 +103,8 @@ const AdminRoles = () => {
               roles={rolesManagement.roles}
               isUpdating={rolesManagement.isUpdating}
               onUpdateRole={rolesManagement.updateRolePermissions}
+              onCreateRole={rolesManagement.createRole}
+              onDeleteRole={rolesManagement.deleteRole}
             />
           </TabsContent>
 
