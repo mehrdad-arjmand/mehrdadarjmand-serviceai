@@ -118,7 +118,7 @@ export type Database = {
           repository_delete: boolean
           repository_read: boolean
           repository_write: boolean
-          role: Database["public"]["Enums"]["app_role"]
+          role: string
           updated_at: string | null
         }
         Insert: {
@@ -132,7 +132,7 @@ export type Database = {
           repository_delete?: boolean
           repository_read?: boolean
           repository_write?: boolean
-          role: Database["public"]["Enums"]["app_role"]
+          role: string
           updated_at?: string | null
         }
         Update: {
@@ -146,8 +146,32 @@ export type Database = {
           repository_delete?: boolean
           repository_read?: boolean
           repository_write?: boolean
-          role?: Database["public"]["Enums"]["app_role"]
+          role?: string
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      signup_config: {
+        Row: {
+          created_at: string | null
+          id: string
+          key: string
+          updated_at: string | null
+          value: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          key: string
+          updated_at?: string | null
+          value: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          key?: string
+          updated_at?: string | null
+          value?: string
         }
         Relationships: []
       }
@@ -155,19 +179,19 @@ export type Database = {
         Row: {
           created_at: string | null
           id: string
-          role: Database["public"]["Enums"]["app_role"]
+          role: string
           user_id: string
         }
         Insert: {
           created_at?: string | null
           id?: string
-          role: Database["public"]["Enums"]["app_role"]
+          role: string
           user_id: string
         }
         Update: {
           created_at?: string | null
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          role?: string
           user_id?: string
         }
         Relationships: []
@@ -178,10 +202,7 @@ export type Database = {
     }
     Functions: {
       assign_user_role: {
-        Args: {
-          p_role: Database["public"]["Enums"]["app_role"]
-          p_user_id: string
-        }
+        Args: { p_role: string; p_user_id: string }
         Returns: undefined
       }
       create_role: {
@@ -193,14 +214,11 @@ export type Database = {
           p_repository_delete?: boolean
           p_repository_read?: boolean
           p_repository_write?: boolean
-          p_role: Database["public"]["Enums"]["app_role"]
+          p_role: string
         }
         Returns: undefined
       }
-      delete_role: {
-        Args: { p_role: Database["public"]["Enums"]["app_role"] }
-        Returns: undefined
-      }
+      delete_role: { Args: { p_role: string }; Returns: undefined }
       get_all_roles: {
         Args: never
         Returns: {
@@ -211,7 +229,7 @@ export type Database = {
           repository_delete: boolean
           repository_read: boolean
           repository_write: boolean
-          role: Database["public"]["Enums"]["app_role"]
+          role: string
           user_count: number
         }[]
       }
@@ -224,26 +242,20 @@ export type Database = {
           repository_delete: boolean
           repository_read: boolean
           repository_write: boolean
-          role: Database["public"]["Enums"]["app_role"]
+          role: string
         }[]
       }
       has_permission: {
         Args: { p_action: string; p_tab: string; p_user_id?: string }
         Returns: boolean
       }
-      has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
-        }
-        Returns: boolean
-      }
+      has_role: { Args: { _role: string; _user_id: string }; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       list_users_with_roles: {
         Args: never
         Returns: {
           email: string
-          role: Database["public"]["Enums"]["app_role"]
+          role: string
           role_assigned_at: string
           user_id: string
         }[]
@@ -272,16 +284,17 @@ export type Database = {
           p_assistant_read?: boolean
           p_assistant_write?: boolean
           p_description?: string
+          p_new_role_name?: string
           p_repository_delete?: boolean
           p_repository_read?: boolean
           p_repository_write?: boolean
-          p_role: Database["public"]["Enums"]["app_role"]
+          p_role: string
         }
         Returns: undefined
       }
     }
     Enums: {
-      app_role: "admin" | "user" | "manager" | "technician"
+      [_ in never]: never
     }
     CompositeTypes: {
       [_ in never]: never
@@ -408,8 +421,6 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {
-      app_role: ["admin", "user", "manager", "technician"],
-    },
+    Enums: {},
   },
 } as const
