@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -35,7 +34,7 @@ export const UsersRolesList = ({
 }: UsersRolesListProps) => {
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
-  const handleRoleChange = async (userId: string, newRole: AppRole) => {
+  const handleRoleChange = async (userId: string, newRole: string) => {
     setUpdatingUserId(userId);
     await onAssignRole(userId, newRole);
     setUpdatingUserId(null);
@@ -98,13 +97,13 @@ export const UsersRolesList = ({
                       )}
                       <Select
                         value={user.role || ''}
-                        onValueChange={(value) => handleRoleChange(user.user_id, value as AppRole)}
+                        onValueChange={(value) => handleRoleChange(user.user_id, value)}
                         disabled={isUpdating}
                       >
                         <SelectTrigger className="w-[140px]">
                           <SelectValue placeholder="No role">
                             {user.role ? (
-                              <span className="capitalize">{user.role}</span>
+                              <span>{user.role}</span>
                             ) : (
                               <span className="text-muted-foreground">No role</span>
                             )}
@@ -112,7 +111,7 @@ export const UsersRolesList = ({
                         </SelectTrigger>
                         <SelectContent className="bg-popover border border-border z-50">
                           {roles.map((role) => (
-                            <SelectItem key={role.role} value={role.role} className="capitalize">
+                            <SelectItem key={role.role} value={role.role}>
                               {role.role}
                             </SelectItem>
                           ))}
