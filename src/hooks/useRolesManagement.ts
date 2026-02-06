@@ -84,12 +84,13 @@ export function useRolesManagement() {
 
   const updateRolePermissions = async (
     role: AppRole,
-    updates: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>>
+    updates: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>> & { newRoleName?: string }
   ) => {
     setIsUpdating(true);
     try {
       const { error } = await supabase.rpc('update_role_permissions', {
         p_role: role,
+        p_new_role_name: updates.newRoleName || null,
         p_description: updates.description,
         p_repository_read: updates.repository_read,
         p_repository_write: updates.repository_write,
@@ -109,9 +110,10 @@ export function useRolesManagement() {
         return false;
       }
 
+      const displayName = updates.newRoleName || role;
       toast({
         title: "Success",
-        description: `Updated permissions for ${role} role.`,
+        description: `Updated ${displayName} role.`,
       });
       
       await fetchRoles();
@@ -168,7 +170,7 @@ export function useRolesManagement() {
   };
 
   const createRole = async (
-    role: AppRole,
+    role: string,
     permissions: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>> = {}
   ) => {
     setIsUpdating(true);

@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
-export type AppRole = 'admin' | 'manager' | 'technician' | 'user';
+// AppRole is now a string since we support custom roles
+export type AppRole = string;
 
 export interface TabPermissions {
   read: boolean;
@@ -47,7 +48,7 @@ export function usePermissions(): UserPermissions {
       if (error) {
         console.error('Error fetching permissions:', error);
         // Default to basic user permissions if no role is assigned
-        setRole('user');
+        setRole('demo');
         setRepository({ read: true, write: false, delete: false });
         setAssistant({ read: true, write: true, delete: false });
       } else if (data && data.length > 0) {
@@ -64,15 +65,15 @@ export function usePermissions(): UserPermissions {
           delete: perms.assistant_delete,
         });
       } else {
-        // No role assigned - default to basic user permissions
-        console.log('No role assigned for user, using default user permissions');
-        setRole('user');
+        // No role assigned - default to demo permissions
+        console.log('No role assigned for user, using default demo permissions');
+        setRole('demo');
         setRepository({ read: true, write: false, delete: false });
         setAssistant({ read: true, write: true, delete: false });
       }
     } catch (err) {
       console.error('Error fetching permissions:', err);
-      setRole('user');
+      setRole('demo');
       setRepository({ read: true, write: false, delete: false });
       setAssistant({ read: true, write: true, delete: false });
     } finally {

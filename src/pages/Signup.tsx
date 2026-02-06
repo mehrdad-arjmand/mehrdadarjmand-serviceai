@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,43 @@ export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [phoneLast4, setPhoneLast4] = useState("");
+  const [expectedPhoneLast4, setExpectedPhoneLast4] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [phoneError, setPhoneError] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  // Fetch the expected phone last 4 digits from database
+  useEffect(() => {
+    const fetchPhoneConfig = async () => {
+      const { data, error } = await supabase
+        .from('signup_config')
+        .select('value')
+        .eq('key', 'phone_last_4')
+        .single();
+      
+      if (!error && data) {
+        setExpectedPhoneLast4(data.value);
+      }
+    };
+    fetchPhoneConfig();
+  }, []);
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPhoneError(false);
+    
+    // Validate phone last 4 digits
+    if (expectedPhoneLast4 && phoneLast4 !== expectedPhoneLast4) {
+      setPhoneError(true);
+      toast({
+        variant: "destructive",
+        title: "Verification failed",
+        description: "The last 4 digits of the phone number are not correct.",
+      });
+      return;
+    }
     
     if (password !== confirmPassword) {
       toast({
@@ -81,6 +112,32 @@ export default function Signup() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phoneLast4">Last 4 Digits of Phone Number</Label>
+              <Input
+                id="phoneLast4"
+                type="text"
+                placeholder="1234"
+                maxLength={4}
+                value={phoneLast4}
+                onChange={(e) => {
+                  // Only allow digits
+                  const value = e.target.value.replace(/\D/g, '');
+                  setPhoneLast4(value);
+                  setPhoneError(false);
+                }}
+                className={phoneError ? "border-destructive focus-visible:ring-destructive" : ""}
+                required
+              />
+              {phoneError && (
+                <p className="text-sm text-destructive">
+                  The last 4 digits of the phone number are not correct.
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Enter the last 4 digits from the phone number on the resume
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
