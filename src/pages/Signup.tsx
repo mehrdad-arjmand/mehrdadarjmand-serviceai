@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -12,40 +12,59 @@ export default function Signup() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [phoneLast4, setPhoneLast4] = useState("");
-  const [expectedPhoneLast4, setExpectedPhoneLast4] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [phoneError, setPhoneError] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Fetch the expected phone last 4 digits from database
-  useEffect(() => {
-    const fetchPhoneConfig = async () => {
-      const { data, error } = await supabase
-        .from('signup_config')
-        .select('value')
-        .eq('key', 'phone_last_4')
-        .single();
-      
-      if (!error && data) {
-        setExpectedPhoneLast4(data.value);
-      }
-    };
-    fetchPhoneConfig();
-  }, []);
-
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPhoneError(false);
+  const validatePhoneLast4 = async (): Promise<boolean> => {
+    if (phoneLast4.length !== 4 || !/^\d{4}$/.test(phoneLast4)) {
+      setPhoneError(true);
+      toast({
+        variant: "destructive",
+        title: "Invalid input",
+        description: "Please enter exactly 4 digits.",
+      });
+      return false;
+    }
     
-    // Validate phone last 4 digits
-    if (expectedPhoneLast4 && phoneLast4 !== expectedPhoneLast4) {
+    // Use secure RPC function that doesn't expose the expected value
+    const { data, error } = await supabase.rpc('verify_phone_last_4', {
+      p_digits: phoneLast4
+    });
+    
+    if (error) {
+      console.error('Phone verification error:', error);
+      setPhoneError(true);
+      toast({
+        variant: "destructive",
+        title: "Verification failed",
+        description: "Unable to verify. Please try again.",
+      });
+      return false;
+    }
+    
+    if (!data) {
       setPhoneError(true);
       toast({
         variant: "destructive",
         title: "Verification failed",
         description: "The last 4 digits of the phone number are not correct.",
       });
+      return false;
+    }
+    
+    setPhoneError(false);
+    return true;
+  };
+
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPhoneError(false);
+    
+    // Validate phone last 4 digits
+    const phoneValid = await validatePhoneLast4();
+    if (!phoneValid) {
       return;
     }
     
