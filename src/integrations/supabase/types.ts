@@ -292,6 +292,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      verify_phone_last_4: { Args: { p_digits: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
