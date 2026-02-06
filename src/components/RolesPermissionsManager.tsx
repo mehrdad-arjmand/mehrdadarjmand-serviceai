@@ -31,29 +31,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Loader2, Pencil, Plus, Trash2, Users } from "lucide-react";
 import type { RoleWithPermissions } from "@/hooks/useRolesManagement";
 import type { AppRole } from "@/hooks/usePermissions";
-import { Constants } from "@/integrations/supabase/types";
-
-const ALL_ROLES = Constants.public.Enums.app_role as readonly AppRole[];
 
 interface RolesPermissionsManagerProps {
   roles: RoleWithPermissions[];
   isUpdating: boolean;
   onUpdateRole: (
     role: AppRole,
-    updates: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>>
+    updates: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>> & { newRoleName?: string }
   ) => Promise<boolean>;
   onCreateRole: (
-    role: AppRole,
+    role: string,
     permissions?: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>>
   ) => Promise<boolean>;
   onDeleteRole: (role: AppRole) => Promise<boolean>;
@@ -67,20 +57,16 @@ export const RolesPermissionsManager = ({
   onDeleteRole,
 }: RolesPermissionsManagerProps) => {
   const [editingRole, setEditingRole] = useState<RoleWithPermissions | null>(null);
-  const [editForm, setEditForm] = useState<Partial<RoleWithPermissions>>({});
+  const [editForm, setEditForm] = useState<Partial<RoleWithPermissions> & { newRoleName?: string }>({});
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [newRole, setNewRole] = useState<AppRole | ''>('');
+  const [newRoleName, setNewRoleName] = useState('');
   const [newRoleDescription, setNewRoleDescription] = useState('');
   const [deletingRole, setDeletingRole] = useState<RoleWithPermissions | null>(null);
-
-  // Get available roles that haven't been created yet
-  const availableRoles = ALL_ROLES.filter(
-    (role) => !roles.some((r) => r.role === role)
-  );
 
   const handleEditClick = (role: RoleWithPermissions) => {
     setEditingRole(role);
     setEditForm({
+      newRoleName: role.role,
       description: role.description || '',
       repository_read: role.repository_read,
       repository_write: role.repository_write,
@@ -94,7 +80,22 @@ export const RolesPermissionsManager = ({
   const handleSave = async () => {
     if (!editingRole) return;
     
-    const success = await onUpdateRole(editingRole.role, editForm);
+    const updates: Partial<Omit<RoleWithPermissions, 'role' | 'user_count'>> & { newRoleName?: string } = {
+      description: editForm.description,
+      repository_read: editForm.repository_read,
+      repository_write: editForm.repository_write,
+      repository_delete: editForm.repository_delete,
+      assistant_read: editForm.assistant_read,
+      assistant_write: editForm.assistant_write,
+      assistant_delete: editForm.assistant_delete,
+    };
+    
+    // Only include newRoleName if it's different from the original
+    if (editForm.newRoleName && editForm.newRoleName !== editingRole.role) {
+      updates.newRoleName = editForm.newRoleName;
+    }
+    
+    const success = await onUpdateRole(editingRole.role, updates);
     if (success) {
       setEditingRole(null);
       setEditForm({});
@@ -120,12 +121,12 @@ export const RolesPermissionsManager = ({
   );
 
   const handleCreateRole = async () => {
-    if (!newRole) return;
+    if (!newRoleName.trim()) return;
     
-    const success = await onCreateRole(newRole, { description: newRoleDescription || null });
+    const success = await onCreateRole(newRoleName.trim(), { description: newRoleDescription || null });
     if (success) {
       setIsCreateDialogOpen(false);
-      setNewRole('');
+      setNewRoleName('');
       setNewRoleDescription('');
     }
   };
@@ -139,6 +140,8 @@ export const RolesPermissionsManager = ({
     }
   };
 
+  const isAdminRole = (role: string) => role === 'admin';
+
   return (
     <>
       <Card className="border border-border/60 shadow-sm">
@@ -149,12 +152,10 @@ export const RolesPermissionsManager = ({
               Configure permissions for each role. Changes apply immediately to all users with that role.
             </p>
           </div>
-          {availableRoles.length > 0 && (
-            <Button onClick={() => setIsCreateDialogOpen(true)} disabled={isUpdating}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Role
-            </Button>
-          )}
+          <Button onClick={() => setIsCreateDialogOpen(true)} disabled={isUpdating}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Role
+          </Button>
         </div>
         
         <div className="overflow-x-auto">
@@ -172,7 +173,7 @@ export const RolesPermissionsManager = ({
             <TableBody>
               {roles.map((role) => (
                 <TableRow key={role.role}>
-                  <TableCell className="font-medium capitalize">{role.role}</TableCell>
+                  <TableCell className="font-medium">{role.role}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {role.description || <span className="italic">No description</span>}
                   </TableCell>
@@ -206,7 +207,7 @@ export const RolesPermissionsManager = ({
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      {role.role !== 'admin' && (
+                      {!isAdminRole(role.role) && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -231,7 +232,7 @@ export const RolesPermissionsManager = ({
       <Dialog open={!!editingRole} onOpenChange={(open) => !open && setEditingRole(null)}>
         <DialogContent className="sm:max-w-[500px] bg-background">
           <DialogHeader>
-            <DialogTitle className="capitalize">
+            <DialogTitle>
               Edit {editingRole?.role} Role
             </DialogTitle>
             <DialogDescription>
@@ -240,6 +241,22 @@ export const RolesPermissionsManager = ({
           </DialogHeader>
 
           <div className="space-y-6 py-4">
+            {/* Role Name (editable for non-admin roles) */}
+            {editingRole && !isAdminRole(editingRole.role) && (
+              <div className="space-y-2">
+                <Label htmlFor="roleName">Role Name</Label>
+                <Input
+                  id="roleName"
+                  placeholder="Role name..."
+                  value={editForm.newRoleName || ''}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, newRoleName: e.target.value }))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Renaming will update all users currently assigned to this role.
+                </p>
+              </div>
+            )}
+
             {/* Description */}
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
@@ -342,27 +359,24 @@ export const RolesPermissionsManager = ({
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent className="sm:max-w-[400px] bg-background">
           <DialogHeader>
-            <DialogTitle>Add New Role</DialogTitle>
+            <DialogTitle>Create New Role</DialogTitle>
             <DialogDescription>
-              Create a new role from available role types. You can configure permissions after creation.
+              Create a custom role with a unique name. You can configure permissions after creation.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="new-role">Role Type</Label>
-              <Select value={newRole} onValueChange={(value) => setNewRole(value as AppRole)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a role type..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableRoles.map((role) => (
-                    <SelectItem key={role} value={role} className="capitalize">
-                      {role}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="new-role-name">Role Name</Label>
+              <Input
+                id="new-role-name"
+                placeholder="e.g., viewer, editor, demo..."
+                value={newRoleName}
+                onChange={(e) => setNewRoleName(e.target.value.toLowerCase().replace(/\s+/g, '_'))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Use lowercase letters and underscores only.
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -380,7 +394,7 @@ export const RolesPermissionsManager = ({
             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} disabled={isUpdating}>
               Cancel
             </Button>
-            <Button onClick={handleCreateRole} disabled={isUpdating || !newRole}>
+            <Button onClick={handleCreateRole} disabled={isUpdating || !newRoleName.trim()}>
               {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Create Role
             </Button>
@@ -394,7 +408,7 @@ export const RolesPermissionsManager = ({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Role</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the <span className="font-semibold capitalize">{deletingRole?.role}</span> role? 
+              Are you sure you want to delete the <span className="font-semibold">{deletingRole?.role}</span> role? 
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
