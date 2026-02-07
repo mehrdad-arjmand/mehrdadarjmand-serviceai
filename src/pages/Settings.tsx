@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, User, Lock, Mail } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { Header } from "@/components/Header";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -70,7 +71,9 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-2xl px-4 py-8">
+      <Header />
+      
+      <main className="mx-auto px-8 py-10" style={{ maxWidth: "1040px" }}>
         <Button
           variant="ghost"
           onClick={() => navigate("/")}
@@ -80,7 +83,7 @@ export default function Settings() {
           Back to Home
         </Button>
 
-        <div className="space-y-6">
+        <div className="max-w-2xl space-y-6">
           {/* Account Information */}
           <Card>
             <CardHeader>
@@ -172,7 +175,7 @@ export default function Settings() {
             </CardContent>
           </Card>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

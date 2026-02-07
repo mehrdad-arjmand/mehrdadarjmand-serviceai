@@ -222,7 +222,7 @@ Deno.serve(async (req) => {
       historyLength: history?.length || 0
     })
 
-    // Generate embedding for the query
+    // Generate embedding for the query using Lovable AI
     const queryEmbedding = await generateEmbedding(question)
 
     // Perform vector similarity search with high count to ensure we get diverse results
@@ -544,26 +544,24 @@ async function enrichWithKeywordFallback(
   }
 }
 
+// Generate embedding using Lovable AI gateway (OpenAI-compatible)
 async function generateEmbedding(text: string): Promise<number[]> {
-  const GOOGLE_API_KEY = Deno.env.get('GOOGLE_API_KEY')
-  if (!GOOGLE_API_KEY) {
-    throw new Error('GOOGLE_API_KEY not configured')
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')
+  if (!LOVABLE_API_KEY) {
+    throw new Error('LOVABLE_API_KEY not configured')
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GOOGLE_API_KEY}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        content: {
-          parts: [{ text }]
-        }
-      })
-    }
-  )
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${LOVABLE_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: 'text-embedding-3-small',
+      input: text
+    })
+  })
 
   if (!response.ok) {
     const error = await response.text()
@@ -571,7 +569,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
   }
 
   const data = await response.json()
-  return data.embedding.values
+  return data.data[0].embedding
 }
 
 async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<string> {
