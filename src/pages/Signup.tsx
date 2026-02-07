@@ -27,14 +27,14 @@ export default function Signup() {
       });
       return false;
     }
-    
+
     // Use secure RPC function that doesn't expose the expected value
-    const { data, error } = await supabase.rpc('verify_phone_last_4', {
-      p_digits: phoneLast4
+    const { data, error } = await supabase.rpc("verify_phone_last_4", {
+      p_digits: phoneLast4,
     });
-    
+
     if (error) {
-      console.error('Phone verification error:', error);
+      console.error("Phone verification error:", error);
       setPhoneError(true);
       toast({
         variant: "destructive",
@@ -43,7 +43,7 @@ export default function Signup() {
       });
       return false;
     }
-    
+
     if (!data) {
       setPhoneError(true);
       toast({
@@ -53,7 +53,7 @@ export default function Signup() {
       });
       return false;
     }
-    
+
     setPhoneError(false);
     return true;
   };
@@ -61,13 +61,13 @@ export default function Signup() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setPhoneError(false);
-    
+
     // Validate phone last 4 digits
     const phoneValid = await validatePhoneLast4();
     if (!phoneValid) {
       return;
     }
-    
+
     if (password !== confirmPassword) {
       toast({
         variant: "destructive",
@@ -142,7 +142,7 @@ export default function Signup() {
                 value={phoneLast4}
                 onChange={(e) => {
                   // Only allow digits
-                  const value = e.target.value.replace(/\D/g, '');
+                  const value = e.target.value.replace(/\D/g, "");
                   setPhoneLast4(value);
                   setPhoneError(false);
                 }}
@@ -150,13 +150,9 @@ export default function Signup() {
                 required
               />
               {phoneError && (
-                <p className="text-sm text-destructive">
-                  The last 4 digits of the phone number are not correct.
-                </p>
+                <p className="text-sm text-destructive">The last 4 digits of the phone number are not correct.</p>
               )}
-              <p className="text-xs text-muted-foreground">
-                Enter the last 4 digits from the phone number on the resume
-              </p>
+              <p className="text-xs text-muted-foreground">Enter the last 4 digits of Mehrdad's phone number</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
