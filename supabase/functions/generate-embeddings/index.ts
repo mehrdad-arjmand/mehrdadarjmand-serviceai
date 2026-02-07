@@ -260,7 +260,7 @@ async function generateEmbeddings(texts: string[]): Promise<string[]> {
 
   const embeddings: string[] = []
 
-  // Process each text individually using gemini-embedding-001
+  // Process each text individually using gemini-embedding-001 with 768 dimensions
   for (const text of texts) {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`,
@@ -268,7 +268,8 @@ async function generateEmbeddings(texts: string[]): Promise<string[]> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          content: { parts: [{ text }] }
+          content: { parts: [{ text }] },
+          outputDimensionality: 768
         })
       }
     )
