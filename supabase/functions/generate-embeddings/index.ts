@@ -251,7 +251,12 @@ Deno.serve(async (req) => {
   }
 })
 
-// Generate embeddings using Google's Gemini Embedding API
+// Delay helper for rate limiting
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// Generate embeddings using Google's Gemini Embedding API with rate limiting
 async function generateEmbeddings(texts: string[]): Promise<string[]> {
   const apiKey = Deno.env.get('GOOGLE_API_KEY')
   if (!apiKey) {
@@ -259,30 +264,79 @@ async function generateEmbeddings(texts: string[]): Promise<string[]> {
   }
 
   const embeddings: string[] = []
+  const DELAY_BETWEEN_REQUESTS_MS = 700 // ~85 requests/minute to stay under 100/min limit
+  const MAX_RETRIES = 3
 
   // Process each text individually using gemini-embedding-001 with 768 dimensions
-  for (const text of texts) {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: { parts: [{ text }] },
-          outputDimensionality: 768
-        })
+  for (let i = 0; i < texts.length; i++) {
+    const text = texts[i]
+    let lastError: Error | null = null
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              content: { parts: [{ text }] },
+              outputDimensionality: 768
+            })
+          }
+        )
+
+        if (response.status === 429) {
+          // Rate limited - extract retry delay from response or use exponential backoff
+          const errorData = await response.json().catch(() => ({}))
+          const retryDelay = errorData?.error?.details?.find(
+            (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
+          )?.retryDelay
+          
+          // Parse delay like "24s" or use exponential backoff
+          let waitMs = attempt * 10000 // 10s, 20s, 30s
+          if (retryDelay) {
+            const seconds = parseFloat(retryDelay.replace('s', ''))
+            if (!isNaN(seconds)) {
+              waitMs = Math.ceil(seconds * 1000) + 1000 // Add 1s buffer
+            }
+          }
+          
+          console.log(`Rate limited on chunk ${i + 1}/${texts.length}, waiting ${waitMs}ms before retry ${attempt}/${MAX_RETRIES}`)
+          await delay(waitMs)
+          continue
+        }
+
+        if (!response.ok) {
+          const error = await response.text()
+          throw new Error(`Failed to generate embedding: ${error}`)
+        }
+
+        const data = await response.json()
+        // Convert to pgvector format string
+        const embedding = data.embedding.values
+        embeddings.push(`[${embedding.join(',')}]`)
+        
+        // Add delay between successful requests to avoid hitting rate limits
+        if (i < texts.length - 1) {
+          await delay(DELAY_BETWEEN_REQUESTS_MS)
+        }
+        
+        lastError = null
+        break // Success, exit retry loop
+        
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err))
+        if (attempt < MAX_RETRIES) {
+          console.log(`Error on chunk ${i + 1}, attempt ${attempt}: ${lastError.message}`)
+          await delay(attempt * 2000) // Exponential backoff for other errors
+        }
       }
-    )
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`Failed to generate embedding: ${error}`)
     }
-
-    const data = await response.json()
-    // Convert to pgvector format string
-    const embedding = data.embedding.values
-    embeddings.push(`[${embedding.join(',')}]`)
+    
+    if (lastError) {
+      throw lastError
+    }
   }
 
   return embeddings
