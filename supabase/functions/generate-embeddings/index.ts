@@ -181,7 +181,7 @@ Deno.serve(async (req) => {
       return text.slice(0, MAX_CHUNK_TEXT_LENGTH)
     })
 
-    // Generate embeddings using Google API directly
+    // Generate embeddings using Lovable AI gateway
     const embeddings = await generateEmbeddings(textsToEmbed)
 
     // Update each chunk with its embedding
@@ -251,26 +251,25 @@ Deno.serve(async (req) => {
   }
 })
 
+// Generate embeddings using Lovable AI gateway (OpenAI-compatible)
 async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const apiKey = Deno.env.get('GOOGLE_API_KEY')
+  const apiKey = Deno.env.get('LOVABLE_API_KEY')
   if (!apiKey) {
-    throw new Error('GOOGLE_API_KEY is not configured')
+    throw new Error('LOVABLE_API_KEY is not configured')
   }
 
-  // Use Google's batch embedding endpoint
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        requests: texts.map(text => ({
-          model: 'models/text-embedding-004',
-          content: { parts: [{ text }] }
-        }))
-      })
-    }
-  )
+  // Use Lovable AI gateway for embeddings
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: 'text-embedding-3-small',
+      input: texts
+    })
+  })
 
   if (!response.ok) {
     const error = await response.text()
@@ -278,5 +277,8 @@ async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   }
 
   const data = await response.json()
-  return data.embeddings.map((item: { values: number[] }) => item.values)
+  // Sort by index to ensure correct ordering
+  return data.data
+    .sort((a: any, b: any) => a.index - b.index)
+    .map((item: { embedding: number[] }) => item.embedding)
 }
