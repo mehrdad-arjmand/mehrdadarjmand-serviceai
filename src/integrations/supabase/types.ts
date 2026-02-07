@@ -60,6 +60,7 @@ export type Database = {
       }
       documents: {
         Row: {
+          allowed_roles: string[] | null
           doc_type: string | null
           equipment_make: string | null
           equipment_model: string | null
@@ -75,6 +76,7 @@ export type Database = {
           uploaded_at: string | null
         }
         Insert: {
+          allowed_roles?: string[] | null
           doc_type?: string | null
           equipment_make?: string | null
           equipment_model?: string | null
@@ -90,6 +92,7 @@ export type Database = {
           uploaded_at?: string | null
         }
         Update: {
+          allowed_roles?: string[] | null
           doc_type?: string | null
           equipment_make?: string | null
           equipment_model?: string | null

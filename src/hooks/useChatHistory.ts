@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
 export interface ChatMessage {
   id: string;
@@ -26,8 +27,9 @@ export interface Conversation {
   updatedAt: Date;
 }
 
-const STORAGE_KEY = "service-ai-conversations";
-const ACTIVE_CONVERSATION_KEY = "service-ai-active-conversation";
+// Storage keys are now user-specific
+const getStorageKey = (userId: string) => `service-ai-conversations-${userId}`;
+const getActiveConversationKey = (userId: string) => `service-ai-active-conversation-${userId}`;
 
 // Default empty filters
 export function getDefaultFilters(): ConversationFilters {
@@ -61,10 +63,11 @@ function createNewConversation(): Conversation {
   };
 }
 
-// Load conversations from localStorage
-function loadConversations(): Conversation[] {
+// Load conversations from localStorage for a specific user
+function loadConversations(userId: string | null): Conversation[] {
+  if (!userId) return [];
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(getStorageKey(userId));
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     return parsed.map((conv: any) => ({
@@ -82,38 +85,47 @@ function loadConversations(): Conversation[] {
   }
 }
 
-// Save conversations to localStorage
-function saveConversations(conversations: Conversation[]) {
+// Save conversations to localStorage for a specific user
+function saveConversations(userId: string | null, conversations: Conversation[]) {
+  if (!userId) return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+    localStorage.setItem(getStorageKey(userId), JSON.stringify(conversations));
   } catch (e) {
     console.error("Failed to save conversations:", e);
   }
 }
 
-// Load active conversation ID
-function loadActiveConversationId(): string | null {
+// Load active conversation ID for a specific user
+function loadActiveConversationId(userId: string | null): string | null {
+  if (!userId) return null;
   try {
-    return localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+    return localStorage.getItem(getActiveConversationKey(userId));
   } catch {
     return null;
   }
 }
 
-// Save active conversation ID
-function saveActiveConversationId(id: string) {
+// Save active conversation ID for a specific user
+function saveActiveConversationId(userId: string | null, id: string) {
+  if (!userId) return;
   try {
-    localStorage.setItem(ACTIVE_CONVERSATION_KEY, id);
+    localStorage.setItem(getActiveConversationKey(userId), id);
   } catch (e) {
     console.error("Failed to save active conversation ID:", e);
   }
 }
 
 export function useChatHistory() {
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations());
+  const { user } = useAuth();
+  const userId = user?.id || null;
+  
+  // Track previous user to detect user changes
+  const prevUserIdRef = useRef<string | null>(null);
+  
+  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations(userId));
   const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
-    const storedId = loadActiveConversationId();
-    const convs = loadConversations();
+    const storedId = loadActiveConversationId(userId);
+    const convs = loadConversations(userId);
     // Validate that stored ID exists, otherwise use first or create new
     if (storedId && convs.find(c => c.id === storedId)) {
       return storedId;
@@ -123,6 +135,33 @@ export function useChatHistory() {
     }
     return null;
   });
+
+  // Reload conversations when user changes
+  useEffect(() => {
+    if (prevUserIdRef.current !== userId) {
+      prevUserIdRef.current = userId;
+      
+      if (userId) {
+        // Load this user's conversations
+        const userConvs = loadConversations(userId);
+        setConversations(userConvs);
+        
+        // Load this user's active conversation
+        const storedId = loadActiveConversationId(userId);
+        if (storedId && userConvs.find(c => c.id === storedId)) {
+          setActiveConversationId(storedId);
+        } else if (userConvs.length > 0) {
+          setActiveConversationId(userConvs[0].id);
+        } else {
+          setActiveConversationId(null);
+        }
+      } else {
+        // No user - clear state
+        setConversations([]);
+        setActiveConversationId(null);
+      }
+    }
+  }, [userId]);
 
   // USE A REF to always have the latest activeConversationId
   // This prevents stale closure issues in addMessage
@@ -144,15 +183,15 @@ export function useChatHistory() {
 
   // Persist conversations whenever they change
   useEffect(() => {
-    saveConversations(conversations);
-  }, [conversations]);
+    saveConversations(userId, conversations);
+  }, [conversations, userId]);
 
   // Persist active conversation ID
   useEffect(() => {
-    if (activeConversationId) {
-      saveActiveConversationId(activeConversationId);
+    if (activeConversationId && userId) {
+      saveActiveConversationId(userId, activeConversationId);
     }
-  }, [activeConversationId]);
+  }, [activeConversationId, userId]);
 
   // Ensure there's always an active conversation - returns the ID synchronously
   const ensureActiveConversation = useCallback((): string => {
