@@ -124,6 +124,7 @@ Deno.serve(async (req) => {
     const equipmentType = formData.get('equipmentType')
     const equipmentMake = formData.get('equipmentMake')
     const equipmentModel = formData.get('equipmentModel')
+    const allowedRolesRaw = formData.get('allowedRoles')
 
     // Validate file count
     if (!files || files.length === 0) {
@@ -173,6 +174,19 @@ Deno.serve(async (req) => {
     const sanitizedEquipmentType = sanitizeMetadata(equipmentType)
     const sanitizedEquipmentMake = sanitizeMetadata(equipmentMake)
     const sanitizedEquipmentModel = sanitizeMetadata(equipmentModel)
+    
+    // Parse allowed roles
+    let allowedRoles: string[] = ['admin'] // Default to admin only
+    if (allowedRolesRaw && typeof allowedRolesRaw === 'string') {
+      try {
+        const parsed = JSON.parse(allowedRolesRaw)
+        if (Array.isArray(parsed) && parsed.every(r => typeof r === 'string')) {
+          allowedRoles = parsed
+        }
+      } catch {
+        console.log('Invalid allowedRoles format, using default')
+      }
+    }
 
     console.log(`Processing ${files.length} files`)
 
@@ -244,6 +258,7 @@ Deno.serve(async (req) => {
             total_chunks: totalChunks,
             ingested_chunks: 0,
             ingestion_status: 'in_progress',
+            allowed_roles: allowedRoles,
           })
 
         if (docError) throw docError

@@ -1,4 +1,4 @@
-import { Upload, FileText, Trash2, CalendarIcon, Loader2, CheckCircle, AlertCircle, Clock } from "lucide-react";
+import { Upload, FileText, Trash2, CalendarIcon, Loader2, CheckCircle, AlertCircle, Clock, Check, ChevronsUpDown } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,9 +10,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
-import { Calendar } from "@/components/ui/calendar";
+import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, parse } from "date-fns";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { TabPermissions } from "@/hooks/usePermissions";
 
@@ -35,6 +35,12 @@ interface Document {
   embeddedChunks: number;
   ingestionStatus: string;
   ingestionError: string | null;
+  allowedRoles: string[];
+}
+
+interface Role {
+  role: string;
+  displayName: string | null;
 }
 
 interface RepositoryCardProps {
@@ -50,13 +56,16 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const [documents, setDocuments] = useState<Document[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   
+  // Available roles for access control
+  const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
+  
   // Form state
   const [docType, setDocType] = useState<string>("");
-  const [uploadDate, setUploadDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [site, setSite] = useState<string>("");
   const [equipmentType, setEquipmentType] = useState<string>("");
   const [equipmentMake, setEquipmentMake] = useState<string>("");
   const [equipmentModel, setEquipmentModel] = useState<string>("");
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(["all"]); // Default to all roles
 
   // Dropdown options state
   const [docTypeOptions, setDocTypeOptions] = useState<string[]>([
@@ -87,6 +96,34 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const [newEquipmentType, setNewEquipmentType] = useState("");
   const [newEquipmentMake, setNewEquipmentMake] = useState("");
   const [newEquipmentModel, setNewEquipmentModel] = useState("");
+
+  // Role picker popover state
+  const [rolePickerOpen, setRolePickerOpen] = useState(false);
+
+  // Fetch available roles
+  useEffect(() => {
+    const fetchRoles = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('role_permissions')
+          .select('role, display_name')
+          .order('role');
+        
+        if (error) throw error;
+        
+        if (data) {
+          setAvailableRoles(data.map(r => ({
+            role: r.role,
+            displayName: r.display_name
+          })));
+        }
+      } catch (error) {
+        console.error('Error fetching roles:', error);
+      }
+    };
+    
+    fetchRoles();
+  }, []);
 
   const fetchDocuments = async () => {
     try {
@@ -136,6 +173,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               embeddedChunks,
               ingestionStatus: doc.ingestion_status || 'pending',
               ingestionError: doc.ingestion_error || null,
+              allowedRoles: (doc as any).allowed_roles || ['admin'],
             };
           })
         );
@@ -228,6 +266,47 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     }
   };
 
+  const handleRoleToggle = (role: string) => {
+    if (role === "all") {
+      // If "all" is selected, toggle between all and none
+      if (selectedRoles.includes("all")) {
+        setSelectedRoles([]);
+      } else {
+        setSelectedRoles(["all"]);
+      }
+    } else {
+      // Remove "all" if selecting specific roles
+      let newRoles = selectedRoles.filter(r => r !== "all");
+      
+      if (newRoles.includes(role)) {
+        newRoles = newRoles.filter(r => r !== role);
+      } else {
+        newRoles = [...newRoles, role];
+      }
+      
+      // If all individual roles are selected, switch to "all"
+      if (newRoles.length === availableRoles.length) {
+        setSelectedRoles(["all"]);
+      } else {
+        setSelectedRoles(newRoles);
+      }
+    }
+  };
+
+  const getSelectedRolesLabel = () => {
+    if (selectedRoles.includes("all")) {
+      return "All roles";
+    }
+    if (selectedRoles.length === 0) {
+      return "Select roles";
+    }
+    if (selectedRoles.length === 1) {
+      const role = availableRoles.find(r => r.role === selectedRoles[0]);
+      return role?.displayName || role?.role || selectedRoles[0];
+    }
+    return `${selectedRoles.length} roles selected`;
+  };
+
   const handleUpload = async () => {
     if (selectedFiles.length === 0) {
       toast({
@@ -247,17 +326,27 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       return;
     }
 
+    if (selectedRoles.length === 0) {
+      toast({
+        title: "Missing access roles",
+        description: "Please select at least one role that can access this document",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsUploading(true);
 
     try {
       const formData = new FormData();
       selectedFiles.forEach(file => formData.append('files', file));
       formData.append('docType', docType);
-      formData.append('uploadDate', uploadDate);
+      formData.append('uploadDate', new Date().toISOString().split('T')[0]); // Auto-set to today
       formData.append('site', site || '');
       formData.append('equipmentType', equipmentType);
       formData.append('equipmentMake', equipmentMake || '');
       formData.append('equipmentModel', equipmentModel || '');
+      formData.append('allowedRoles', JSON.stringify(selectedRoles));
 
       const { data, error } = await supabase.functions.invoke('ingest', {
         body: formData,
@@ -395,6 +484,18 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
   const selectedDoc = documents.find(doc => doc.id === selectedDocId);
 
+  const formatRolesDisplay = (roles: string[]) => {
+    if (roles.includes("all")) return "All";
+    if (roles.length === 0) return "None";
+    if (roles.length <= 2) {
+      return roles.map(r => {
+        const roleInfo = availableRoles.find(ar => ar.role === r);
+        return roleInfo?.displayName || r;
+      }).join(", ");
+    }
+    return `${roles.length} roles`;
+  };
+
   return (
     <Card className="w-full border-border/50 shadow-premium bg-card">
       <CardHeader className="pb-4">
@@ -487,31 +588,62 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
             )}
           </div>
 
-          {/* Upload Date */}
+          {/* Access Role Multi-Select */}
           <div className="space-y-2">
-            <Label htmlFor="upload-date">Upload date</Label>
-            <Popover>
+            <Label>Access role</Label>
+            <Popover open={rolePickerOpen} onOpenChange={setRolePickerOpen}>
               <PopoverTrigger asChild>
                 <Button
-                  id="upload-date"
                   variant="outline"
-                  className={cn(
-                    "h-10 w-full justify-between text-left font-normal",
-                    !uploadDate && "text-muted-foreground"
-                  )}
+                  role="combobox"
+                  aria-expanded={rolePickerOpen}
+                  className="h-10 w-full justify-between font-normal"
                 >
-                  {uploadDate ? format(parse(uploadDate, 'yyyy-MM-dd', new Date()), "PPP") : "Select date"}
-                  <CalendarIcon className="h-4 w-4 opacity-50" />
+                  {getSelectedRolesLabel()}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={uploadDate ? parse(uploadDate, 'yyyy-MM-dd', new Date()) : undefined}
-                  onSelect={(date) => setUploadDate(date ? format(date, 'yyyy-MM-dd') : '')}
-                  initialFocus
-                  className="pointer-events-auto"
-                />
+              <PopoverContent className="w-[280px] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search roles..." />
+                  <CommandList>
+                    <CommandEmpty>No roles found.</CommandEmpty>
+                    <CommandGroup>
+                      {/* All option */}
+                      <CommandItem
+                        value="all"
+                        onSelect={() => handleRoleToggle("all")}
+                      >
+                        <Check
+                          className={cn(
+                            "mr-2 h-4 w-4",
+                            selectedRoles.includes("all") ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                        All roles
+                      </CommandItem>
+                      <Separator className="my-1" />
+                      {/* Individual roles */}
+                      {availableRoles.map((role) => (
+                        <CommandItem
+                          key={role.role}
+                          value={role.role}
+                          onSelect={() => handleRoleToggle(role.role)}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              (selectedRoles.includes(role.role) || selectedRoles.includes("all"))
+                                ? "opacity-100" 
+                                : "opacity-0"
+                            )}
+                          />
+                          {role.displayName || role.role}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
               </PopoverContent>
             </Popover>
           </div>
@@ -703,7 +835,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
         {/* Upload Button */}
         <div className="flex justify-end">
-          <Button size="lg" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || !docType || !equipmentType}>
+          <Button size="lg" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || !docType || !equipmentType || selectedRoles.length === 0}>
             {isUploading ? "Uploading..." : "Upload"}
           </Button>
         </div>
@@ -716,13 +848,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
             <Separator />
             <div className="space-y-4">
               <h3 className="text-lg font-semibold">Documents</h3>
-              <div className="border rounded-lg">
+              <div className="border rounded-lg overflow-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Name</TableHead>
                       <TableHead>Document type</TableHead>
                       <TableHead>Upload date</TableHead>
+                      <TableHead>Access roles</TableHead>
                       <TableHead>Site</TableHead>
                       <TableHead>Equipment type</TableHead>
                       <TableHead>Equipment make</TableHead>
@@ -750,6 +883,11 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                         </TableCell>
                         <TableCell className="capitalize">{doc.docType}</TableCell>
                         <TableCell>{doc.uploadDate || '—'}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="text-xs">
+                            {formatRolesDisplay(doc.allowedRoles)}
+                          </Badge>
+                        </TableCell>
                         <TableCell>{doc.site || '—'}</TableCell>
                         <TableCell className="capitalize">{doc.equipmentType}</TableCell>
                         <TableCell>{doc.equipmentMake || '—'}</TableCell>
