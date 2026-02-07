@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
   }
 })
 
-// Generate embeddings using Google's Embedding API (text-embedding-004)
+// Generate embeddings using Google's Embedding API
 async function generateEmbeddings(texts: string[]): Promise<string[]> {
   const apiKey = Deno.env.get('GOOGLE_API_KEY')
   if (!apiKey) {
@@ -260,15 +260,14 @@ async function generateEmbeddings(texts: string[]): Promise<string[]> {
 
   const embeddings: string[] = []
 
-  // Process each text individually with Google's batch embedding
+  // Process each text individually
   for (const text of texts) {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'models/text-embedding-004',
           content: { parts: [{ text }] }
         })
       }
