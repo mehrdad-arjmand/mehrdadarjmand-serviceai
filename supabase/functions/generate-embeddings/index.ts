@@ -251,34 +251,39 @@ Deno.serve(async (req) => {
   }
 })
 
-// Generate embeddings using Lovable AI gateway (OpenAI-compatible)
-async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const apiKey = Deno.env.get('LOVABLE_API_KEY')
+// Generate embeddings using Google's Embedding API (text-embedding-004)
+async function generateEmbeddings(texts: string[]): Promise<string[]> {
+  const apiKey = Deno.env.get('GOOGLE_API_KEY')
   if (!apiKey) {
-    throw new Error('LOVABLE_API_KEY is not configured')
+    throw new Error('GOOGLE_API_KEY is not configured')
   }
 
-  // Use Lovable AI gateway for embeddings
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'text-embedding-3-small',
-      input: texts
-    })
-  })
+  const embeddings: string[] = []
 
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Failed to generate embeddings: ${error}`)
+  // Process each text individually with Google's batch embedding
+  for (const text of texts) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'models/text-embedding-004',
+          content: { parts: [{ text }] }
+        })
+      }
+    )
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`Failed to generate embedding: ${error}`)
+    }
+
+    const data = await response.json()
+    // Convert to pgvector format string
+    const embedding = data.embedding.values
+    embeddings.push(`[${embedding.join(',')}]`)
   }
 
-  const data = await response.json()
-  // Sort by index to ensure correct ordering
-  return data.data
-    .sort((a: any, b: any) => a.index - b.index)
-    .map((item: { embedding: number[] }) => item.embedding)
+  return embeddings
 }
