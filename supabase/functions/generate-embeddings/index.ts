@@ -6,7 +6,7 @@ const corsHeaders = {
 }
 
 // Process embeddings in small batches to avoid CPU timeout
-const BATCH_SIZE = 15
+const BATCH_SIZE = 10 // Reduced to stay well under 100 requests/min limit
 const MAX_CHUNK_TEXT_LENGTH = 10000 // Maximum text length per chunk for embedding
 
 // UUID validation
