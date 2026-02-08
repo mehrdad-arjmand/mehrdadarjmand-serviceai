@@ -208,6 +208,7 @@ export type Database = {
         Args: { p_role: string; p_user_id: string }
         Returns: undefined
       }
+      check_is_admin: { Args: { check_user_id: string }; Returns: boolean }
       create_role: {
         Args: {
           p_assistant_delete?: boolean
