@@ -67,22 +67,44 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const [equipmentModel, setEquipmentModel] = useState<string>("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>(["all"]); // Default to all roles
 
-  // Dropdown options state
-  const [docTypeOptions, setDocTypeOptions] = useState<string[]>([
-    "Manual",
-    "Daily / shift report",
-    "Procedure / SOP",
-    "Project document"
-  ]);
+  // Dropdown options state - loaded from database
+  const [docTypeOptions, setDocTypeOptions] = useState<string[]>([]);
   const [siteOptions, setSiteOptions] = useState<string[]>([]);
-  const [equipmentTypeOptions, setEquipmentTypeOptions] = useState<string[]>([
-    "Inverter",
-    "Battery",
-    "Converter",
-    "PCS"
-  ]);
+  const [equipmentTypeOptions, setEquipmentTypeOptions] = useState<string[]>([]);
   const [equipmentMakeOptions, setEquipmentMakeOptions] = useState<string[]>([]);
   const [equipmentModelOptions, setEquipmentModelOptions] = useState<string[]>([]);
+
+  // Load dropdown options from database
+  useEffect(() => {
+    const fetchDropdownOptions = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('dropdown_options')
+          .select('category, value')
+          .order('value');
+        
+        if (error) throw error;
+        
+        if (data) {
+          const docTypes = data.filter(d => d.category === 'docType').map(d => d.value);
+          const sites = data.filter(d => d.category === 'site').map(d => d.value);
+          const equipTypes = data.filter(d => d.category === 'equipmentType').map(d => d.value);
+          const equipMakes = data.filter(d => d.category === 'equipmentMake').map(d => d.value);
+          const equipModels = data.filter(d => d.category === 'equipmentModel').map(d => d.value);
+          
+          setDocTypeOptions(docTypes);
+          setSiteOptions(sites);
+          setEquipmentTypeOptions(equipTypes);
+          setEquipmentMakeOptions(equipMakes);
+          setEquipmentModelOptions(equipModels);
+        }
+      } catch (error) {
+        console.error('Error fetching dropdown options:', error);
+      }
+    };
+    
+    fetchDropdownOptions();
+  }, []);
 
   // Inline add state
   const [showDocTypeInput, setShowDocTypeInput] = useState(false);
@@ -226,39 +248,71 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     }
   };
 
-  const handleAddOption = (
+  const handleAddOption = async (
     type: 'docType' | 'site' | 'equipmentType' | 'equipmentMake' | 'equipmentModel',
-    value: string
+    value: string,
+    saveToDatabase: boolean = true
   ) => {
     if (!value.trim()) return;
 
+    // Save to database if requested (when clicking Add button)
+    if (saveToDatabase) {
+      try {
+        const { error } = await supabase
+          .from('dropdown_options')
+          .insert({ category: type, value: value.trim() });
+        
+        if (error && !error.message.includes('duplicate')) {
+          console.error('Error saving dropdown option:', error);
+          toast({
+            title: "Error saving option",
+            description: error.message,
+            variant: "destructive",
+          });
+          return;
+        }
+      } catch (err) {
+        console.error('Error saving dropdown option:', err);
+      }
+    }
+
     switch (type) {
       case 'docType':
-        setDocTypeOptions([...docTypeOptions, value]);
+        if (!docTypeOptions.includes(value)) {
+          setDocTypeOptions([...docTypeOptions, value]);
+        }
         setDocType(value);
         setShowDocTypeInput(false);
         setNewDocType("");
         break;
       case 'site':
-        setSiteOptions([...siteOptions, value]);
+        if (!siteOptions.includes(value)) {
+          setSiteOptions([...siteOptions, value]);
+        }
         setSite(value);
         setShowSiteInput(false);
         setNewSite("");
         break;
       case 'equipmentType':
-        setEquipmentTypeOptions([...equipmentTypeOptions, value]);
+        if (!equipmentTypeOptions.includes(value)) {
+          setEquipmentTypeOptions([...equipmentTypeOptions, value]);
+        }
         setEquipmentType(value);
         setShowEquipmentTypeInput(false);
         setNewEquipmentType("");
         break;
       case 'equipmentMake':
-        setEquipmentMakeOptions([...equipmentMakeOptions, value]);
+        if (!equipmentMakeOptions.includes(value)) {
+          setEquipmentMakeOptions([...equipmentMakeOptions, value]);
+        }
         setEquipmentMake(value);
         setShowEquipmentMakeInput(false);
         setNewEquipmentMake("");
         break;
       case 'equipmentModel':
-        setEquipmentModelOptions([...equipmentModelOptions, value]);
+        if (!equipmentModelOptions.includes(value)) {
+          setEquipmentModelOptions([...equipmentModelOptions, value]);
+        }
         setEquipmentModel(value);
         setShowEquipmentModelInput(false);
         setNewEquipmentModel("");
