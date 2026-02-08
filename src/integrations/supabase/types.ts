@@ -109,6 +109,30 @@ export type Database = {
         }
         Relationships: []
       }
+      dropdown_options: {
+        Row: {
+          category: string
+          created_at: string | null
+          created_by: string | null
+          id: string
+          value: string
+        }
+        Insert: {
+          category: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          value: string
+        }
+        Update: {
+          category?: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          value?: string
+        }
+        Relationships: []
+      }
       role_permissions: {
         Row: {
           assistant_delete: boolean
