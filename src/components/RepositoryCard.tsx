@@ -371,10 +371,17 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       return;
     }
 
-    if (!docType || !equipmentType) {
+    // Resolve final values: use typed input if the Add Item input is showing, otherwise use selected value
+    const finalSite = showSiteInput ? newSite.trim() : site;
+    const finalEquipmentMake = showEquipmentMakeInput ? newEquipmentMake.trim() : equipmentMake;
+    const finalEquipmentModel = showEquipmentModelInput ? newEquipmentModel.trim() : equipmentModel;
+    const finalDocType = showDocTypeInput ? newDocType.trim() : docType;
+    const finalEquipmentType = showEquipmentTypeInput ? newEquipmentType.trim() : equipmentType;
+
+    if (!finalDocType || !finalSite || !finalEquipmentType || !finalEquipmentMake || !finalEquipmentModel) {
       toast({
         title: "Missing metadata",
-        description: "Please select document type and equipment type",
+        description: "Please fill out all six metadata fields before uploading",
         variant: "destructive",
       });
       return;
@@ -394,12 +401,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     try {
       const formData = new FormData();
       selectedFiles.forEach(file => formData.append('files', file));
-      formData.append('docType', docType);
+      formData.append('docType', finalDocType);
       formData.append('uploadDate', new Date().toISOString().split('T')[0]); // Auto-set to today
-      formData.append('site', site || '');
-      formData.append('equipmentType', equipmentType);
-      formData.append('equipmentMake', equipmentMake || '');
-      formData.append('equipmentModel', equipmentModel || '');
+      formData.append('site', finalSite);
+      formData.append('equipmentType', finalEquipmentType);
+      formData.append('equipmentMake', finalEquipmentMake);
+      formData.append('equipmentModel', finalEquipmentModel);
       formData.append('allowedRoles', JSON.stringify(selectedRoles));
 
       const { data, error } = await supabase.functions.invoke('ingest', {
@@ -889,7 +896,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
         {/* Upload Button */}
         <div className="flex justify-end">
-          <Button size="lg" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || !docType || !equipmentType || selectedRoles.length === 0}>
+          <Button size="lg" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || selectedRoles.length === 0}>
             {isUploading ? "Uploading..." : "Upload"}
           </Button>
         </div>
