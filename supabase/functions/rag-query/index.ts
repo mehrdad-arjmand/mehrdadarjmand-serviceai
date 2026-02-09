@@ -135,6 +135,49 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Get the user's role to filter accessible documents
+    const { data: userRoleData } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .single()
+
+    const userRole = userRoleData?.role || 'demo'
+    const isAdmin = userRole === 'admin'
+
+    // Get IDs of documents this user can access based on allowed_roles
+    let accessibleDocIds: Set<string> | null = null
+    if (!isAdmin) {
+      const { data: accessibleDocs, error: accessError } = await supabase
+        .from('documents')
+        .select('id')
+        .or(`allowed_roles.cs.{${userRole}},allowed_roles.cs.{all}`)
+
+      if (accessError) {
+        console.error('Error fetching accessible documents:', accessError)
+        return new Response(
+          JSON.stringify({ error: 'Failed to check document access' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      accessibleDocIds = new Set((accessibleDocs || []).map(d => d.id))
+      console.log(`User role: ${userRole}, accessible documents: ${accessibleDocIds.size}`)
+
+      if (accessibleDocIds.size === 0) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            answer: 'You do not have access to any documents. Please contact an administrator to get access.',
+            sources: []
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        )
+      }
+    } else {
+      console.log('User is admin, access to all documents')
+    }
+
     // Validate content-type
     const contentType = req.headers.get('content-type')
     if (!contentType?.includes('application/json')) {
@@ -244,8 +287,15 @@ Deno.serve(async (req) => {
 
     console.log(`Found ${chunks?.length || 0} semantic chunks`)
 
+    // Filter chunks by user's accessible documents (RBAC enforcement)
+    let accessFilteredChunks = chunks || []
+    if (accessibleDocIds) {
+      accessFilteredChunks = accessFilteredChunks.filter((chunk: any) => accessibleDocIds.has(chunk.document_id))
+      console.log(`After access filter: ${accessFilteredChunks.length} chunks (from ${chunks?.length || 0})`)
+    }
+
     // Apply document filters if provided
-    let filteredChunks = chunks || []
+    let filteredChunks = accessFilteredChunks
     
     if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel) {
       let docQuery = supabase.from('documents').select('id')
@@ -311,7 +361,8 @@ Deno.serve(async (req) => {
       question, 
       filteredChunks, 
       matchingDocIds,
-      equipmentType
+      equipmentType,
+      accessibleDocIds
     )
     // Re-rank chunks: prioritize substantive content over TOC/index entries
     const rankedChunks = rerankChunks(combinedChunks, question)
@@ -485,7 +536,8 @@ async function enrichWithKeywordFallback(
   question: string, 
   initialChunks: any[],
   matchingDocIds: Set<string> | null,
-  equipmentType?: string
+  equipmentType?: string,
+  accessibleDocIds?: Set<string> | null
 ): Promise<any[]> {
   try {
     const tokens = (question.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
@@ -521,6 +573,9 @@ async function enrichWithKeywordFallback(
 
     for (const row of data || []) {
       if (existingIds.has(row.id)) continue
+      
+      // APPLY ACCESS CONTROL FILTER
+      if (accessibleDocIds && !accessibleDocIds.has(row.document_id)) continue
       
       // APPLY DOCUMENT FILTERS to keyword results
       if (matchingDocIds && !matchingDocIds.has(row.document_id)) continue
