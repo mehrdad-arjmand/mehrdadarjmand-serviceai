@@ -57,6 +57,16 @@ Deno.serve(async (req) => {
     // Use service role client for database operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
+    // Get the user's role for document access filtering
+    const { data: userRoleData } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .single()
+
+    const userRole = userRoleData?.role || 'demo'
+    const isAdmin = userRole === 'admin'
+
     // Check permission: assistant.read required for searching
     const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
       p_tab: 'assistant',
@@ -112,7 +122,7 @@ Deno.serve(async (req) => {
 
     // Search for chunks containing the query (case-insensitive)
     // Use escaped pattern to prevent wildcard injection
-    const { data: chunks, error } = await supabase
+    let chunkQuery = supabase
       .from('chunks')
       .select(`
         id,
@@ -120,17 +130,32 @@ Deno.serve(async (req) => {
         chunk_index,
         equipment,
         document_id,
-        documents!inner(filename)
+        documents!inner(filename, allowed_roles)
       `)
       .ilike('text', `%${sanitizedQuery}%`)
-      .limit(10)
+      .limit(50)
+
+    const { data: allChunks, error } = await chunkQuery
+
+    if (error) {
+      throw error
+    }
+
+    // Filter by document access
+    const chunks = isAdmin
+      ? allChunks
+      : (allChunks || []).filter((chunk: any) => {
+          const roles: string[] = chunk.documents?.allowed_roles || []
+          return roles.includes(userRole) || roles.includes('all')
+        })
 
     if (error) {
       throw error
     }
 
     // Format results with snippets
-    const results = chunks.map((chunk: any) => {
+    // Format results with snippets (limit to 10)
+    const results = (chunks || []).slice(0, 10).map((chunk: any) => {
       const text = chunk.text
       const queryLower = query.toLowerCase()
       const textLower = text.toLowerCase()
