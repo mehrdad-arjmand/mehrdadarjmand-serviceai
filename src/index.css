@@ -147,3 +147,25 @@
     box-shadow: var(--shadow-xl);
   }
 }
+
+/* Remove cmdk input focus ring/border globally */
+[cmdk-input-wrapper] {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+[cmdk-input-wrapper]:focus-within {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+[cmdk-input-wrapper] input,
+[cmdk-input-wrapper] input:focus,
+[cmdk-input-wrapper] input:focus-visible {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  ring: 0 !important;
+}
