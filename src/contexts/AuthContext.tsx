@@ -37,7 +37,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    const isCustomDomain =
+      !window.location.hostname.includes("lovable.app") &&
+      !window.location.hostname.includes("lovableproject.com") &&
+      !window.location.hostname.includes("localhost");
+
+    if (isCustomDomain) {
+      // On custom domains, force local session cleanup to avoid auth-bridge issues
+      await supabase.auth.signOut({ scope: 'local' });
+      setSession(null);
+      setUser(null);
+      window.location.href = '/login';
+    } else {
+      await supabase.auth.signOut();
+    }
   };
 
   return (
