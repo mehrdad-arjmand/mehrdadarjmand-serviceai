@@ -378,15 +378,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     const finalDocType = showDocTypeInput ? newDocType.trim() : docType;
     const finalEquipmentType = showEquipmentTypeInput ? newEquipmentType.trim() : equipmentType;
 
-    if (!finalDocType || !finalSite || !finalEquipmentType || !finalEquipmentMake || !finalEquipmentModel) {
-      toast({
-        title: "Missing metadata",
-        description: "Please fill out all six metadata fields before uploading",
-        variant: "destructive",
-      });
-      return;
-    }
-
+    // Only access_role is required; all other metadata fields are optional
     if (selectedRoles.length === 0) {
       toast({
         title: "Missing access roles",
@@ -401,12 +393,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     try {
       const formData = new FormData();
       selectedFiles.forEach(file => formData.append('files', file));
-      formData.append('docType', finalDocType);
+      if (finalDocType) formData.append('docType', finalDocType);
       formData.append('uploadDate', new Date().toISOString().split('T')[0]); // Auto-set to today
-      formData.append('site', finalSite);
-      formData.append('equipmentType', finalEquipmentType);
-      formData.append('equipmentMake', finalEquipmentMake);
-      formData.append('equipmentModel', finalEquipmentModel);
+      if (finalSite) formData.append('site', finalSite);
+      if (finalEquipmentType) formData.append('equipmentType', finalEquipmentType);
+      if (finalEquipmentMake) formData.append('equipmentMake', finalEquipmentMake);
+      if (finalEquipmentModel) formData.append('equipmentModel', finalEquipmentModel);
       formData.append('allowedRoles', JSON.stringify(selectedRoles));
 
       const { data, error } = await supabase.functions.invoke('ingest', {
@@ -418,7 +410,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       if (data.success) {
         toast({
           title: "Upload successful",
-          description: `Processed ${data.documents.length} file(s). Generating embeddings...`,
+          description: `Processed ${data.documents.length} file(s). Embeddings are generating server-side.`,
         });
 
         // Reset form
@@ -426,13 +418,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
         const fileInput = document.getElementById('file-upload') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
 
-        // Auto-trigger embedding generation for each uploaded document
-        for (const doc of data.documents) {
-          if (doc.id && !doc.error) {
-            // Run embedding generation in background (don't await)
-            runEmbeddingGeneration(doc.id, doc.fileName);
-          }
-        }
+        // Embedding generation now happens server-side automatically
+        // No frontend loop needed — realtime subscription will update progress
 
         // Refresh documents list
         await fetchDocuments();
@@ -451,24 +438,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     }
   };
 
-  // Background embedding generation - runs until complete
+  // Background embedding generation - now uses server-side full mode
   const runEmbeddingGeneration = async (docId: string, fileName: string) => {
     try {
-      let hasMore = true;
-      while (hasMore) {
-        const { data, error } = await supabase.functions.invoke('generate-embeddings', {
-          body: { documentId: docId },
-        });
+      const { data, error } = await supabase.functions.invoke('generate-embeddings', {
+        body: { documentId: docId, mode: 'full' },
+      });
 
-        if (error) throw error;
-
-        if (data.complete || data.remaining === 0) {
-          hasMore = false;
-        } else {
-          // Small delay between batches
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
+      if (error) throw error;
 
       toast({
         title: "Indexing complete",
@@ -897,6 +874,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
         {/* Upload Button */}
         <div className="flex justify-end">
           <Button size="lg" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || selectedRoles.length === 0}>
+
             {isUploading ? "Uploading..." : "Upload"}
           </Button>
         </div>
