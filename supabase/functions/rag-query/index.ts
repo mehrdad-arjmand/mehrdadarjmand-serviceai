@@ -458,9 +458,11 @@ Please provide a clear, concise answer based on the actual procedural content in
       output_tokens: usage.output_tokens,
       total_tokens: usage.total_tokens,
       execution_time_ms: executionTimeMs,
+      top_k: topChunks.length,
+      upstream_inference_cost: usage.upstream_inference_cost ?? 0,
     }).then(({ error: logError }) => {
       if (logError) console.error('Failed to log query:', logError)
-      else console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens`)
+      else console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
     })
 
     return new Response(
@@ -654,7 +656,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
   return data.embedding.values
 }
 
-async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number } }> {
+async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -683,6 +685,7 @@ async function generateAnswer(systemPrompt: string, userPrompt: string): Promise
       input_tokens: data.usage?.prompt_tokens ?? 0,
       output_tokens: data.usage?.completion_tokens ?? 0,
       total_tokens: data.usage?.total_tokens ?? 0,
+      upstream_inference_cost: data.usage?.cost_details?.upstream_inference_cost ?? 0,
     }
   }
 }
