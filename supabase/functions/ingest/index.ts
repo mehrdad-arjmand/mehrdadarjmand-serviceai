@@ -8,7 +8,7 @@ const corsHeaders = {
 
 // Input validation constants
 const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
-const MAX_FILES = 10
+const MAX_FILES = 50
 const MAX_METADATA_LENGTH = 500
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt']
 
