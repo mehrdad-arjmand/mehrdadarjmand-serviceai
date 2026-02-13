@@ -300,7 +300,7 @@ Deno.serve(async (req) => {
             id: docId,
             filename: file.name.slice(0, 500),
             ingestion_status: 'failed',
-            ingestion_error: error.slice(0, 1000) // Limit error message length
+            ingestion_error: error.slice(0, 1000)
           })
 
         documents.push({
@@ -308,6 +308,28 @@ Deno.serve(async (req) => {
           fileName: file.name,
           error
         })
+      }
+    }
+
+    // Fire-and-forget: trigger server-side embedding generation for each successful document
+    const supabaseUrlForFetch = supabaseUrl
+    for (const doc of documents) {
+      if (doc.id && !doc.error) {
+        // Use EdgeRuntime.waitUntil if available, otherwise fire-and-forget
+        const embeddingPromise = fetch(
+          `${supabaseUrlForFetch}/functions/v1/generate-embeddings`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': req.headers.get('Authorization') || '',
+              'apikey': supabaseAnonKey,
+            },
+            body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
+          }
+        ).catch(err => console.error(`Failed to trigger embeddings for ${doc.id}:`, err))
+
+        // Don't await - let it run in background
       }
     }
 
