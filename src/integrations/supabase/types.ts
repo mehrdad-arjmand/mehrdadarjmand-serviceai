@@ -133,6 +133,51 @@ export type Database = {
         }
         Relationships: []
       }
+      query_logs: {
+        Row: {
+          citations_json: Json | null
+          created_at: string
+          execution_time_ms: number | null
+          id: string
+          input_tokens: number | null
+          output_tokens: number | null
+          query_text: string
+          response_text: string | null
+          retrieved_chunk_ids: string[] | null
+          retrieved_similarities: number[] | null
+          total_tokens: number | null
+          user_id: string | null
+        }
+        Insert: {
+          citations_json?: Json | null
+          created_at?: string
+          execution_time_ms?: number | null
+          id?: string
+          input_tokens?: number | null
+          output_tokens?: number | null
+          query_text: string
+          response_text?: string | null
+          retrieved_chunk_ids?: string[] | null
+          retrieved_similarities?: number[] | null
+          total_tokens?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          citations_json?: Json | null
+          created_at?: string
+          execution_time_ms?: number | null
+          id?: string
+          input_tokens?: number | null
+          output_tokens?: number | null
+          query_text?: string
+          response_text?: string | null
+          retrieved_chunk_ids?: string[] | null
+          retrieved_similarities?: number[] | null
+          total_tokens?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       role_permissions: {
         Row: {
           assistant_delete: boolean
