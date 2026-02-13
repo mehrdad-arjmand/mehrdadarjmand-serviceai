@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.ingest]
 verify_jwt = false
+
+[functions.run-eval]
+verify_jwt = false

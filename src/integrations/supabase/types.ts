@@ -133,6 +133,33 @@ export type Database = {
         }
         Relationships: []
       }
+      eval_dataset: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          expected_chunk_ids: string[]
+          id: string
+          query_text: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          expected_chunk_ids?: string[]
+          id?: string
+          query_text: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          expected_chunk_ids?: string[]
+          id?: string
+          query_text?: string
+        }
+        Relationships: []
+      }
       query_logs: {
         Row: {
           citations_json: Json | null
@@ -145,7 +172,9 @@ export type Database = {
           response_text: string | null
           retrieved_chunk_ids: string[] | null
           retrieved_similarities: number[] | null
+          top_k: number | null
           total_tokens: number | null
+          upstream_inference_cost: number | null
           user_id: string | null
         }
         Insert: {
@@ -159,7 +188,9 @@ export type Database = {
           response_text?: string | null
           retrieved_chunk_ids?: string[] | null
           retrieved_similarities?: number[] | null
+          top_k?: number | null
           total_tokens?: number | null
+          upstream_inference_cost?: number | null
           user_id?: string | null
         }
         Update: {
@@ -173,7 +204,9 @@ export type Database = {
           response_text?: string | null
           retrieved_chunk_ids?: string[] | null
           retrieved_similarities?: number[] | null
+          top_k?: number | null
           total_tokens?: number | null
+          upstream_inference_cost?: number | null
           user_id?: string | null
         }
         Relationships: []

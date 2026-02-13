@@ -12,6 +12,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import Settings from "./pages/Settings";
 import AdminRoles from "./pages/AdminRoles";
+import QueryAnalytics from "./pages/QueryAnalytics";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -49,6 +50,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <AdminRoles />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/analytics"
+              element={
+                <ProtectedRoute>
+                  <QueryAnalytics />
                 </ProtectedRoute>
               }
             />
