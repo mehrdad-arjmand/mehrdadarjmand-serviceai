@@ -74,6 +74,7 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const startTime = Date.now()
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
@@ -431,18 +432,44 @@ ${context}
 
 Please provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries.`
 
-    const answer = await generateAnswer(systemPrompt, userPrompt)
+    const { content: answer, usage } = await generateAnswer(systemPrompt, userPrompt)
+
+    const executionTimeMs = Date.now() - startTime
+
+    // Build sources/citations
+    const sources = topChunks.map((chunk: any) => ({
+      filename: chunk.filename || 'Unknown',
+      chunkIndex: chunk.chunk_index,
+      text: chunk.text,
+      similarity: chunk.similarity
+    }))
+
+    // Log to query_logs for evaluation (fire-and-forget, don't block response)
+    const chunkIds = topChunks.map((c: any) => c.id)
+    const similarities = topChunks.map((c: any) => c.similarity ?? 0)
+    supabase.from('query_logs').insert({
+      user_id: user.id,
+      query_text: question,
+      retrieved_chunk_ids: chunkIds,
+      retrieved_similarities: similarities,
+      response_text: answer,
+      citations_json: sources,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      total_tokens: usage.total_tokens,
+      execution_time_ms: executionTimeMs,
+    }).then(({ error: logError }) => {
+      if (logError) console.error('Failed to log query:', logError)
+      else console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens`)
+    })
 
     return new Response(
       JSON.stringify({ 
         success: true,
         answer,
-        sources: topChunks.map((chunk: any) => ({
-          filename: chunk.filename || 'Unknown',
-          chunkIndex: chunk.chunk_index,
-          text: chunk.text,
-          similarity: chunk.similarity
-        }))
+        sources,
+        usage,
+        execution_time_ms: executionTimeMs,
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -627,7 +654,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
   return data.embedding.values
 }
 
-async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<string> {
+async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number } }> {
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -650,5 +677,12 @@ async function generateAnswer(systemPrompt: string, userPrompt: string): Promise
   }
 
   const data = await response.json()
-  return data.choices[0].message.content
+  return {
+    content: data.choices[0].message.content,
+    usage: {
+      input_tokens: data.usage?.prompt_tokens ?? 0,
+      output_tokens: data.usage?.completion_tokens ?? 0,
+      total_tokens: data.usage?.total_tokens ?? 0,
+    }
+  }
 }
