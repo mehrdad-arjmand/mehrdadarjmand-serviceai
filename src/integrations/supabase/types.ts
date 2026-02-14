@@ -160,19 +160,70 @@ export type Database = {
         }
         Relationships: []
       }
+      eval_runs: {
+        Row: {
+          avg_hit_rate_at_k: number
+          avg_precision_at_k: number
+          avg_recall_at_k: number
+          created_at: string
+          created_by: string | null
+          eval_model: string
+          id: string
+          k_used: string
+          mrr: number
+          notes: string | null
+          total_queries: number
+        }
+        Insert: {
+          avg_hit_rate_at_k?: number
+          avg_precision_at_k?: number
+          avg_recall_at_k?: number
+          created_at?: string
+          created_by?: string | null
+          eval_model?: string
+          id?: string
+          k_used?: string
+          mrr?: number
+          notes?: string | null
+          total_queries?: number
+        }
+        Update: {
+          avg_hit_rate_at_k?: number
+          avg_precision_at_k?: number
+          avg_recall_at_k?: number
+          created_at?: string
+          created_by?: string | null
+          eval_model?: string
+          id?: string
+          k_used?: string
+          mrr?: number
+          notes?: string | null
+          total_queries?: number
+        }
+        Relationships: []
+      }
       query_logs: {
         Row: {
           citations_json: Json | null
           created_at: string
+          eval_model: string | null
+          evaluated_at: string | null
           execution_time_ms: number | null
+          first_relevant_rank: number | null
+          hit_rate_at_k: number | null
           id: string
           input_tokens: number | null
           output_tokens: number | null
+          precision_at_k: number | null
           query_text: string
+          recall_at_k: number | null
+          relevance_labels: Json | null
+          relevant_in_top_k: number | null
           response_text: string | null
           retrieved_chunk_ids: string[] | null
           retrieved_similarities: number[] | null
           top_k: number | null
+          total_relevant_chunks: number | null
           total_tokens: number | null
           upstream_inference_cost: number | null
           user_id: string | null
@@ -180,15 +231,24 @@ export type Database = {
         Insert: {
           citations_json?: Json | null
           created_at?: string
+          eval_model?: string | null
+          evaluated_at?: string | null
           execution_time_ms?: number | null
+          first_relevant_rank?: number | null
+          hit_rate_at_k?: number | null
           id?: string
           input_tokens?: number | null
           output_tokens?: number | null
+          precision_at_k?: number | null
           query_text: string
+          recall_at_k?: number | null
+          relevance_labels?: Json | null
+          relevant_in_top_k?: number | null
           response_text?: string | null
           retrieved_chunk_ids?: string[] | null
           retrieved_similarities?: number[] | null
           top_k?: number | null
+          total_relevant_chunks?: number | null
           total_tokens?: number | null
           upstream_inference_cost?: number | null
           user_id?: string | null
@@ -196,15 +256,24 @@ export type Database = {
         Update: {
           citations_json?: Json | null
           created_at?: string
+          eval_model?: string | null
+          evaluated_at?: string | null
           execution_time_ms?: number | null
+          first_relevant_rank?: number | null
+          hit_rate_at_k?: number | null
           id?: string
           input_tokens?: number | null
           output_tokens?: number | null
+          precision_at_k?: number | null
           query_text?: string
+          recall_at_k?: number | null
+          relevance_labels?: Json | null
+          relevant_in_top_k?: number | null
           response_text?: string | null
           retrieved_chunk_ids?: string[] | null
           retrieved_similarities?: number[] | null
           top_k?: number | null
+          total_relevant_chunks?: number | null
           total_tokens?: number | null
           upstream_inference_cost?: number | null
           user_id?: string | null
