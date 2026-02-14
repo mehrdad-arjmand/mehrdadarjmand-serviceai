@@ -757,12 +757,29 @@ Is this chunk relevant to answering the query?`
     const data = await res.json()
     const text = data.choices?.[0]?.message?.content?.trim() ?? ''
 
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    // Strip markdown code fences if present
+    const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-      return { relevant: !!parsed.relevant, reasoning: parsed.reasoning || '' }
+      try {
+        const parsed = JSON.parse(jsonMatch[0])
+        return { relevant: !!parsed.relevant, reasoning: parsed.reasoning || '' }
+      } catch (parseErr) {
+        console.error('JSON parse failed for eval response:', jsonMatch[0].slice(0, 200))
+      }
     }
-  } catch { /* fall through */ }
+
+    // Fallback: check for yes/true keywords in plain text
+    const lower = cleaned.toLowerCase()
+    if (lower.includes('"relevant": true') || lower.includes('"relevant":true')) {
+      return { relevant: true, reasoning: 'Parsed from text fallback' }
+    }
+
+    console.error('Could not parse eval LLM response:', text.slice(0, 300))
+  } catch (err) {
+    console.error('Eval chunk error:', err)
+  }
 
   return { relevant: false, reasoning: 'Parse error' }
 }
