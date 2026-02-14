@@ -444,10 +444,13 @@ Please provide a clear, concise answer based on the actual procedural content in
       similarity: chunk.similarity
     }))
 
-    // Log to query_logs for evaluation (fire-and-forget, don't block response)
+    // Log to query_logs and trigger background retrieval evaluation
     const chunkIds = topChunks.map((c: any) => c.id)
     const similarities = topChunks.map((c: any) => c.similarity ?? 0)
-    supabase.from('query_logs').insert({
+    const chunkTexts = topChunks.map((c: any) => ({ id: c.id, text: c.text }))
+    const topK = topChunks.length
+
+    const logPayload = {
       user_id: user.id,
       query_text: question,
       retrieved_chunk_ids: chunkIds,
@@ -458,12 +461,37 @@ Please provide a clear, concise answer based on the actual procedural content in
       output_tokens: usage.output_tokens,
       total_tokens: usage.total_tokens,
       execution_time_ms: executionTimeMs,
-      top_k: topChunks.length,
+      top_k: topK,
       upstream_inference_cost: usage.upstream_inference_cost ?? 0,
-    }).then(({ error: logError }) => {
-      if (logError) console.error('Failed to log query:', logError)
-      else console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
-    })
+    }
+
+    // Background: insert log then evaluate retrieval quality
+    const bgTask = (async () => {
+      try {
+        const { data: inserted, error: logError } = await supabase
+          .from('query_logs')
+          .insert(logPayload)
+          .select('id')
+          .single()
+
+        if (logError || !inserted) {
+          console.error('Failed to log query:', logError)
+          return
+        }
+
+        console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
+
+        // LLM-based retrieval evaluation
+        await evaluateRetrievalBackground(supabase, inserted.id, question, chunkTexts, topK)
+      } catch (e) {
+        console.error('Background eval error:', e)
+      }
+    })()
+
+    // Use EdgeRuntime.waitUntil if available, otherwise fire-and-forget
+    if (typeof (globalThis as any).EdgeRuntime?.waitUntil === 'function') {
+      (globalThis as any).EdgeRuntime.waitUntil(bgTask)
+    }
 
     return new Response(
       JSON.stringify({ 
@@ -687,5 +715,99 @@ async function generateAnswer(systemPrompt: string, userPrompt: string): Promise
       total_tokens: data.usage?.total_tokens ?? 0,
       upstream_inference_cost: data.usage?.cost_details?.upstream_inference_cost ?? 0,
     }
+  }
+}
+
+const EVAL_MODEL = 'google/gemini-2.5-flash-lite'
+
+async function evaluateChunkRelevance(
+  queryText: string,
+  chunkText: string
+): Promise<{ relevant: boolean; reasoning: string }> {
+  const apiKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!apiKey) return { relevant: false, reasoning: 'LOVABLE_API_KEY not configured' }
+
+  const prompt = `You are a retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains information that is necessary or helpful to answer the query.
+
+Respond with ONLY a JSON object: {"relevant": true/false, "reasoning": "one sentence explanation"}
+
+User Query: "${queryText}"
+
+Retrieved Chunk:
+"""
+${chunkText.slice(0, 2000)}
+"""
+
+Is this chunk relevant to answering the query?`
+
+  try {
+    const res = await fetch('https://ai.lovable.dev/api/chat/v1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: EVAL_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 200,
+      }),
+    })
+
+    if (!res.ok) return { relevant: false, reasoning: 'LLM evaluation failed' }
+
+    const data = await res.json()
+    const text = data.choices?.[0]?.message?.content?.trim() ?? ''
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      return { relevant: !!parsed.relevant, reasoning: parsed.reasoning || '' }
+    }
+  } catch { /* fall through */ }
+
+  return { relevant: false, reasoning: 'Parse error' }
+}
+
+async function evaluateRetrievalBackground(
+  supabase: any,
+  queryLogId: string,
+  queryText: string,
+  chunkTexts: { id: string; text: string }[],
+  topK: number
+) {
+  const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
+  let firstRelevantRank: number | null = null
+
+  for (let i = 0; i < chunkTexts.length; i++) {
+    const { id: chunkId, text: chunkText } = chunkTexts[i]
+    const result = await evaluateChunkRelevance(queryText, chunkText)
+    labels.push({ chunk_id: chunkId, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
+
+    if (result.relevant && firstRelevantRank === null) {
+      firstRelevantRank = i + 1
+    }
+  }
+
+  const totalRelevant = labels.filter(l => l.relevant).length
+  const relevantInTopK = totalRelevant
+  const precisionAtK = topK > 0 ? relevantInTopK / topK : 0
+  const recallAtK = totalRelevant > 0 ? relevantInTopK / totalRelevant : 0
+  const hitRate = relevantInTopK > 0 ? 1 : 0
+
+  const { error: updateError } = await supabase.from('query_logs').update({
+    total_relevant_chunks: totalRelevant,
+    relevant_in_top_k: relevantInTopK,
+    precision_at_k: parseFloat(precisionAtK.toFixed(4)),
+    recall_at_k: parseFloat(recallAtK.toFixed(4)),
+    hit_rate_at_k: hitRate,
+    first_relevant_rank: firstRelevantRank,
+    relevance_labels: labels,
+    eval_model: EVAL_MODEL,
+    evaluated_at: new Date().toISOString(),
+  }).eq('id', queryLogId)
+
+  if (updateError) {
+    console.error('Failed to update retrieval eval:', updateError)
+  } else {
+    console.log(`Retrieval eval complete for ${queryLogId}: P@K=${precisionAtK.toFixed(3)}, R@K=${recallAtK.toFixed(3)}, HR=${hitRate}, MRR_rank=${firstRelevantRank}`)
   }
 }
