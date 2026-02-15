@@ -158,20 +158,47 @@ Deno.serve(async (req) => {
         return new Response('No data', { status: 200, headers: { ...corsHeaders, 'Content-Type': 'text/plain' } })
       }
 
-      const headers = ['id','created_at','query_text','response_text','retrieved_chunk_ids','retrieved_similarities','input_tokens','output_tokens','total_tokens','execution_time_ms','top_k','upstream_inference_cost','precision_at_k','recall_at_k','hit_rate_at_k','first_relevant_rank','total_relevant_chunks','relevant_in_top_k','eval_model','evaluated_at']
-      const csvRows = [headers.join(',')]
-      for (const log of logs) {
-        const row = headers.map(h => {
-          const val = (log as any)[h]
-          if (val === null || val === undefined) return ''
-          const str = Array.isArray(val) ? JSON.stringify(val) : String(val)
+      // Columns in logical order: identity → timing → query/response → retrieval details → token/cost → eval metrics
+      const columns = [
+        'id', 'created_at', 'user_id',
+        'query_text', 'response_text',
+        'execution_time_ms', 'top_k',
+        'input_tokens', 'output_tokens', 'total_tokens', 'upstream_inference_cost',
+        'precision_at_k', 'recall_at_k', 'hit_rate_at_k', 'first_relevant_rank',
+        'total_relevant_chunks', 'relevant_in_top_k',
+        'eval_model', 'evaluated_at',
+        'retrieved_chunk_ids', 'retrieved_similarities',
+        'citations_json', 'relevance_labels',
+      ]
+
+      const escapeCsvField = (val: unknown): string => {
+        if (val === null || val === undefined) return ''
+        let str: string
+        if (typeof val === 'object') {
+          str = JSON.stringify(val)
+        } else {
+          str = String(val)
+        }
+        // Quote if the field contains comma, newline, or double-quote
+        if (str.includes(',') || str.includes('\n') || str.includes('\r') || str.includes('"')) {
           return `"${str.replace(/"/g, '""')}"`
-        })
+        }
+        return str
+      }
+
+      const csvRows = [columns.join(',')]
+      for (const log of logs) {
+        const row = columns.map(col => escapeCsvField((log as any)[col]))
         csvRows.push(row.join(','))
       }
 
-      return new Response(csvRows.join('\n'), {
-        headers: { ...corsHeaders, 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename=query_logs.csv' }
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+      return new Response(csvRows.join('\r\n'), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="query_logs_${timestamp}.csv"`,
+        }
       })
     }
 
