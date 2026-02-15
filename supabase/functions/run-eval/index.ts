@@ -158,17 +158,17 @@ Deno.serve(async (req) => {
         return new Response('No data', { status: 200, headers: { ...corsHeaders, 'Content-Type': 'text/plain' } })
       }
 
-      // Columns in logical order: identity → timing → query/response → retrieval details → token/cost → eval metrics
+      // Match exact column order as shown in Cloud table view
       const columns = [
-        'id', 'created_at', 'user_id',
-        'query_text', 'response_text',
-        'execution_time_ms', 'top_k',
-        'input_tokens', 'output_tokens', 'total_tokens', 'upstream_inference_cost',
-        'precision_at_k', 'recall_at_k', 'hit_rate_at_k', 'first_relevant_rank',
-        'total_relevant_chunks', 'relevant_in_top_k',
-        'eval_model', 'evaluated_at',
+        'id', 'created_at', 'user_id', 'query_text',
         'retrieved_chunk_ids', 'retrieved_similarities',
-        'citations_json', 'relevance_labels',
+        'response_text', 'citations_json',
+        'input_tokens', 'output_tokens', 'total_tokens',
+        'execution_time_ms', 'top_k', 'upstream_inference_cost',
+        'total_relevant_chunks', 'relevant_in_top_k',
+        'precision_at_k', 'recall_at_k', 'hit_rate_at_k',
+        'first_relevant_rank', 'relevance_labels',
+        'evaluated_at', 'eval_model',
       ]
 
       const escapeCsvField = (val: unknown): string => {
@@ -179,13 +179,14 @@ Deno.serve(async (req) => {
         } else {
           str = String(val)
         }
-        // Quote if the field contains comma, newline, or double-quote
-        if (str.includes(',') || str.includes('\n') || str.includes('\r') || str.includes('"')) {
-          return `"${str.replace(/"/g, '""')}"`
-        }
-        return str
+        // Replace newlines with spaces so Excel doesn't split rows
+        str = str.replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\r/g, ' ')
+        // Always quote fields to avoid delimiter confusion
+        return `"${str.replace(/"/g, '""')}"`
       }
 
+      // Add BOM for Excel UTF-8 detection
+      const bom = '\uFEFF'
       const csvRows = [columns.join(',')]
       for (const log of logs) {
         const row = columns.map(col => escapeCsvField((log as any)[col]))
@@ -193,7 +194,7 @@ Deno.serve(async (req) => {
       }
 
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
-      return new Response(csvRows.join('\r\n'), {
+      return new Response(bom + csvRows.join('\r\n'), {
         headers: {
           ...corsHeaders,
           'Content-Type': 'text/csv; charset=utf-8',
