@@ -48,7 +48,7 @@ function isValidDate(value: unknown): boolean {
 
 function isValidHistory(history: unknown): history is ConversationMessage[] {
   if (!Array.isArray(history)) return false
-  if (history.length > MAX_HISTORY_LENGTH) return false
+  // Allow any length — we'll truncate later
   return history.every(item => 
     typeof item === 'object' && 
     item !== null &&
@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
 
     // Validate history if provided
     if (rawRequest.history !== undefined && !isValidHistory(rawRequest.history)) {
-      throw new Error(`history must be an array of max ${MAX_HISTORY_LENGTH} messages with valid role and content`)
+      throw new Error(`history must be an array of messages with valid role and content`)
     }
 
     // Validate isConversationMode
@@ -243,7 +243,7 @@ Deno.serve(async (req) => {
       equipmentType: sanitizeString(rawRequest.equipmentType as string | undefined),
       equipmentMake: sanitizeString(rawRequest.equipmentMake as string | undefined),
       equipmentModel: sanitizeString(rawRequest.equipmentModel as string | undefined),
-      history: rawRequest.history as ConversationMessage[] | undefined,
+      history: rawRequest.history ? (rawRequest.history as ConversationMessage[]).slice(-MAX_HISTORY_LENGTH) : undefined,
       isConversationMode: rawRequest.isConversationMode as boolean | undefined
     }
 
