@@ -1,4 +1,5 @@
 import { Upload, FileText, Trash2, CalendarIcon, Loader2, CheckCircle, AlertCircle, Clock, Check, ChevronsUpDown } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -477,10 +478,10 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     runEmbeddingGeneration(docId, fileName);
   };
 
-  const handleDelete = async (docId: string, fileName: string) => {
-    if (!confirm(`Delete "${fileName}"? This will remove it from the knowledge base.`)) {
-      return;
-    }
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const { id: docId, fileName } = deleteTarget;
+    setDeleteTarget(null);
 
     try {
       // Delete chunks first (foreign key constraint)
@@ -519,6 +520,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       });
     }
   };
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; fileName: string } | null>(null);
 
   const selectedDoc = documents.find(doc => doc.id === selectedDocId);
 
@@ -977,7 +980,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                               size="icon"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDelete(doc.id, doc.fileName);
+                                setDeleteTarget({ id: doc.id, fileName: doc.fileName });
                               }}
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
                               title="Delete document"
@@ -1014,6 +1017,26 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
           </>
         )}
       </CardContent>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Document</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{deleteTarget?.fileName}</strong>? This will remove it from the knowledge base. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 };
