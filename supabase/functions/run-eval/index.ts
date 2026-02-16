@@ -51,7 +51,7 @@ ${chunkText.slice(0, 2000)}
 
 Is this chunk relevant to answering the query?`
 
-  const res = await fetch('https://ai.lovable.dev/api/chat/v1', {
+  const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
