@@ -1,4 +1,4 @@
-import { LogOut, Settings, User, Shield } from "lucide-react";
+import { LogOut, Settings, User, Shield, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -64,13 +64,22 @@ export const UserMenu = () => {
         
         {/* Admin-only: Roles Management */}
         {isAdmin && (
-          <DropdownMenuItem 
-            onClick={() => navigate('/admin/roles')}
-            className="cursor-pointer"
-          >
-            <Shield className="mr-2 h-4 w-4" />
-            <span>Manage Roles & Permissions</span>
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem 
+              onClick={() => navigate('/admin/roles')}
+              className="cursor-pointer"
+            >
+              <Shield className="mr-2 h-4 w-4" />
+              <span>Manage Roles & Permissions</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem 
+              onClick={() => navigate('/admin/analytics')}
+              className="cursor-pointer"
+            >
+              <BarChart3 className="mr-2 h-4 w-4" />
+              <span>Query Analytics</span>
+            </DropdownMenuItem>
+          </>
         )}
         
         <DropdownMenuSeparator />
