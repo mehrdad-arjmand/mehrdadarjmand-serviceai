@@ -60,9 +60,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const [documents, setDocuments] = useState<Document[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  
+
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
-  
+
   // Form state
   const [docType, setDocType] = useState<string>("");
   const [site, setSite] = useState<string>("");
@@ -82,20 +82,20 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   useEffect(() => {
     const fetchDropdownOptions = async () => {
       try {
-        const { data, error } = await supabase
-          .from('dropdown_options')
-          .select('category, value')
-          .order('value');
-        
+        const { data, error } = await supabase.
+        from('dropdown_options').
+        select('category, value').
+        order('value');
+
         if (error) throw error;
-        
+
         if (data) {
-          const docTypes = data.filter(d => d.category === 'docType').map(d => d.value);
-          const sites = data.filter(d => d.category === 'site').map(d => d.value);
-          const equipTypes = data.filter(d => d.category === 'equipmentType').map(d => d.value);
-          const equipMakes = data.filter(d => d.category === 'equipmentMake').map(d => d.value);
-          const equipModels = data.filter(d => d.category === 'equipmentModel').map(d => d.value);
-          
+          const docTypes = data.filter((d) => d.category === 'docType').map((d) => d.value);
+          const sites = data.filter((d) => d.category === 'site').map((d) => d.value);
+          const equipTypes = data.filter((d) => d.category === 'equipmentType').map((d) => d.value);
+          const equipMakes = data.filter((d) => d.category === 'equipmentMake').map((d) => d.value);
+          const equipModels = data.filter((d) => d.category === 'equipmentModel').map((d) => d.value);
+
           setDocTypeOptions(docTypes);
           setSiteOptions(sites);
           setEquipmentTypeOptions(equipTypes);
@@ -106,7 +106,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
         console.error('Error fetching dropdown options:', error);
       }
     };
-    
+
     fetchDropdownOptions();
   }, []);
 
@@ -137,21 +137,21 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const [isSaving, setIsSaving] = useState(false);
 
   // Delete state
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; fileName: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{id: string;fileName: string;} | null>(null);
 
   // Fetch available roles
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        const { data, error } = await supabase
-          .from('role_permissions')
-          .select('role, display_name')
-          .order('role');
-        
+        const { data, error } = await supabase.
+        from('role_permissions').
+        select('role, display_name').
+        order('role');
+
         if (error) throw error;
-        
+
         if (data) {
-          setAvailableRoles(data.map(r => ({
+          setAvailableRoles(data.map((r) => ({
             role: r.role,
             displayName: r.display_name
           })));
@@ -160,16 +160,16 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
         console.error('Error fetching roles:', error);
       }
     };
-    
+
     fetchRoles();
   }, []);
 
   const fetchDocuments = async () => {
     try {
-      const { data: docs, error } = await supabase
-        .from('documents')
-        .select('*')
-        .order('uploaded_at', { ascending: false });
+      const { data: docs, error } = await supabase.
+      from('documents').
+      select('*').
+      order('uploaded_at', { ascending: false });
 
       if (error) throw error;
 
@@ -177,21 +177,21 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
         // Fetch chunks for each document to reconstruct full text and count embeddings
         const documentsWithText = await Promise.all(
           docs.map(async (doc) => {
-            const { data: chunks, error: chunksError } = await supabase
-              .from('chunks')
-              .select('text, chunk_index, equipment, embedding')
-              .eq('document_id', doc.id)
-              .order('chunk_index');
+            const { data: chunks, error: chunksError } = await supabase.
+            from('chunks').
+            select('text, chunk_index, equipment, embedding').
+            eq('document_id', doc.id).
+            order('chunk_index');
 
             if (chunksError) {
               console.error('Error fetching chunks:', chunksError);
               return null;
             }
 
-            const extractedText = chunks?.map(c => c.text).join('') || '';
+            const extractedText = chunks?.map((c) => c.text).join('') || '';
             const equipment = chunks?.[0]?.equipment || 'unknown';
             // Count chunks that have embeddings
-            const embeddedChunks = chunks?.filter(c => c.embedding !== null).length || 0;
+            const embeddedChunks = chunks?.filter((c) => c.embedding !== null).length || 0;
 
             return {
               id: doc.id,
@@ -212,12 +212,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               embeddedChunks,
               ingestionStatus: doc.ingestion_status || 'pending',
               ingestionError: doc.ingestion_error || null,
-              allowedRoles: (doc as any).allowed_roles || ['admin'],
+              allowedRoles: (doc as any).allowed_roles || ['admin']
             };
           })
         );
 
-        setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
+        setDocuments(documentsWithText.filter((d) => d !== null) as Document[]);
       }
     } catch (error) {
       console.error('Error fetching documents:', error);
@@ -229,22 +229,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     fetchDocuments();
 
     // Subscribe to documents changes
-    const docsChannel = supabase
-      .channel('repository-docs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments)
-      .subscribe();
+    const docsChannel = supabase.
+    channel('repository-docs').
+    on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).
+    subscribe();
 
     // Subscribe to chunks changes for real-time embedding progress
-    const chunksChannel = supabase
-      .channel('repository-chunks')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments)
-      .subscribe();
+    const chunksChannel = supabase.
+    channel('repository-chunks').
+    on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments).
+    subscribe();
 
     // Also poll every 3 seconds for in-progress documents (in case subscription misses updates)
     const pollInterval = setInterval(() => {
       // Check if any documents are still in progress
       const hasInProgress = documents.some(
-        doc => doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings'
+        (doc) => doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings'
       );
       if (hasInProgress) {
         fetchDocuments();
@@ -266,25 +266,25 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   };
 
   const handleAddOption = async (
-    type: 'docType' | 'site' | 'equipmentType' | 'equipmentMake' | 'equipmentModel',
-    value: string,
-    saveToDatabase: boolean = true
-  ) => {
+  type: 'docType' | 'site' | 'equipmentType' | 'equipmentMake' | 'equipmentModel',
+  value: string,
+  saveToDatabase: boolean = true) =>
+  {
     if (!value.trim()) return;
 
     // Save to database if requested (when clicking Add button)
     if (saveToDatabase) {
       try {
-        const { error } = await supabase
-          .from('dropdown_options')
-          .insert({ category: type, value: value.trim() });
-        
+        const { error } = await supabase.
+        from('dropdown_options').
+        insert({ category: type, value: value.trim() });
+
         if (error && !error.message.includes('duplicate')) {
           console.error('Error saving dropdown option:', error);
           toast({
             title: "Error saving option",
             description: error.message,
-            variant: "destructive",
+            variant: "destructive"
           });
           return;
         }
@@ -347,14 +347,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       }
     } else {
       // Remove "all" if selecting specific roles
-      let newRoles = selectedRoles.filter(r => r !== "all");
-      
+      let newRoles = selectedRoles.filter((r) => r !== "all");
+
       if (newRoles.includes(role)) {
-        newRoles = newRoles.filter(r => r !== role);
+        newRoles = newRoles.filter((r) => r !== role);
       } else {
         newRoles = [...newRoles, role];
       }
-      
+
       // If all individual roles are selected, switch to "all"
       if (newRoles.length === availableRoles.length) {
         setSelectedRoles(["all"]);
@@ -372,7 +372,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       return "Select roles";
     }
     if (selectedRoles.length === 1) {
-      const role = availableRoles.find(r => r.role === selectedRoles[0]);
+      const role = availableRoles.find((r) => r.role === selectedRoles[0]);
       return role?.displayName || role?.role || selectedRoles[0];
     }
     return `${selectedRoles.length} roles selected`;
@@ -383,7 +383,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       toast({
         title: "No files selected",
         description: "Please select at least one file",
-        variant: "destructive",
+        variant: "destructive"
       });
       return;
     }
@@ -400,7 +400,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       toast({
         title: "Missing access roles",
         description: "Please select at least one role that can access this document",
-        variant: "destructive",
+        variant: "destructive"
       });
       return;
     }
@@ -409,7 +409,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
     try {
       const formData = new FormData();
-      selectedFiles.forEach(file => formData.append('files', file));
+      selectedFiles.forEach((file) => formData.append('files', file));
       if (finalDocType) formData.append('docType', finalDocType);
       formData.append('uploadDate', new Date().toISOString().split('T')[0]); // Auto-set to today
       if (finalSite) formData.append('site', finalSite);
@@ -419,7 +419,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       formData.append('allowedRoles', JSON.stringify(selectedRoles));
 
       const { data, error } = await supabase.functions.invoke('ingest', {
-        body: formData,
+        body: formData
       });
 
       if (error) throw error;
@@ -427,7 +427,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       if (data.success) {
         toast({
           title: "Upload successful",
-          description: `Processed ${data.documents.length} file(s). Embeddings are generating server-side.`,
+          description: `Processed ${data.documents.length} file(s). Embeddings are generating server-side.`
         });
 
         // Reset form
@@ -448,7 +448,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       toast({
         title: "Upload failed",
         description: error.message || "Unknown error",
-        variant: "destructive",
+        variant: "destructive"
       });
     } finally {
       setIsUploading(false);
@@ -459,21 +459,21 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const runEmbeddingGeneration = async (docId: string, fileName: string) => {
     try {
       const { data, error } = await supabase.functions.invoke('generate-embeddings', {
-        body: { documentId: docId, mode: 'full' },
+        body: { documentId: docId, mode: 'full' }
       });
 
       if (error) throw error;
 
       toast({
         title: "Indexing complete",
-        description: `"${fileName}" is now fully indexed.`,
+        description: `"${fileName}" is now fully indexed.`
       });
     } catch (error: any) {
       console.error('Embedding generation error:', error);
       toast({
         title: "Indexing failed",
         description: `${fileName}: ${error.message || "Unknown error"}`,
-        variant: "destructive",
+        variant: "destructive"
       });
     }
   };
@@ -482,15 +482,15 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const handleRetryEmbeddings = async (docId: string, fileName: string) => {
     toast({
       title: "Retrying indexing",
-      description: `Resuming embedding generation for "${fileName}"...`,
+      description: `Resuming embedding generation for "${fileName}"...`
     });
-    
+
     // Reset status to processing
-    await supabase
-      .from('documents')
-      .update({ ingestion_status: 'processing_embeddings', ingestion_error: null })
-      .eq('id', docId);
-    
+    await supabase.
+    from('documents').
+    update({ ingestion_status: 'processing_embeddings', ingestion_error: null }).
+    eq('id', docId);
+
     runEmbeddingGeneration(docId, fileName);
   };
 
@@ -501,23 +501,23 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
     try {
       // Delete chunks first (foreign key constraint)
-      const { error: chunksError } = await supabase
-        .from('chunks')
-        .delete()
-        .eq('document_id', docId);
+      const { error: chunksError } = await supabase.
+      from('chunks').
+      delete().
+      eq('document_id', docId);
 
       if (chunksError) throw chunksError;
 
       // Delete document
-      const { error: docError } = await supabase
-        .from('documents')
-        .delete()
-        .eq('id', docId);
+      const { error: docError } = await supabase.
+      from('documents').
+      delete().
+      eq('id', docId);
 
       if (docError) throw docError;
 
       // Update UI
-      setDocuments(prev => prev.filter(d => d.id !== docId));
+      setDocuments((prev) => prev.filter((d) => d.id !== docId));
       if (selectedDocId === docId) {
         setSelectedDocId(null);
         onDocumentSelect?.(null);
@@ -525,14 +525,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
       toast({
         title: "Document deleted",
-        description: `"${fileName}" has been removed from the knowledge base.`,
+        description: `"${fileName}" has been removed from the knowledge base.`
       });
     } catch (error: any) {
       console.error('Delete error:', error);
       toast({
         title: "Delete failed",
         description: error.message || "Unknown error",
-        variant: "destructive",
+        variant: "destructive"
       });
     }
   };
@@ -557,9 +557,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
         setEditSelectedRoles(["all"]);
       }
     } else {
-      let newRoles = editSelectedRoles.filter(r => r !== "all");
+      let newRoles = editSelectedRoles.filter((r) => r !== "all");
       if (newRoles.includes(role)) {
-        newRoles = newRoles.filter(r => r !== role);
+        newRoles = newRoles.filter((r) => r !== role);
       } else {
         newRoles = [...newRoles, role];
       }
@@ -575,7 +575,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     if (editSelectedRoles.includes("all")) return "All roles";
     if (editSelectedRoles.length === 0) return "Select roles";
     if (editSelectedRoles.length === 1) {
-      const role = availableRoles.find(r => r.role === editSelectedRoles[0]);
+      const role = availableRoles.find((r) => r.role === editSelectedRoles[0]);
       return role?.displayName || role?.role || editSelectedRoles[0];
     }
     return `${editSelectedRoles.length} roles selected`;
@@ -587,32 +587,32 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
     try {
       // Update document record
-      const { error: docError } = await supabase
-        .from('documents')
-        .update({
-          doc_type: editDocType || null,
-          site: editSite || null,
-          equipment_make: editEquipmentMake || null,
-          equipment_model: editEquipmentModel || null,
-          allowed_roles: editSelectedRoles,
-        })
-        .eq('id', editTarget.id);
+      const { error: docError } = await supabase.
+      from('documents').
+      update({
+        doc_type: editDocType || null,
+        site: editSite || null,
+        equipment_make: editEquipmentMake || null,
+        equipment_model: editEquipmentModel || null,
+        allowed_roles: editSelectedRoles
+      }).
+      eq('id', editTarget.id);
 
       if (docError) throw docError;
 
       // Update equipment type in chunks
       if (editEquipmentType !== editTarget.equipmentType) {
-        const { error: chunksError } = await supabase
-          .from('chunks')
-          .update({ equipment: editEquipmentType || null })
-          .eq('document_id', editTarget.id);
+        const { error: chunksError } = await supabase.
+        from('chunks').
+        update({ equipment: editEquipmentType || null }).
+        eq('document_id', editTarget.id);
 
         if (chunksError) throw chunksError;
       }
 
       toast({
         title: "Document updated",
-        description: `Metadata for "${editTarget.fileName}" has been updated.`,
+        description: `Metadata for "${editTarget.fileName}" has been updated.`
       });
 
       setEditTarget(null);
@@ -622,21 +622,21 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       toast({
         title: "Update failed",
         description: error.message || "Unknown error",
-        variant: "destructive",
+        variant: "destructive"
       });
     } finally {
       setIsSaving(false);
     }
   };
 
-  const selectedDoc = documents.find(doc => doc.id === selectedDocId);
+  const selectedDoc = documents.find((doc) => doc.id === selectedDocId);
 
   const formatRolesDisplay = (roles: string[]) => {
     if (roles.includes("all")) return "All";
     if (roles.length === 0) return "None";
     if (roles.length <= 2) {
-      return roles.map(r => {
-        const roleInfo = availableRoles.find(ar => ar.role === r);
+      return roles.map((r) => {
+        const roleInfo = availableRoles.find((ar) => ar.role === r);
         return roleInfo?.displayName || r;
       }).join(", ");
     }
@@ -644,25 +644,25 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   };
 
   // Filter documents by search query
-  const filteredDocuments = documents.filter(doc => {
+  const filteredDocuments = documents.filter((doc) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
       doc.fileName.toLowerCase().includes(q) ||
       doc.docType.toLowerCase().includes(q) ||
-      (doc.site && doc.site.toLowerCase().includes(q)) ||
-      (doc.equipmentMake && doc.equipmentMake.toLowerCase().includes(q)) ||
-      (doc.equipmentModel && doc.equipmentModel.toLowerCase().includes(q))
-    );
+      doc.site && doc.site.toLowerCase().includes(q) ||
+      doc.equipmentMake && doc.equipmentMake.toLowerCase().includes(q) ||
+      doc.equipmentModel && doc.equipmentModel.toLowerCase().includes(q));
+
   });
 
-  const indexedCount = documents.filter(d => d.ingestionStatus === 'complete').length;
+  const indexedCount = documents.filter((d) => d.ingestionStatus === 'complete').length;
 
   return (
     <div className="space-y-8">
       {/* Upload + Filters side by side */}
-      {canWrite && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {canWrite &&
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Upload Box */}
           <Card className="border-border/50 shadow-premium bg-card">
             <CardHeader className="pb-3">
@@ -674,19 +674,19 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
             <CardContent className="space-y-4">
               <div className="relative border-2 border-dashed border-border/60 rounded-2xl p-10 text-center hover:border-muted-foreground/40 hover:bg-muted/30 transition-all duration-300 cursor-pointer group">
                 <input
-                  type="file"
-                  id="file-upload"
-                  multiple
-                  accept=".pdf,.docx,.txt"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
+                type="file"
+                id="file-upload"
+                multiple
+                accept=".pdf,.docx,.txt"
+                className="hidden"
+                onChange={handleFileChange} />
+
                 <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-3">
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-foreground">
-                      {selectedFiles.length > 0 
-                        ? `${selectedFiles.length} file(s) selected` 
-                        : "Drag & drop"}
+                      {selectedFiles.length > 0 ?
+                    `${selectedFiles.length} file(s) selected` :
+                    "Drag & drop"}
                     </p>
                     <p className="text-xs text-primary font-normal">
                       Or click to upload
@@ -694,9 +694,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                   </div>
                 </label>
               </div>
-              <p className="text-xs text-muted-foreground italic">
-                Apply metadata filters to tag the upload batch for scoped retrieval.
-              </p>
+              
+
+
               <div className="flex justify-end">
                 <Button size="sm" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || selectedRoles.length === 0}>
                   {isUploading ? "Uploading..." : "Upload"}
@@ -726,96 +726,96 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                     {/* Document Type */}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Document Type</Label>
-                      {showDocTypeInput ? (
-                        <div className="flex gap-1">
-                          <Input value={newDocType} onChange={(e) => setNewDocType(e.target.value)} placeholder="Type..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('docType', newDocType); }} />
+                      {showDocTypeInput ?
+                    <div className="flex gap-1">
+                          <Input value={newDocType} onChange={(e) => setNewDocType(e.target.value)} placeholder="Type..." className="h-9 text-sm" onKeyDown={(e) => {if (e.key === 'Enter') handleAddOption('docType', newDocType);}} />
                           <Button size="sm" className="h-9" onClick={() => handleAddOption('docType', newDocType)}>Add</Button>
-                        </div>
-                      ) : (
-                        <Select value={docType} onValueChange={(value) => { if (value === "__add_new__") setShowDocTypeInput(true); else setDocType(value); }}>
+                        </div> :
+
+                    <Select value={docType} onValueChange={(value) => {if (value === "__add_new__") setShowDocTypeInput(true);else setDocType(value);}}>
                           <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All types" /></SelectTrigger>
                           <SelectContent>
-                            {docTypeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            {docTypeOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                             <SelectItem value="__add_new__">+ Add item</SelectItem>
                           </SelectContent>
                         </Select>
-                      )}
+                    }
                     </div>
 
                     {/* Site */}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Site</Label>
-                      {showSiteInput ? (
-                        <div className="flex gap-1">
-                          <Input value={newSite} onChange={(e) => setNewSite(e.target.value)} placeholder="Site..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('site', newSite); }} />
+                      {showSiteInput ?
+                    <div className="flex gap-1">
+                          <Input value={newSite} onChange={(e) => setNewSite(e.target.value)} placeholder="Site..." className="h-9 text-sm" onKeyDown={(e) => {if (e.key === 'Enter') handleAddOption('site', newSite);}} />
                           <Button size="sm" className="h-9" onClick={() => handleAddOption('site', newSite)}>Add</Button>
-                        </div>
-                      ) : (
-                        <Select value={site} onValueChange={(value) => { if (value === "__add_new__") setShowSiteInput(true); else setSite(value); }}>
+                        </div> :
+
+                    <Select value={site} onValueChange={(value) => {if (value === "__add_new__") setShowSiteInput(true);else setSite(value);}}>
                           <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                           <SelectContent>
-                            {siteOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            {siteOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                             <SelectItem value="__add_new__">+ Add item</SelectItem>
                           </SelectContent>
                         </Select>
-                      )}
+                    }
                     </div>
 
                     {/* Equipment Type */}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Equipment Type</Label>
-                      {showEquipmentTypeInput ? (
-                        <div className="flex gap-1">
-                          <Input value={newEquipmentType} onChange={(e) => setNewEquipmentType(e.target.value)} placeholder="Type..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('equipmentType', newEquipmentType); }} />
+                      {showEquipmentTypeInput ?
+                    <div className="flex gap-1">
+                          <Input value={newEquipmentType} onChange={(e) => setNewEquipmentType(e.target.value)} placeholder="Type..." className="h-9 text-sm" onKeyDown={(e) => {if (e.key === 'Enter') handleAddOption('equipmentType', newEquipmentType);}} />
                           <Button size="sm" className="h-9" onClick={() => handleAddOption('equipmentType', newEquipmentType)}>Add</Button>
-                        </div>
-                      ) : (
-                        <Select value={equipmentType} onValueChange={(value) => { if (value === "__add_new__") setShowEquipmentTypeInput(true); else setEquipmentType(value); }}>
+                        </div> :
+
+                    <Select value={equipmentType} onValueChange={(value) => {if (value === "__add_new__") setShowEquipmentTypeInput(true);else setEquipmentType(value);}}>
                           <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All types" /></SelectTrigger>
                           <SelectContent>
-                            {equipmentTypeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            {equipmentTypeOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                             <SelectItem value="__add_new__">+ Add item</SelectItem>
                           </SelectContent>
                         </Select>
-                      )}
+                    }
                     </div>
 
                     {/* Equipment Make */}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Equipment Make</Label>
-                      {showEquipmentMakeInput ? (
-                        <div className="flex gap-1">
-                          <Input value={newEquipmentMake} onChange={(e) => setNewEquipmentMake(e.target.value)} placeholder="Make..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('equipmentMake', newEquipmentMake); }} />
+                      {showEquipmentMakeInput ?
+                    <div className="flex gap-1">
+                          <Input value={newEquipmentMake} onChange={(e) => setNewEquipmentMake(e.target.value)} placeholder="Make..." className="h-9 text-sm" onKeyDown={(e) => {if (e.key === 'Enter') handleAddOption('equipmentMake', newEquipmentMake);}} />
                           <Button size="sm" className="h-9" onClick={() => handleAddOption('equipmentMake', newEquipmentMake)}>Add</Button>
-                        </div>
-                      ) : (
-                        <Select value={equipmentMake} onValueChange={(value) => { if (value === "__add_new__") setShowEquipmentMakeInput(true); else setEquipmentMake(value); }}>
+                        </div> :
+
+                    <Select value={equipmentMake} onValueChange={(value) => {if (value === "__add_new__") setShowEquipmentMakeInput(true);else setEquipmentMake(value);}}>
                           <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All makes" /></SelectTrigger>
                           <SelectContent>
-                            {equipmentMakeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            {equipmentMakeOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                             <SelectItem value="__add_new__">+ Add item</SelectItem>
                           </SelectContent>
                         </Select>
-                      )}
+                    }
                     </div>
 
                     {/* Equipment Model */}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Equipment Model</Label>
-                      {showEquipmentModelInput ? (
-                        <div className="flex gap-1">
-                          <Input value={newEquipmentModel} onChange={(e) => setNewEquipmentModel(e.target.value)} placeholder="Model..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('equipmentModel', newEquipmentModel); }} />
+                      {showEquipmentModelInput ?
+                    <div className="flex gap-1">
+                          <Input value={newEquipmentModel} onChange={(e) => setNewEquipmentModel(e.target.value)} placeholder="Model..." className="h-9 text-sm" onKeyDown={(e) => {if (e.key === 'Enter') handleAddOption('equipmentModel', newEquipmentModel);}} />
                           <Button size="sm" className="h-9" onClick={() => handleAddOption('equipmentModel', newEquipmentModel)}>Add</Button>
-                        </div>
-                      ) : (
-                        <Select value={equipmentModel} onValueChange={(value) => { if (value === "__add_new__") setShowEquipmentModelInput(true); else setEquipmentModel(value); }}>
+                        </div> :
+
+                    <Select value={equipmentModel} onValueChange={(value) => {if (value === "__add_new__") setShowEquipmentModelInput(true);else setEquipmentModel(value);}}>
                           <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All models" /></SelectTrigger>
                           <SelectContent>
-                            {equipmentModelOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            {equipmentModelOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                             <SelectItem value="__add_new__">+ Add item</SelectItem>
                           </SelectContent>
                         </Select>
-                      )}
+                    }
                     </div>
 
                     {/* Access Role */}
@@ -839,12 +839,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                                   All roles
                                 </CommandItem>
                                 <Separator className="my-1" />
-                                {availableRoles.map((role) => (
-                                  <CommandItem key={role.role} value={role.role} onSelect={() => handleRoleToggle(role.role)}>
-                                    <Check className={cn("mr-2 h-4 w-4", (selectedRoles.includes(role.role) || selectedRoles.includes("all")) ? "opacity-100" : "opacity-0")} />
+                                {availableRoles.map((role) =>
+                              <CommandItem key={role.role} value={role.role} onSelect={() => handleRoleToggle(role.role)}>
+                                    <Check className={cn("mr-2 h-4 w-4", selectedRoles.includes(role.role) || selectedRoles.includes("all") ? "opacity-100" : "opacity-0")} />
                                     {role.displayName || role.role}
                                   </CommandItem>
-                                ))}
+                              )}
                               </CommandGroup>
                             </CommandList>
                           </Command>
@@ -857,13 +857,13 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                       Set metadata once per batch, to keep the repository searchable and scoped.
                     </p>
                     <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs h-7"
-                      onClick={() => {
-                        setDocType(""); setSite(""); setEquipmentType(""); setEquipmentMake(""); setEquipmentModel(""); setSelectedRoles(["all"]);
-                      }}
-                    >
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs h-7"
+                    onClick={() => {
+                      setDocType("");setSite("");setEquipmentType("");setEquipmentMake("");setEquipmentModel("");setSelectedRoles(["all"]);
+                    }}>
+
                       Reset
                     </Button>
                   </div>
@@ -872,22 +872,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
             </Collapsible>
           </Card>
         </div>
-      )}
+      }
 
       {/* Documents Table */}
-      {documents.length > 0 && (
-        <div className="space-y-4">
+      {documents.length > 0 &&
+      <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-foreground">Documents</h3>
             <div className="flex items-center gap-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search documents"
-                  className="pl-9 h-9 w-64 rounded-full border-border/50"
-                />
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search documents"
+                className="pl-9 h-9 w-64 rounded-full border-border/50" />
+
               </div>
               <Badge variant="outline" className="text-xs font-medium">
                 {indexedCount} indexed
@@ -912,16 +912,16 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredDocuments.map((doc) => (
-                  <TableRow 
-                    key={doc.id}
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => {
-                      const newId = doc.id === selectedDocId ? null : doc.id;
-                      setSelectedDocId(newId);
-                      onDocumentSelect?.(newId);
-                    }}
-                  >
+                {filteredDocuments.map((doc) =>
+              <TableRow
+                key={doc.id}
+                className="cursor-pointer hover:bg-muted/50"
+                onClick={() => {
+                  const newId = doc.id === selectedDocId ? null : doc.id;
+                  setSelectedDocId(newId);
+                  onDocumentSelect?.(newId);
+                }}>
+
                     <TableCell className="font-medium">{doc.fileName}</TableCell>
                     <TableCell className="capitalize">{doc.docType}</TableCell>
                     <TableCell>{doc.uploadDate || '—'}</TableCell>
@@ -935,99 +935,99 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                     <TableCell>{doc.equipmentMake || '—'}</TableCell>
                     <TableCell>{doc.equipmentModel || '—'}</TableCell>
                     <TableCell>
-                      {doc.ingestionStatus === 'complete' && (
-                        <div className="flex flex-col items-start gap-0.5">
+                      {doc.ingestionStatus === 'complete' &&
+                  <div className="flex flex-col items-start gap-0.5">
                           <CheckCircle className="h-5 w-5 text-green-600" />
                           <span className="text-[10px] text-muted-foreground">{doc.embeddedChunks}/{doc.totalChunks} chunks</span>
                         </div>
-                      )}
-                      {doc.ingestionStatus === 'failed' && (
-                        <div className="flex items-center gap-2">
+                  }
+                      {doc.ingestionStatus === 'failed' &&
+                  <div className="flex items-center gap-2">
                           <div className="flex flex-col items-start gap-0.5">
                             <AlertCircle className="h-5 w-5 text-destructive" />
                             <span className="text-[10px] text-muted-foreground">{doc.embeddedChunks}/{doc.totalChunks}</span>
                           </div>
                           <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 text-xs"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRetryEmbeddings(doc.id, doc.fileName);
-                            }}
-                          >
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRetryEmbeddings(doc.id, doc.fileName);
+                      }}>
+
                             Retry
                           </Button>
                         </div>
-                      )}
-                      {(doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') && (
-                        <div className="flex flex-col items-start gap-0.5">
+                  }
+                      {(doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') &&
+                  <div className="flex flex-col items-start gap-0.5">
                           <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
                           <span className="text-[10px] text-muted-foreground">{doc.embeddedChunks}/{doc.totalChunks} chunks</span>
                         </div>
-                      )}
-                      {doc.ingestionStatus === 'pending' && (
-                        <div className="flex flex-col items-start gap-0.5">
+                  }
+                      {doc.ingestionStatus === 'pending' &&
+                  <div className="flex flex-col items-start gap-0.5">
                           <Clock className="h-5 w-5 text-muted-foreground" />
                           <span className="text-[10px] text-muted-foreground">Pending</span>
                         </div>
-                      )}
+                  }
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        {canWrite && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => handleEditClick(e, doc)}
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                            title="Edit document metadata"
-                          >
+                        {canWrite &&
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => handleEditClick(e, doc)}
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      title="Edit document metadata">
+
                             <Pencil className="h-4 w-4" />
                           </Button>
-                        )}
-                        {canDelete && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTarget({ id: doc.id, fileName: doc.fileName });
-                            }}
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            title="Delete document"
-                          >
+                    }
+                        {canDelete &&
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget({ id: doc.id, fileName: doc.fileName });
+                      }}
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      title="Delete document">
+
                             <Trash2 className="h-4 w-4" />
                           </Button>
-                        )}
+                    }
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+              )}
               </TableBody>
             </Table>
           </div>
 
           {/* Full Text Preview */}
-          {selectedDoc && (
-            <div className="space-y-2">
+          {selectedDoc &&
+        <div className="space-y-2">
               <Label>Document text: {selectedDoc.fileName}</Label>
-              {selectedDoc.error ? (
-                <div className="p-4 border rounded-lg bg-destructive/10 text-destructive">
+              {selectedDoc.error ?
+          <div className="p-4 border rounded-lg bg-destructive/10 text-destructive">
                   <p className="font-medium">Error extracting text:</p>
                   <p className="text-sm mt-1">{selectedDoc.error}</p>
-                </div>
-              ) : (
-                <ScrollArea className="h-[400px] border rounded-lg p-4 bg-muted/30">
+                </div> :
+
+          <ScrollArea className="h-[400px] border rounded-lg p-4 bg-muted/30">
                   <pre className="text-xs whitespace-pre-wrap font-mono">
                     {selectedDoc.extractedText}
                   </pre>
                 </ScrollArea>
-              )}
+          }
             </div>
-          )}
+        }
         </div>
-      )}
+      }
 
       {/* Delete confirmation dialog */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
@@ -1042,8 +1042,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -1065,7 +1065,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               <Select value={editDocType} onValueChange={setEditDocType}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Select type" /></SelectTrigger>
                 <SelectContent>
-                  {docTypeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                  {docTypeOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -1074,7 +1074,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               <Select value={editSite} onValueChange={setEditSite}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Select site" /></SelectTrigger>
                 <SelectContent>
-                  {siteOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                  {siteOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -1083,7 +1083,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               <Select value={editEquipmentType} onValueChange={setEditEquipmentType}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Select type" /></SelectTrigger>
                 <SelectContent>
-                  {equipmentTypeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                  {equipmentTypeOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -1092,7 +1092,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               <Select value={editEquipmentMake} onValueChange={setEditEquipmentMake}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Select make" /></SelectTrigger>
                 <SelectContent>
-                  {equipmentMakeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                  {equipmentMakeOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -1101,7 +1101,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               <Select value={editEquipmentModel} onValueChange={setEditEquipmentModel}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Select model" /></SelectTrigger>
                 <SelectContent>
-                  {equipmentModelOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                  {equipmentModelOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -1125,12 +1125,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                           All roles
                         </CommandItem>
                         <Separator className="my-1" />
-                        {availableRoles.map((role) => (
-                          <CommandItem key={role.role} value={role.role} onSelect={() => handleEditRoleToggle(role.role)}>
-                            <Check className={cn("mr-2 h-4 w-4", (editSelectedRoles.includes(role.role) || editSelectedRoles.includes("all")) ? "opacity-100" : "opacity-0")} />
+                        {availableRoles.map((role) =>
+                        <CommandItem key={role.role} value={role.role} onSelect={() => handleEditRoleToggle(role.role)}>
+                            <Check className={cn("mr-2 h-4 w-4", editSelectedRoles.includes(role.role) || editSelectedRoles.includes("all") ? "opacity-100" : "opacity-0")} />
                             {role.displayName || role.role}
                           </CommandItem>
-                        ))}
+                        )}
                       </CommandGroup>
                     </CommandList>
                   </Command>
@@ -1146,6 +1146,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
+    </div>);
+
 };
