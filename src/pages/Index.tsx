@@ -87,15 +87,15 @@ const Index = () => {
         <Tabs defaultValue={defaultTab} className="w-full">
           <div className="flex items-end justify-between mb-8">
             <div>
-              <h2 className="text-2xl font-semibold text-foreground tracking-tight">Workspace</h2>
               
-
-
-
-
-
-
-
+              <p className="text-sm text-muted-foreground mt-1.5 font-normal">
+                {canSeeRepository && canSeeAssistant ?
+                "Switch between document repository and assistant." :
+                canSeeRepository ?
+                "Manage your document repository." :
+                "Chat with the AI assistant."
+                }
+              </p>
             </div>
             {canSeeRepository && canSeeAssistant &&
             <TabsList className="bg-muted/60 p-1 rounded-xl">
