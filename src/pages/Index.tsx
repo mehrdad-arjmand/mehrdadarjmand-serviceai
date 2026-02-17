@@ -14,13 +14,13 @@ const Index = () => {
   const permissions = usePermissions();
 
   const fetchStats = async () => {
-    const { count: docsCount } = await supabase
-      .from('documents')
-      .select('*', { count: 'exact', head: true });
-    
-    const { count: chunksCount } = await supabase
-      .from('chunks')
-      .select('*', { count: 'exact', head: true });
+    const { count: docsCount } = await supabase.
+    from('documents').
+    select('*', { count: 'exact', head: true });
+
+    const { count: chunksCount } = await supabase.
+    from('chunks').
+    select('*', { count: 'exact', head: true });
 
     setHasDocuments((docsCount || 0) > 0);
     setChunksCount(chunksCount || 0);
@@ -29,11 +29,11 @@ const Index = () => {
   useEffect(() => {
     fetchStats();
 
-    const docsChannel = supabase
-      .channel('docs-stats')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchStats)
-      .subscribe();
+    const docsChannel = supabase.
+    channel('docs-stats').
+    on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats).
+    on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchStats).
+    subscribe();
 
     return () => {
       supabase.removeChannel(docsChannel);
@@ -50,8 +50,8 @@ const Index = () => {
             <span>Loading permissions...</span>
           </div>
         </main>
-      </div>
-    );
+      </div>);
+
   }
 
   const canSeeRepository = permissions.repository.read;
@@ -68,15 +68,15 @@ const Index = () => {
             <p className="text-muted-foreground">
               Your account does not have access to any features. Please contact an administrator.
             </p>
-            {permissions.role && (
-              <p className="text-sm text-muted-foreground mt-4">
+            {permissions.role &&
+            <p className="text-sm text-muted-foreground mt-4">
                 Current role: <span className="font-medium capitalize">{permissions.role}</span>
               </p>
-            )}
+            }
           </div>
         </main>
-      </div>
-    );
+      </div>);
+
   }
 
   return (
@@ -87,55 +87,55 @@ const Index = () => {
         <Tabs defaultValue={defaultTab} className="w-full">
           <div className="flex items-end justify-between mb-8">
             <div>
-              <h2 className="text-2xl font-semibold text-foreground tracking-tight">Workspace</h2>
+              
               <p className="text-sm text-muted-foreground mt-1.5 font-normal">
-                {canSeeRepository && canSeeAssistant 
-                  ? "Switch between document repository and assistant."
-                  : canSeeRepository 
-                    ? "Manage your document repository."
-                    : "Chat with the AI assistant."
+                {canSeeRepository && canSeeAssistant ?
+                "Switch between document repository and assistant." :
+                canSeeRepository ?
+                "Manage your document repository." :
+                "Chat with the AI assistant."
                 }
               </p>
             </div>
-            {canSeeRepository && canSeeAssistant && (
-              <TabsList className="bg-muted/60 p-1 rounded-xl">
-                <TabsTrigger 
-                  value="repository" 
-                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
-                >
+            {canSeeRepository && canSeeAssistant &&
+            <TabsList className="bg-muted/60 p-1 rounded-xl">
+                <TabsTrigger
+                value="repository"
+                className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
+
                   Repository
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="assistant"
-                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
-                >
+                <TabsTrigger
+                value="assistant"
+                className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
+
                   Assistant
                 </TabsTrigger>
               </TabsList>
-            )}
+            }
           </div>
 
-          {canSeeRepository && (
-            <TabsContent value="repository" className="mt-0">
-              <RepositoryCard 
-                onDocumentSelect={setSelectedDocumentId}
-                permissions={permissions.repository}
-              />
+          {canSeeRepository &&
+          <TabsContent value="repository" className="mt-0">
+              <RepositoryCard
+              onDocumentSelect={setSelectedDocumentId}
+              permissions={permissions.repository} />
+
             </TabsContent>
-          )}
-          {canSeeAssistant && (
-            <TabsContent value="assistant" className="mt-0">
-              <TechnicianChat 
-                hasDocuments={hasDocuments} 
-                chunksCount={chunksCount}
-                permissions={permissions.assistant}
-              />
+          }
+          {canSeeAssistant &&
+          <TabsContent value="assistant" className="mt-0">
+              <TechnicianChat
+              hasDocuments={hasDocuments}
+              chunksCount={chunksCount}
+              permissions={permissions.assistant} />
+
             </TabsContent>
-          )}
+          }
         </Tabs>
       </main>
-    </div>
-  );
+    </div>);
+
 };
 
 export default Index;
