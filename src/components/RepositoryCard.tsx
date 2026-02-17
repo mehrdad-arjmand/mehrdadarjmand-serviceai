@@ -694,9 +694,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                   </div>
                 </label>
               </div>
-              
-
-
+              <p className="text-xs text-muted-foreground italic">
+                Apply metadata filters to tag the upload batch for scoped retrieval.
+              </p>
               <div className="flex justify-end">
                 <Button size="sm" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || selectedRoles.length === 0}>
                   {isUploading ? "Uploading..." : "Upload"}
@@ -852,10 +852,10 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                       </Popover>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between pt-1">
-                    <p className="text-xs text-muted-foreground italic">
-                      Set metadata once per batch, to keep the repository searchable and scoped.
-                    </p>
+                  <div className="items-center justify-between pt-1 flex flex-row border-none">
+                    
+
+
                     <Button
                     variant="ghost"
                     size="sm"
