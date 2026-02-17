@@ -1,5 +1,6 @@
-import { Upload, FileText, Trash2, CalendarIcon, Loader2, CheckCircle, AlertCircle, Clock, Check, ChevronsUpDown } from "lucide-react";
+import { Upload, Trash2, CalendarIcon, Loader2, CheckCircle, AlertCircle, Clock, Check, ChevronsUpDown, Pencil, Search, X } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,6 +15,8 @@ import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TabPermissions } from "@/hooks/usePermissions";
 
@@ -56,8 +59,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const [isUploading, setIsUploading] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   
-  // Available roles for access control
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
   
   // Form state
@@ -66,9 +69,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const [equipmentType, setEquipmentType] = useState<string>("");
   const [equipmentMake, setEquipmentMake] = useState<string>("");
   const [equipmentModel, setEquipmentModel] = useState<string>("");
-  const [selectedRoles, setSelectedRoles] = useState<string[]>(["all"]); // Default to all roles
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(["all"]);
 
-  // Dropdown options state - loaded from database
+  // Dropdown options state
   const [docTypeOptions, setDocTypeOptions] = useState<string[]>([]);
   const [siteOptions, setSiteOptions] = useState<string[]>([]);
   const [equipmentTypeOptions, setEquipmentTypeOptions] = useState<string[]>([]);
@@ -120,8 +123,21 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   const [newEquipmentMake, setNewEquipmentMake] = useState("");
   const [newEquipmentModel, setNewEquipmentModel] = useState("");
 
-  // Role picker popover state
   const [rolePickerOpen, setRolePickerOpen] = useState(false);
+
+  // Edit state
+  const [editTarget, setEditTarget] = useState<Document | null>(null);
+  const [editDocType, setEditDocType] = useState("");
+  const [editSite, setEditSite] = useState("");
+  const [editEquipmentType, setEditEquipmentType] = useState("");
+  const [editEquipmentMake, setEditEquipmentMake] = useState("");
+  const [editEquipmentModel, setEditEquipmentModel] = useState("");
+  const [editSelectedRoles, setEditSelectedRoles] = useState<string[]>([]);
+  const [editRolePickerOpen, setEditRolePickerOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Delete state
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; fileName: string } | null>(null);
 
   // Fetch available roles
   useEffect(() => {
@@ -521,7 +537,97 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     }
   };
 
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; fileName: string } | null>(null);
+  // Edit handlers
+  const handleEditClick = (e: React.MouseEvent, doc: Document) => {
+    e.stopPropagation();
+    setEditTarget(doc);
+    setEditDocType(doc.docType === 'unknown' ? '' : doc.docType);
+    setEditSite(doc.site || '');
+    setEditEquipmentType(doc.equipmentType === 'unknown' ? '' : doc.equipmentType);
+    setEditEquipmentMake(doc.equipmentMake || '');
+    setEditEquipmentModel(doc.equipmentModel || '');
+    setEditSelectedRoles(doc.allowedRoles);
+  };
+
+  const handleEditRoleToggle = (role: string) => {
+    if (role === "all") {
+      if (editSelectedRoles.includes("all")) {
+        setEditSelectedRoles([]);
+      } else {
+        setEditSelectedRoles(["all"]);
+      }
+    } else {
+      let newRoles = editSelectedRoles.filter(r => r !== "all");
+      if (newRoles.includes(role)) {
+        newRoles = newRoles.filter(r => r !== role);
+      } else {
+        newRoles = [...newRoles, role];
+      }
+      if (newRoles.length === availableRoles.length) {
+        setEditSelectedRoles(["all"]);
+      } else {
+        setEditSelectedRoles(newRoles);
+      }
+    }
+  };
+
+  const getEditRolesLabel = () => {
+    if (editSelectedRoles.includes("all")) return "All roles";
+    if (editSelectedRoles.length === 0) return "Select roles";
+    if (editSelectedRoles.length === 1) {
+      const role = availableRoles.find(r => r.role === editSelectedRoles[0]);
+      return role?.displayName || role?.role || editSelectedRoles[0];
+    }
+    return `${editSelectedRoles.length} roles selected`;
+  };
+
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    setIsSaving(true);
+
+    try {
+      // Update document record
+      const { error: docError } = await supabase
+        .from('documents')
+        .update({
+          doc_type: editDocType || null,
+          site: editSite || null,
+          equipment_make: editEquipmentMake || null,
+          equipment_model: editEquipmentModel || null,
+          allowed_roles: editSelectedRoles,
+        })
+        .eq('id', editTarget.id);
+
+      if (docError) throw docError;
+
+      // Update equipment type in chunks
+      if (editEquipmentType !== editTarget.equipmentType) {
+        const { error: chunksError } = await supabase
+          .from('chunks')
+          .update({ equipment: editEquipmentType || null })
+          .eq('document_id', editTarget.id);
+
+        if (chunksError) throw chunksError;
+      }
+
+      toast({
+        title: "Document updated",
+        description: `Metadata for "${editTarget.fileName}" has been updated.`,
+      });
+
+      setEditTarget(null);
+      await fetchDocuments();
+    } catch (error: any) {
+      console.error('Edit error:', error);
+      toast({
+        title: "Update failed",
+        description: error.message || "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const selectedDoc = documents.find(doc => doc.id === selectedDocId);
 
@@ -537,487 +643,393 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
     return `${roles.length} roles`;
   };
 
+  // Filter documents by search query
+  const filteredDocuments = documents.filter(doc => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      doc.fileName.toLowerCase().includes(q) ||
+      doc.docType.toLowerCase().includes(q) ||
+      (doc.site && doc.site.toLowerCase().includes(q)) ||
+      (doc.equipmentMake && doc.equipmentMake.toLowerCase().includes(q)) ||
+      (doc.equipmentModel && doc.equipmentModel.toLowerCase().includes(q))
+    );
+  });
+
+  const indexedCount = documents.filter(d => d.ingestionStatus === 'complete').length;
+
   return (
-    <Card className="w-full border-border/50 shadow-premium bg-card">
-      <CardHeader className="pb-4">
-        <CardTitle className="text-xl tracking-tight">
-          {canWrite ? "Upload documents" : "Document Repository"}
-        </CardTitle>
-        <CardDescription className="text-muted-foreground font-normal">
-          {canWrite 
-            ? "Add PDFs, Word files, or text documents to build your knowledge base."
-            : "View documents in the knowledge base."}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-8">
-        {/* Upload Area - Only show if user has write permission */}
-        {canWrite && (
-          <>
-            <div className="relative border-2 border-dashed border-border/60 rounded-2xl p-16 text-center hover:border-muted-foreground/40 hover:bg-muted/30 transition-all duration-300 cursor-pointer group">
-              <input
-                type="file"
-                id="file-upload"
-                multiple
-                accept=".pdf,.docx,.txt"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center group-hover:bg-accent transition-colors duration-300">
-                  <Upload className="h-6 w-6 text-muted-foreground" />
+    <div className="space-y-8">
+      {/* Upload + Filters side by side */}
+      {canWrite && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Upload Box */}
+          <Card className="border-border/50 shadow-premium bg-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base tracking-tight">Upload documents</CardTitle>
+              <CardDescription className="text-muted-foreground font-normal text-xs">
+                PDF, DOCX, TXT supported
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="relative border-2 border-dashed border-border/60 rounded-2xl p-10 text-center hover:border-muted-foreground/40 hover:bg-muted/30 transition-all duration-300 cursor-pointer group">
+                <input
+                  type="file"
+                  id="file-upload"
+                  multiple
+                  accept=".pdf,.docx,.txt"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      {selectedFiles.length > 0 
+                        ? `${selectedFiles.length} file(s) selected` 
+                        : "Drag & drop"}
+                    </p>
+                    <p className="text-xs text-primary font-normal">
+                      Or click to upload
+                    </p>
+                  </div>
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground italic">
+                Apply metadata filters to tag the upload batch for scoped retrieval.
+              </p>
+              <div className="flex justify-end">
+                <Button size="sm" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || selectedRoles.length === 0}>
+                  {isUploading ? "Uploading..." : "Upload"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Optional Filters */}
+          <Card className="border-border/50 shadow-premium bg-card">
+            <Collapsible defaultOpen={true}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CollapsibleTrigger asChild>
+                    <button className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                      <ChevronDown className="h-4 w-4 transition-transform duration-200 [[data-state=closed]>&]:rotate-[-90deg]" />
+                      <CardTitle className="text-base tracking-tight">Optional filters</CardTitle>
+                      <span className="text-xs text-muted-foreground font-normal ml-1">Tags uploads</span>
+                    </button>
+                  </CollapsibleTrigger>
+                  <span className="text-xs text-muted-foreground font-normal">Applies to uploads</span>
                 </div>
-                <div className="space-y-1.5">
-                  <p className="text-base font-medium text-foreground">
-                    {selectedFiles.length > 0 
-                      ? `${selectedFiles.length} file(s) selected` 
-                      : "Click to upload or drag and drop"}
-                  </p>
-                  <p className="text-sm text-muted-foreground font-normal">
-                    PDF, DOCX, or TXT files (multiple allowed)
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            <Separator className="bg-border/50" />
-
-        {/* Metadata Form */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Document Type */}
-          <div className="space-y-2">
-            <Label htmlFor="doc-type">Document type</Label>
-            {showDocTypeInput ? (
-              <div className="flex gap-2">
-                <Input
-                  value={newDocType}
-                  onChange={(e) => setNewDocType(e.target.value)}
-                  placeholder="Enter new document type"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleAddOption('docType', newDocType);
-                    }
-                  }}
-                />
-                <Button
-                  size="sm"
-                  onClick={() => handleAddOption('docType', newDocType)}
-                >
-                  Add
-                </Button>
-              </div>
-            ) : (
-              <Select 
-                value={docType} 
-                onValueChange={(value) => {
-                  if (value === "__add_new__") {
-                    setShowDocTypeInput(true);
-                  } else {
-                    setDocType(value);
-                  }
-                }}
-              >
-                <SelectTrigger id="doc-type">
-                  <SelectValue placeholder="Select document type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {docTypeOptions.map((option) => (
-                    <SelectItem key={option} value={option}>{option}</SelectItem>
-                  ))}
-                  <SelectItem value="__add_new__">+ Add item</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {/* Access Role Multi-Select */}
-          <div className="space-y-2">
-            <Label>Access role</Label>
-            <Popover open={rolePickerOpen} onOpenChange={setRolePickerOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={rolePickerOpen}
-                  className="h-10 w-full justify-between font-normal"
-                >
-                  {getSelectedRolesLabel()}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[280px] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search roles..." />
-                  <CommandList>
-                    <CommandEmpty>No roles found.</CommandEmpty>
-                    <CommandGroup>
-                      {/* All option */}
-                      <CommandItem
-                        value="all"
-                        onSelect={() => handleRoleToggle("all")}
-                      >
-                        <Check
-                          className={cn(
-                            "mr-2 h-4 w-4",
-                            selectedRoles.includes("all") ? "opacity-100" : "opacity-0"
-                          )}
-                        />
-                        All roles
-                      </CommandItem>
-                      <Separator className="my-1" />
-                      {/* Individual roles */}
-                      {availableRoles.map((role) => (
-                        <CommandItem
-                          key={role.role}
-                          value={role.role}
-                          onSelect={() => handleRoleToggle(role.role)}
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              (selectedRoles.includes(role.role) || selectedRoles.includes("all"))
-                                ? "opacity-100" 
-                                : "opacity-0"
-                            )}
-                          />
-                          {role.displayName || role.role}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {/* Site */}
-          <div className="space-y-2">
-            <Label htmlFor="site">Site</Label>
-            {showSiteInput ? (
-              <div className="flex gap-2">
-                <Input
-                  value={newSite}
-                  onChange={(e) => setNewSite(e.target.value)}
-                  placeholder="Enter site name"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleAddOption('site', newSite);
-                    }
-                  }}
-                />
-                <Button
-                  size="sm"
-                  onClick={() => handleAddOption('site', newSite)}
-                >
-                  Add
-                </Button>
-              </div>
-            ) : (
-              <Select 
-                value={site} 
-                onValueChange={(value) => {
-                  if (value === "__add_new__") {
-                    setShowSiteInput(true);
-                  } else {
-                    setSite(value);
-                  }
-                }}
-              >
-                <SelectTrigger id="site">
-                  <SelectValue placeholder="Select site" />
-                </SelectTrigger>
-                <SelectContent>
-                  {siteOptions.map((option) => (
-                    <SelectItem key={option} value={option}>{option}</SelectItem>
-                  ))}
-                  <SelectItem value="__add_new__">+ Add item</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {/* Equipment Type */}
-          <div className="space-y-2">
-            <Label htmlFor="equipment-type">Equipment type</Label>
-            {showEquipmentTypeInput ? (
-              <div className="flex gap-2">
-                <Input
-                  value={newEquipmentType}
-                  onChange={(e) => setNewEquipmentType(e.target.value)}
-                  placeholder="Enter equipment type"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleAddOption('equipmentType', newEquipmentType);
-                    }
-                  }}
-                />
-                <Button
-                  size="sm"
-                  onClick={() => handleAddOption('equipmentType', newEquipmentType)}
-                >
-                  Add
-                </Button>
-              </div>
-            ) : (
-              <Select 
-                value={equipmentType} 
-                onValueChange={(value) => {
-                  if (value === "__add_new__") {
-                    setShowEquipmentTypeInput(true);
-                  } else {
-                    setEquipmentType(value);
-                  }
-                }}
-              >
-                <SelectTrigger id="equipment-type">
-                  <SelectValue placeholder="Select equipment type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {equipmentTypeOptions.map((option) => (
-                    <SelectItem key={option} value={option}>{option}</SelectItem>
-                  ))}
-                  <SelectItem value="__add_new__">+ Add item</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {/* Equipment Make */}
-          <div className="space-y-2">
-            <Label htmlFor="equipment-make">Equipment make</Label>
-            {showEquipmentMakeInput ? (
-              <div className="flex gap-2">
-                <Input
-                  value={newEquipmentMake}
-                  onChange={(e) => setNewEquipmentMake(e.target.value)}
-                  placeholder="Enter equipment make"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleAddOption('equipmentMake', newEquipmentMake);
-                    }
-                  }}
-                />
-                <Button
-                  size="sm"
-                  onClick={() => handleAddOption('equipmentMake', newEquipmentMake)}
-                >
-                  Add
-                </Button>
-              </div>
-            ) : (
-              <Select 
-                value={equipmentMake} 
-                onValueChange={(value) => {
-                  if (value === "__add_new__") {
-                    setShowEquipmentMakeInput(true);
-                  } else {
-                    setEquipmentMake(value);
-                  }
-                }}
-              >
-                <SelectTrigger id="equipment-make">
-                  <SelectValue placeholder="Select equipment make" />
-                </SelectTrigger>
-                <SelectContent>
-                  {equipmentMakeOptions.map((option) => (
-                    <SelectItem key={option} value={option}>{option}</SelectItem>
-                  ))}
-                  <SelectItem value="__add_new__">+ Add item</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {/* Equipment Model */}
-          <div className="space-y-2">
-            <Label htmlFor="equipment-model">Equipment model</Label>
-            {showEquipmentModelInput ? (
-              <div className="flex gap-2">
-                <Input
-                  value={newEquipmentModel}
-                  onChange={(e) => setNewEquipmentModel(e.target.value)}
-                  placeholder="Enter equipment model"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleAddOption('equipmentModel', newEquipmentModel);
-                    }
-                  }}
-                />
-                <Button
-                  size="sm"
-                  onClick={() => handleAddOption('equipmentModel', newEquipmentModel)}
-                >
-                  Add
-                </Button>
-              </div>
-            ) : (
-              <Select 
-                value={equipmentModel} 
-                onValueChange={(value) => {
-                  if (value === "__add_new__") {
-                    setShowEquipmentModelInput(true);
-                  } else {
-                    setEquipmentModel(value);
-                  }
-                }}
-              >
-                <SelectTrigger id="equipment-model">
-                  <SelectValue placeholder="Select equipment model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {equipmentModelOptions.map((option) => (
-                    <SelectItem key={option} value={option}>{option}</SelectItem>
-                  ))}
-                  <SelectItem value="__add_new__">+ Add item</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-        </div>
-
-        {/* Upload Button */}
-        <div className="flex justify-end">
-          <Button size="lg" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || selectedRoles.length === 0}>
-
-            {isUploading ? "Uploading..." : "Upload"}
-          </Button>
-        </div>
-          </>
-        )}
-
-        {/* Documents Table */}
-        {documents.length > 0 && (
-          <>
-            <Separator />
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Documents</h3>
-              <div className="border rounded-lg overflow-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Document type</TableHead>
-                      <TableHead>Upload date</TableHead>
-                      <TableHead>Access roles</TableHead>
-                      <TableHead>Site</TableHead>
-                      <TableHead>Equipment type</TableHead>
-                      <TableHead>Equipment make</TableHead>
-                      <TableHead>Equipment model</TableHead>
-                      <TableHead>Ingestion</TableHead>
-                      {canDelete && <TableHead className="w-[50px]"></TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {documents.map((doc) => (
-                      <TableRow 
-                        key={doc.id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => {
-                          const newId = doc.id === selectedDocId ? null : doc.id;
-                          setSelectedDocId(newId);
-                          onDocumentSelect?.(newId);
-                        }}
-                      >
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            <FileText className="h-4 w-4 text-muted-foreground" />
-                            {doc.fileName}
-                          </div>
-                        </TableCell>
-                        <TableCell className="capitalize">{doc.docType}</TableCell>
-                        <TableCell>{doc.uploadDate || '—'}</TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="text-xs">
-                            {formatRolesDisplay(doc.allowedRoles)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{doc.site || '—'}</TableCell>
-                        <TableCell className="capitalize">{doc.equipmentType}</TableCell>
-                        <TableCell>{doc.equipmentMake || '—'}</TableCell>
-                        <TableCell>{doc.equipmentModel || '—'}</TableCell>
-                        <TableCell>
-                          {doc.ingestionStatus === 'complete' && (
-                            <div className="flex items-center gap-1 text-green-600">
-                              <CheckCircle className="h-4 w-4" />
-                              <span className="text-xs">Complete ({doc.embeddedChunks}/{doc.totalChunks} chunks)</span>
-                            </div>
-                          )}
-                          {doc.ingestionStatus === 'failed' && (
-                            <div className="flex items-center gap-2">
-                              <div className="flex items-center gap-1 text-destructive" title={doc.ingestionError || 'Unknown error'}>
-                                <AlertCircle className="h-4 w-4" />
-                                <span className="text-xs">Failed ({doc.embeddedChunks}/{doc.totalChunks})</span>
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-6 text-xs"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleRetryEmbeddings(doc.id, doc.fileName);
-                                }}
-                              >
-                                Retry
-                              </Button>
-                            </div>
-                          )}
-                          {(doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') && (
-                            <div className="flex items-center gap-1 text-amber-600">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span className="text-xs">Indexing... ({doc.embeddedChunks}/{doc.totalChunks} chunks)</span>
-                            </div>
-                          )}
-                          {doc.ingestionStatus === 'pending' && (
-                            <div className="flex items-center gap-1 text-muted-foreground">
-                              <Clock className="h-4 w-4" />
-                              <span className="text-xs">Pending</span>
-                            </div>
-                          )}
-                        </TableCell>
-                        {canDelete && (
-                          <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget({ id: doc.id, fileName: doc.fileName });
-                              }}
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              title="Delete document"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Full Text Preview */}
-              {selectedDoc && (
-                <div className="space-y-2">
-                  <Label>Document text: {selectedDoc.fileName}</Label>
-                  {selectedDoc.error ? (
-                    <div className="p-4 border rounded-lg bg-destructive/10 text-destructive">
-                      <p className="font-medium">Error extracting text:</p>
-                      <p className="text-sm mt-1">{selectedDoc.error}</p>
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent className="space-y-4 pt-0">
+                  <div className="grid grid-cols-3 gap-3">
+                    {/* Document Type */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Document Type</Label>
+                      {showDocTypeInput ? (
+                        <div className="flex gap-1">
+                          <Input value={newDocType} onChange={(e) => setNewDocType(e.target.value)} placeholder="Type..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('docType', newDocType); }} />
+                          <Button size="sm" className="h-9" onClick={() => handleAddOption('docType', newDocType)}>Add</Button>
+                        </div>
+                      ) : (
+                        <Select value={docType} onValueChange={(value) => { if (value === "__add_new__") setShowDocTypeInput(true); else setDocType(value); }}>
+                          <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All types" /></SelectTrigger>
+                          <SelectContent>
+                            {docTypeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            <SelectItem value="__add_new__">+ Add item</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
-                  ) : (
-                    <ScrollArea className="h-[400px] border rounded-lg p-4 bg-muted/30">
-                      <pre className="text-xs whitespace-pre-wrap font-mono">
-                        {selectedDoc.extractedText}
-                      </pre>
-                    </ScrollArea>
-                  )}
+
+                    {/* Site */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Site</Label>
+                      {showSiteInput ? (
+                        <div className="flex gap-1">
+                          <Input value={newSite} onChange={(e) => setNewSite(e.target.value)} placeholder="Site..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('site', newSite); }} />
+                          <Button size="sm" className="h-9" onClick={() => handleAddOption('site', newSite)}>Add</Button>
+                        </div>
+                      ) : (
+                        <Select value={site} onValueChange={(value) => { if (value === "__add_new__") setShowSiteInput(true); else setSite(value); }}>
+                          <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
+                          <SelectContent>
+                            {siteOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            <SelectItem value="__add_new__">+ Add item</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+
+                    {/* Equipment Type */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Equipment Type</Label>
+                      {showEquipmentTypeInput ? (
+                        <div className="flex gap-1">
+                          <Input value={newEquipmentType} onChange={(e) => setNewEquipmentType(e.target.value)} placeholder="Type..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('equipmentType', newEquipmentType); }} />
+                          <Button size="sm" className="h-9" onClick={() => handleAddOption('equipmentType', newEquipmentType)}>Add</Button>
+                        </div>
+                      ) : (
+                        <Select value={equipmentType} onValueChange={(value) => { if (value === "__add_new__") setShowEquipmentTypeInput(true); else setEquipmentType(value); }}>
+                          <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All types" /></SelectTrigger>
+                          <SelectContent>
+                            {equipmentTypeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            <SelectItem value="__add_new__">+ Add item</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+
+                    {/* Equipment Make */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Equipment Make</Label>
+                      {showEquipmentMakeInput ? (
+                        <div className="flex gap-1">
+                          <Input value={newEquipmentMake} onChange={(e) => setNewEquipmentMake(e.target.value)} placeholder="Make..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('equipmentMake', newEquipmentMake); }} />
+                          <Button size="sm" className="h-9" onClick={() => handleAddOption('equipmentMake', newEquipmentMake)}>Add</Button>
+                        </div>
+                      ) : (
+                        <Select value={equipmentMake} onValueChange={(value) => { if (value === "__add_new__") setShowEquipmentMakeInput(true); else setEquipmentMake(value); }}>
+                          <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All makes" /></SelectTrigger>
+                          <SelectContent>
+                            {equipmentMakeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            <SelectItem value="__add_new__">+ Add item</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+
+                    {/* Equipment Model */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Equipment Model</Label>
+                      {showEquipmentModelInput ? (
+                        <div className="flex gap-1">
+                          <Input value={newEquipmentModel} onChange={(e) => setNewEquipmentModel(e.target.value)} placeholder="Model..." className="h-9 text-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleAddOption('equipmentModel', newEquipmentModel); }} />
+                          <Button size="sm" className="h-9" onClick={() => handleAddOption('equipmentModel', newEquipmentModel)}>Add</Button>
+                        </div>
+                      ) : (
+                        <Select value={equipmentModel} onValueChange={(value) => { if (value === "__add_new__") setShowEquipmentModelInput(true); else setEquipmentModel(value); }}>
+                          <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="All models" /></SelectTrigger>
+                          <SelectContent>
+                            {equipmentModelOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                            <SelectItem value="__add_new__">+ Add item</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+
+                    {/* Access Role */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Access Role</Label>
+                      <Popover open={rolePickerOpen} onOpenChange={setRolePickerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" role="combobox" aria-expanded={rolePickerOpen} className="h-9 w-full justify-between font-normal text-sm">
+                            {getSelectedRolesLabel()}
+                            <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[240px] p-0" align="start">
+                          <Command>
+                            <CommandInput placeholder="Search roles..." />
+                            <CommandList>
+                              <CommandEmpty>No roles found.</CommandEmpty>
+                              <CommandGroup>
+                                <CommandItem value="all" onSelect={() => handleRoleToggle("all")}>
+                                  <Check className={cn("mr-2 h-4 w-4", selectedRoles.includes("all") ? "opacity-100" : "opacity-0")} />
+                                  All roles
+                                </CommandItem>
+                                <Separator className="my-1" />
+                                {availableRoles.map((role) => (
+                                  <CommandItem key={role.role} value={role.role} onSelect={() => handleRoleToggle(role.role)}>
+                                    <Check className={cn("mr-2 h-4 w-4", (selectedRoles.includes(role.role) || selectedRoles.includes("all")) ? "opacity-100" : "opacity-0")} />
+                                    {role.displayName || role.role}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <p className="text-xs text-muted-foreground italic">
+                      Set metadata once per batch, to keep the repository searchable and scoped.
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs h-7"
+                      onClick={() => {
+                        setDocType(""); setSite(""); setEquipmentType(""); setEquipmentMake(""); setEquipmentModel(""); setSelectedRoles(["all"]);
+                      }}
+                    >
+                      Reset
+                    </Button>
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Collapsible>
+          </Card>
+        </div>
+      )}
+
+      {/* Documents Table */}
+      {documents.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-foreground">Documents</h3>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search documents"
+                  className="pl-9 h-9 w-64 rounded-full border-border/50"
+                />
+              </div>
+              <Badge variant="outline" className="text-xs font-medium">
+                {indexedCount} indexed
+              </Badge>
+            </div>
+          </div>
+
+          <div className="border border-border/50 rounded-xl overflow-auto bg-card shadow-premium">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/30">
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Name</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Document Type</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Upload Date</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Access Role</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Site</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Equipment Type</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Make</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Model</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider">Ingestion</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredDocuments.map((doc) => (
+                  <TableRow 
+                    key={doc.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => {
+                      const newId = doc.id === selectedDocId ? null : doc.id;
+                      setSelectedDocId(newId);
+                      onDocumentSelect?.(newId);
+                    }}
+                  >
+                    <TableCell className="font-medium">{doc.fileName}</TableCell>
+                    <TableCell className="capitalize">{doc.docType}</TableCell>
+                    <TableCell>{doc.uploadDate || '—'}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="text-xs">
+                        {formatRolesDisplay(doc.allowedRoles)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{doc.site || '—'}</TableCell>
+                    <TableCell className="capitalize">{doc.equipmentType}</TableCell>
+                    <TableCell>{doc.equipmentMake || '—'}</TableCell>
+                    <TableCell>{doc.equipmentModel || '—'}</TableCell>
+                    <TableCell>
+                      {doc.ingestionStatus === 'complete' && (
+                        <div className="flex flex-col items-start gap-0.5">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <span className="text-[10px] text-muted-foreground">{doc.embeddedChunks}/{doc.totalChunks} chunks</span>
+                        </div>
+                      )}
+                      {doc.ingestionStatus === 'failed' && (
+                        <div className="flex items-center gap-2">
+                          <div className="flex flex-col items-start gap-0.5">
+                            <AlertCircle className="h-5 w-5 text-destructive" />
+                            <span className="text-[10px] text-muted-foreground">{doc.embeddedChunks}/{doc.totalChunks}</span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRetryEmbeddings(doc.id, doc.fileName);
+                            }}
+                          >
+                            Retry
+                          </Button>
+                        </div>
+                      )}
+                      {(doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') && (
+                        <div className="flex flex-col items-start gap-0.5">
+                          <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
+                          <span className="text-[10px] text-muted-foreground">{doc.embeddedChunks}/{doc.totalChunks} chunks</span>
+                        </div>
+                      )}
+                      {doc.ingestionStatus === 'pending' && (
+                        <div className="flex flex-col items-start gap-0.5">
+                          <Clock className="h-5 w-5 text-muted-foreground" />
+                          <span className="text-[10px] text-muted-foreground">Pending</span>
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-1">
+                        {canWrite && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => handleEditClick(e, doc)}
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title="Edit document metadata"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget({ id: doc.id, fileName: doc.fileName });
+                            }}
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            title="Delete document"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Full Text Preview */}
+          {selectedDoc && (
+            <div className="space-y-2">
+              <Label>Document text: {selectedDoc.fileName}</Label>
+              {selectedDoc.error ? (
+                <div className="p-4 border rounded-lg bg-destructive/10 text-destructive">
+                  <p className="font-medium">Error extracting text:</p>
+                  <p className="text-sm mt-1">{selectedDoc.error}</p>
                 </div>
+              ) : (
+                <ScrollArea className="h-[400px] border rounded-lg p-4 bg-muted/30">
+                  <pre className="text-xs whitespace-pre-wrap font-mono">
+                    {selectedDoc.extractedText}
+                  </pre>
+                </ScrollArea>
               )}
             </div>
-          </>
-        )}
-      </CardContent>
+          )}
+        </div>
+      )}
 
+      {/* Delete confirmation dialog */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1037,6 +1049,103 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+
+      {/* Edit dialog */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Document Metadata</DialogTitle>
+            <DialogDescription>
+              Update metadata for <strong>{editTarget?.fileName}</strong>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Document Type</Label>
+              <Select value={editDocType} onValueChange={setEditDocType}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select type" /></SelectTrigger>
+                <SelectContent>
+                  {docTypeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Site</Label>
+              <Select value={editSite} onValueChange={setEditSite}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select site" /></SelectTrigger>
+                <SelectContent>
+                  {siteOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Equipment Type</Label>
+              <Select value={editEquipmentType} onValueChange={setEditEquipmentType}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select type" /></SelectTrigger>
+                <SelectContent>
+                  {equipmentTypeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Equipment Make</Label>
+              <Select value={editEquipmentMake} onValueChange={setEditEquipmentMake}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select make" /></SelectTrigger>
+                <SelectContent>
+                  {equipmentMakeOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Equipment Model</Label>
+              <Select value={editEquipmentModel} onValueChange={setEditEquipmentModel}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Select model" /></SelectTrigger>
+                <SelectContent>
+                  {equipmentModelOptions.map((option) => (<SelectItem key={option} value={option}>{option}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Access Role</Label>
+              <Popover open={editRolePickerOpen} onOpenChange={setEditRolePickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" role="combobox" className="h-9 w-full justify-between font-normal text-sm">
+                    {getEditRolesLabel()}
+                    <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[240px] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search roles..." />
+                    <CommandList>
+                      <CommandEmpty>No roles found.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem value="all" onSelect={() => handleEditRoleToggle("all")}>
+                          <Check className={cn("mr-2 h-4 w-4", editSelectedRoles.includes("all") ? "opacity-100" : "opacity-0")} />
+                          All roles
+                        </CommandItem>
+                        <Separator className="my-1" />
+                        {availableRoles.map((role) => (
+                          <CommandItem key={role.role} value={role.role} onSelect={() => handleEditRoleToggle(role.role)}>
+                            <Check className={cn("mr-2 h-4 w-4", (editSelectedRoles.includes(role.role) || editSelectedRoles.includes("all")) ? "opacity-100" : "opacity-0")} />
+                            {role.displayName || role.role}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 };

@@ -29,7 +29,6 @@ const Index = () => {
   useEffect(() => {
     fetchStats();
 
-    // Subscribe to realtime changes
     const docsChannel = supabase
       .channel('docs-stats')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats)
@@ -41,12 +40,11 @@ const Index = () => {
     };
   }, []);
 
-  // Loading state
   if (permissions.isLoading) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="mx-auto px-8 py-10 flex items-center justify-center" style={{ maxWidth: "1040px" }}>
+        <main className="px-6 lg:px-10 py-10 flex items-center justify-center">
           <div className="flex items-center gap-3 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
             <span>Loading permissions...</span>
@@ -56,19 +54,15 @@ const Index = () => {
     );
   }
 
-  // Determine which tabs are visible
   const canSeeRepository = permissions.repository.read;
   const canSeeAssistant = permissions.assistant.read;
-  
-  // Determine the default tab based on available permissions
   const defaultTab = canSeeRepository ? "repository" : canSeeAssistant ? "assistant" : "none";
 
-  // If user has no access to any tab
   if (!canSeeRepository && !canSeeAssistant) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="mx-auto px-8 py-10" style={{ maxWidth: "1040px" }}>
+        <main className="px-6 lg:px-10 py-10">
           <div className="text-center py-16">
             <h2 className="text-xl font-semibold text-foreground mb-2">No Access</h2>
             <p className="text-muted-foreground">
@@ -89,9 +83,7 @@ const Index = () => {
     <div className="min-h-screen bg-background">
       <Header />
 
-      {/* Main Content */}
-      <main className="mx-auto px-8 py-10" style={{ maxWidth: "1040px" }}>
-        {/* Workspace Section */}
+      <main className="px-6 lg:px-10 py-10">
         <Tabs defaultValue={defaultTab} className="w-full">
           <div className="flex items-end justify-between mb-8">
             <div>
@@ -105,7 +97,6 @@ const Index = () => {
                 }
               </p>
             </div>
-            {/* Only show tabs if user has access to both */}
             {canSeeRepository && canSeeAssistant && (
               <TabsList className="bg-muted/60 p-1 rounded-xl">
                 <TabsTrigger 
