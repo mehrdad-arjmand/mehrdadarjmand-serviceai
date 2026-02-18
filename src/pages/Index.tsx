@@ -82,16 +82,16 @@ const Index = () => {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }} className="bg-background">
       <Header />
 
-      <div className="flex-1 flex overflow-hidden" style={{ height: 'calc(100vh - 57px)' }}>
-        <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0">
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
+        <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0" style={{ minHeight: 0 }}>
           {canSeeRepository && (
-            <TabsContent value="repository" className="flex-1 mt-0 overflow-auto">
-              {/* Tab bar on repository page - shown at top with content */}
+            <TabsContent value="repository" className="flex-1 mt-0" style={{ overflowY: 'auto', minHeight: 0 }}>
+              {/* Tab bar — same px-6 as sidebar tabs to align with logo */}
               {canSeeRepository && canSeeAssistant && (
-                <div className="px-6 lg:px-10 pt-4 pb-0">
+                <div className="px-6 pt-4 pb-0">
                   <TabsList className="bg-muted/60 p-1 rounded-xl">
                     <TabsTrigger
                       value="repository"
@@ -118,9 +118,8 @@ const Index = () => {
           )}
 
           {canSeeAssistant && (
-            <TabsContent value="assistant" className="flex-1 mt-0 overflow-hidden">
-              {/* Full height edge-to-edge chat — tabs live inside the sidebar */}
-              <div className="h-full">
+            <TabsContent value="assistant" className="flex-1 mt-0" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
                 <TechnicianChat
                   hasDocuments={hasDocuments}
                   chunksCount={chunksCount}
