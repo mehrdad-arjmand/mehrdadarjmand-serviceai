@@ -6,7 +6,7 @@ export const Header = () => {
 
   return (
     <header className="sticky top-0 z-50 glass border-b border-border/50">
-      <div className="w-full px-6 lg:px-10 py-4 flex items-center justify-between">
+      <div className="w-full px-4 py-4 flex items-center justify-between">
         {/* Logo & Title */}
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-foreground flex items-center justify-center shadow-premium flex-shrink-0">
