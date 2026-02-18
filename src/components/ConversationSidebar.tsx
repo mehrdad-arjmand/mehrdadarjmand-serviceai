@@ -87,8 +87,8 @@ export function ConversationSidebar({
   return (
     <>
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* New chat button — px-6 to align with logo */}
-        <div className="px-6 pb-2 pt-2 flex-shrink-0">
+        {/* New chat button — px-6 aligns with header logo */}
+        <div className="px-6 pb-2 pt-1 flex-shrink-0">
           <Button
             onClick={onNewConversation}
             variant="outline"
@@ -99,11 +99,11 @@ export function ConversationSidebar({
           </Button>
         </div>
 
-        {/* Conversation list — isolated scroll, does NOT scroll with main page */}
+        {/* Conversation list — isolated scroll */}
         <ScrollArea className="flex-1 min-h-0">
-          <div className="pb-3 space-y-0.5">
+          <div className="pb-3 space-y-0.5 px-3">
             {conversations.length === 0 ? (
-              <div className="px-6 py-4 text-center text-sm text-sidebar-foreground/50">
+              <div className="px-3 py-4 text-center text-sm text-sidebar-foreground/50">
                 No conversations yet
               </div>
             ) : (
@@ -111,7 +111,7 @@ export function ConversationSidebar({
                 <div
                   key={conv.id}
                   className={cn(
-                    "group flex items-center gap-2 mx-3 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150",
+                    "group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150",
                     conv.id === activeConversationId
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
@@ -143,13 +143,18 @@ export function ConversationSidebar({
                   ) : (
                     <>
                       {/*
-                        Text truncates BEFORE the 3-dot button.
-                        The button is always in the flex layout (takes up space),
-                        just invisible until hover — this guarantees no overlap.
+                        KEY: text gets flex-1 min-w-0 so it truncates.
+                        The 3-dot button is flex-shrink-0 and always takes space in layout
+                        (just opacity-0 until hover). This guarantees text NEVER overlaps the button.
                       */}
-                      <p className="text-sm truncate flex-1 min-w-0">{conv.title}</p>
+                      <span
+                        className="text-sm truncate flex-1 min-w-0 select-none"
+                        style={{ paddingRight: '4px' }}
+                      >
+                        {conv.title}
+                      </span>
 
-                      {/* 3-dot — inline, always reserves space, visible on hover */}
+                      {/* 3-dot: always in layout (reserves space), only visible on hover */}
                       <div
                         className="flex-shrink-0"
                         onClick={(e) => e.stopPropagation()}
@@ -159,14 +164,14 @@ export function ConversationSidebar({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                             >
                               <MoreHorizontal className="h-3.5 w-3.5" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             align="end"
-                            className="w-36 bg-popover border border-border shadow-lg z-50"
+                            className="w-36"
                           >
                             {onRenameConversation && (
                               <DropdownMenuItem
