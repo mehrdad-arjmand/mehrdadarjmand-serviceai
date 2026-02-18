@@ -364,70 +364,72 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const activeFilters = Object.entries(currentFilters).filter(([_, v]) => v && v !== "");
 
   return (
-    /**
-     * LAYOUT CONTRACT:
-     * - This component fills its parent exactly (h-full, overflow-hidden).
-     * - Sidebar: fixed column, never participates in page scroll.
-     * - Main area: flex column. Messages div is flex-1 overflow-y-auto (only thing that scrolls).
-     * - Input: flex-shrink-0 — always pinned at the bottom, text scrolls behind it.
-     */
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', position: 'relative' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }}>
 
       {/* ── SIDEBAR ─────────────────────────────────────────────────── */}
-      <div
-        style={{
-          width: sidebarOpen ? '256px' : '0px',
-          flexShrink: 0,
-          height: '100%',
-          overflow: 'hidden',
-          transition: 'width 0.2s',
-          display: 'flex',
-          flexDirection: 'column',
-          backgroundColor: 'hsl(var(--sidebar-background))',
-          borderRight: '1px solid hsl(var(--sidebar-border))',
-        }}
-      >
-        {/* Repository / Assistant tabs — px-6 matches the header logo's left edge */}
-        {showTabBar && onTabChange && (
-          <div className="px-6 pt-4 pb-2 flex-shrink-0">
-            <Tabs value={currentTab} onValueChange={onTabChange}>
-              <TabsList className="bg-muted/60 p-1 rounded-xl">
-                <TabsTrigger
-                  value="repository"
-                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+      {sidebarOpen && (
+        <div
+          style={{
+            width: '260px',
+            flexShrink: 0,
+            height: '100%',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            backgroundColor: 'hsl(var(--sidebar-background))',
+            borderRight: '1px solid hsl(var(--sidebar-border))',
+          }}
+        >
+          {/* Repository / Assistant tabs — px-6 to align with header logo */}
+          {showTabBar && onTabChange && (
+            <div className="px-6 pt-4 pb-3 flex-shrink-0">
+              <div className="inline-flex items-center gap-1 bg-muted/60 p-1 rounded-xl">
+                <button
+                  onClick={() => onTabChange("repository")}
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                    currentTab === "repository"
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
                 >
                   Repository
-                </TabsTrigger>
-                <TabsTrigger
-                  value="assistant"
-                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                </button>
+                <button
+                  onClick={() => onTabChange("assistant")}
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                    currentTab === "assistant"
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
                 >
                   Assistant
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-        )}
+                </button>
+              </div>
+            </div>
+          )}
 
-        {/* Conversation list — self-contained scroll, never scrolls the page */}
-        <ConversationSidebar
-          conversations={conversations}
-          activeConversationId={activeConversationId}
-          onNewConversation={startNewConversation}
-          onSelectConversation={switchConversation}
-          onDeleteConversation={deleteConversation}
-          onRenameConversation={renameConversation}
-          onReorderConversations={reorderConversations}
-          canDelete={canDelete}
-        />
-      </div>
+          {/* Conversation list — self-contained scroll, never scrolls the page */}
+          <ConversationSidebar
+            conversations={conversations}
+            activeConversationId={activeConversationId}
+            onNewConversation={startNewConversation}
+            onSelectConversation={switchConversation}
+            onDeleteConversation={deleteConversation}
+            onRenameConversation={renameConversation}
+            onReorderConversations={reorderConversations}
+            canDelete={canDelete}
+          />
+        </div>
+      )}
 
-      {/* Sidebar toggle — floats OUTSIDE the sidebar, always clickable */}
+      {/* Sidebar toggle — always floats outside the sidebar */}
       <div
         style={{
           position: 'absolute',
-          top: '12px',
-          left: sidebarOpen ? '268px' : '12px',
+          top: '14px',
+          left: sidebarOpen ? '268px' : '14px',
           transition: 'left 0.2s',
           zIndex: 20,
         }}
@@ -452,10 +454,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           minWidth: 0,
           height: '100%',
           overflow: 'hidden',
-          backgroundColor: 'hsl(var(--background))',
         }}
       >
-        {/* Messages — the ONLY scrolling region; text scrolls up behind the input box */}
+        {/* Messages — THE ONLY scrolling region. Input box is always below this. */}
         <div
           ref={chatContainerRef}
           style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}
