@@ -99,8 +99,8 @@ export function ConversationSidebar({
       `}</style>
 
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* New chat button — left edge aligns with header logo (px-6 = 24px) */}
-        <div style={{ padding: '4px 16px 8px 24px', flexShrink: 0 }}>
+        {/* New chat button — left edge aligns with header logo (px-6 sm, px-10 lg) */}
+        <div className="flex-shrink-0 pl-6 lg:pl-10 pr-4 pt-1 pb-2">
           <Button
             onClick={onNewConversation}
             variant="outline"
@@ -115,7 +115,7 @@ export function ConversationSidebar({
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
           <div style={{ paddingBottom: '12px' }}>
             {conversations.length === 0 ? (
-              <div style={{ padding: '16px 24px', textAlign: 'center', fontSize: '14px', opacity: 0.5 }}>
+              <div className="pl-6 lg:pl-10 pr-4 py-4 text-center text-sm opacity-50">
                 No conversations yet
               </div>
             ) : (
@@ -123,21 +123,11 @@ export function ConversationSidebar({
                 <div
                   key={conv.id}
                   className={cn(
-                    "conv-item",
+                    "conv-item flex items-center gap-2 my-px mr-4 ml-6 lg:ml-10 px-2 py-2 rounded-lg cursor-pointer",
                     conv.id === activeConversationId
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                   )}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    margin: '1px 16px 1px 24px',
-                    padding: '8px 8px 8px 8px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    position: 'relative',
-                  }}
                   onClick={() => {
                     if (editingId !== conv.id) onSelectConversation(conv.id);
                   }}
