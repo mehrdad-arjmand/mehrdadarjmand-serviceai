@@ -87,23 +87,23 @@ export function ConversationSidebar({
   return (
     <>
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* New chat button — aligned with px-6 to match logo */}
-        <div className="px-6 pb-2 pt-1 flex-shrink-0">
+        {/* New chat button — px-6 to align with logo */}
+        <div className="px-6 pb-2 pt-2 flex-shrink-0">
           <Button
             onClick={onNewConversation}
             variant="outline"
             className="w-full justify-start gap-2 h-9 bg-sidebar-accent/60 hover:bg-sidebar-accent border-sidebar-border/50 rounded-xl transition-all duration-200"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-4 w-4 flex-shrink-0" />
             <span className="font-medium text-sm">New chat</span>
           </Button>
         </div>
 
-        {/* Conversation list — own scroll area, sidebar doesn't scroll with page */}
-        <ScrollArea className="flex-1 overflow-hidden">
-          <div className="px-3 pb-3 space-y-0.5">
+        {/* Conversation list — isolated scroll, does NOT scroll with main page */}
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="pb-3 space-y-0.5">
             {conversations.length === 0 ? (
-              <div className="px-3 py-4 text-center text-sm text-sidebar-foreground/50">
+              <div className="px-6 py-4 text-center text-sm text-sidebar-foreground/50">
                 No conversations yet
               </div>
             ) : (
@@ -111,17 +111,20 @@ export function ConversationSidebar({
                 <div
                   key={conv.id}
                   className={cn(
-                    "group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150",
+                    "group flex items-center gap-2 mx-3 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150",
                     conv.id === activeConversationId
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                   )}
                   onClick={() => onSelectConversation(conv.id)}
                 >
-                  <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
+                  <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 opacity-40" />
 
                   {editingId === conv.id ? (
-                    <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+                    <div
+                      className="flex items-center gap-1 flex-1 min-w-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <Input
                         ref={inputRef}
                         value={editingTitle}
@@ -139,12 +142,16 @@ export function ConversationSidebar({
                     </div>
                   ) : (
                     <>
-                      {/* Title — truncated strictly, always leaves room for 3-dot */}
-                      <p className="text-sm truncate flex-1 min-w-0 mr-6">{conv.title}</p>
+                      {/*
+                        Text truncates BEFORE the 3-dot button.
+                        The button is always in the flex layout (takes up space),
+                        just invisible until hover — this guarantees no overlap.
+                      */}
+                      <p className="text-sm truncate flex-1 min-w-0">{conv.title}</p>
 
-                      {/* 3-dot menu — appears on hover, absolutely positioned at right edge */}
+                      {/* 3-dot — inline, always reserves space, visible on hover */}
                       <div
-                        className="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                        className="flex-shrink-0"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <DropdownMenu>
@@ -152,15 +159,21 @@ export function ConversationSidebar({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-6 w-6 text-muted-foreground hover:text-foreground bg-sidebar-accent/80"
+                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-sidebar-foreground/60 hover:text-sidebar-foreground"
                             >
                               <MoreHorizontal className="h-3.5 w-3.5" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-36 bg-popover border border-border shadow-lg">
+                          <DropdownMenuContent
+                            align="end"
+                            className="w-36 bg-popover border border-border shadow-lg z-50"
+                          >
                             {onRenameConversation && (
                               <DropdownMenuItem
-                                onClick={() => { setEditingId(conv.id); setEditingTitle(conv.title); }}
+                                onClick={() => {
+                                  setEditingId(conv.id);
+                                  setEditingTitle(conv.title);
+                                }}
                               >
                                 Rename
                               </DropdownMenuItem>
