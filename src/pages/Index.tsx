@@ -82,54 +82,58 @@ const Index = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex flex-col min-h-screen bg-background">
       <Header />
 
-      <Tabs value={currentTab} onValueChange={setActiveTab} className="w-full">
-        {/* Tab bar + page content */}
-        {canSeeRepository && canSeeAssistant && (
-          <div className="px-6 lg:px-10 pt-4 pb-0">
-            <TabsList className="bg-muted/60 p-1 rounded-xl">
-              <TabsTrigger
-                value="repository"
-                className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
-              >
-                Repository
-              </TabsTrigger>
-              <TabsTrigger
-                value="assistant"
-                className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
-              >
-                Assistant
-              </TabsTrigger>
-            </TabsList>
-          </div>
-        )}
+      <div className="flex-1 flex overflow-hidden" style={{ height: 'calc(100vh - 57px)' }}>
+        <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0">
+          {canSeeRepository && (
+            <TabsContent value="repository" className="flex-1 mt-0 overflow-auto">
+              {/* Tab bar on repository page - shown at top with content */}
+              {canSeeRepository && canSeeAssistant && (
+                <div className="px-6 lg:px-10 pt-4 pb-0">
+                  <TabsList className="bg-muted/60 p-1 rounded-xl">
+                    <TabsTrigger
+                      value="repository"
+                      className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                    >
+                      Repository
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="assistant"
+                      className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                    >
+                      Assistant
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+              )}
+              <main className="px-6 lg:px-10 py-6">
+                <RepositoryCard
+                  onDocumentSelect={setSelectedDocumentId}
+                  permissions={permissions.repository}
+                />
+              </main>
+            </TabsContent>
+          )}
 
-        {canSeeRepository && (
-          <TabsContent value="repository" className="mt-0">
-            <main className="px-6 lg:px-10 py-6">
-              <RepositoryCard
-                onDocumentSelect={setSelectedDocumentId}
-                permissions={permissions.repository}
-              />
-            </main>
-          </TabsContent>
-        )}
-
-        {canSeeAssistant && (
-          <TabsContent value="assistant" className="mt-0">
-            {/* Full height edge-to-edge: no padding, no border radius on chat container */}
-            <div style={{ height: canSeeRepository ? 'calc(100vh - 57px - 52px)' : 'calc(100vh - 57px)' }}>
-              <TechnicianChat
-                hasDocuments={hasDocuments}
-                chunksCount={chunksCount}
-                permissions={permissions.assistant}
-              />
-            </div>
-          </TabsContent>
-        )}
-      </Tabs>
+          {canSeeAssistant && (
+            <TabsContent value="assistant" className="flex-1 mt-0 overflow-hidden">
+              {/* Full height edge-to-edge chat — tabs live inside the sidebar */}
+              <div className="h-full">
+                <TechnicianChat
+                  hasDocuments={hasDocuments}
+                  chunksCount={chunksCount}
+                  permissions={permissions.assistant}
+                  showTabBar={canSeeRepository && canSeeAssistant}
+                  currentTab={currentTab}
+                  onTabChange={setActiveTab}
+                />
+              </div>
+            </TabsContent>
+          )}
+        </Tabs>
+      </div>
     </div>
   );
 };
