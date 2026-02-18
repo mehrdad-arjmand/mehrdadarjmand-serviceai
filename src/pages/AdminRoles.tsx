@@ -20,7 +20,7 @@ const AdminRoles = () => {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="mx-auto px-8 py-10 flex items-center justify-center" style={{ maxWidth: "1040px" }}>
+        <main className="px-6 lg:px-10 py-10 flex items-center justify-center">
           <div className="flex items-center gap-3 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
             <span>Loading...</span>
@@ -35,7 +35,7 @@ const AdminRoles = () => {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="mx-auto px-8 py-10" style={{ maxWidth: "1040px" }}>
+        <main className="px-6 lg:px-10 py-10">
           <div className="text-center py-16">
             <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-foreground mb-2">Access Denied</h2>
@@ -56,7 +56,7 @@ const AdminRoles = () => {
     <div className="min-h-screen bg-background">
       <Header />
 
-      <main className="mx-auto px-8 py-10" style={{ maxWidth: "1040px" }}>
+      <main className="px-6 lg:px-10 py-10">
         {/* Page Header */}
         <div className="flex items-center gap-4 mb-8">
           <Button 

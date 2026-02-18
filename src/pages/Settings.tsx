@@ -73,7 +73,7 @@ export default function Settings() {
     <div className="min-h-screen bg-background">
       <Header />
       
-      <main className="mx-auto px-8 py-10" style={{ maxWidth: "1040px" }}>
+      <main className="px-6 lg:px-10 py-10">
         <Button
           variant="ghost"
           onClick={() => navigate("/")}

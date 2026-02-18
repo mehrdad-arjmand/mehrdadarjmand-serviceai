@@ -83,55 +83,44 @@ const Index = () => {
     <div className="min-h-screen bg-background">
       <Header />
 
-      <main className="px-6 lg:px-10 py-10">
+      <main className="px-6 lg:px-10 py-6">
         <Tabs defaultValue={defaultTab} className="w-full">
-          <div className="flex items-end justify-between mb-8">
-            <div>
-              <h2 className="text-2xl font-semibold text-foreground tracking-tight">Workspace</h2>
-              
-
-
-
-
-
-
-
-            </div>
-            {canSeeRepository && canSeeAssistant &&
-            <TabsList className="bg-muted/60 p-1 rounded-xl">
+          {canSeeRepository && canSeeAssistant && (
+            <div className="mb-4">
+              <TabsList className="bg-muted/60 p-1 rounded-xl">
                 <TabsTrigger
-                value="repository"
-                className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
-
+                  value="repository"
+                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                >
                   Repository
                 </TabsTrigger>
                 <TabsTrigger
-                value="assistant"
-                className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
-
+                  value="assistant"
+                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                >
                   Assistant
                 </TabsTrigger>
               </TabsList>
-            }
-          </div>
+            </div>
+          )}
 
-          {canSeeRepository &&
-          <TabsContent value="repository" className="mt-0">
+          {canSeeRepository && (
+            <TabsContent value="repository" className="mt-0">
               <RepositoryCard
-              onDocumentSelect={setSelectedDocumentId}
-              permissions={permissions.repository} />
-
+                onDocumentSelect={setSelectedDocumentId}
+                permissions={permissions.repository}
+              />
             </TabsContent>
-          }
-          {canSeeAssistant &&
-          <TabsContent value="assistant" className="mt-0">
+          )}
+          {canSeeAssistant && (
+            <TabsContent value="assistant" className="mt-0">
               <TechnicianChat
-              hasDocuments={hasDocuments}
-              chunksCount={chunksCount}
-              permissions={permissions.assistant} />
-
+                hasDocuments={hasDocuments}
+                chunksCount={chunksCount}
+                permissions={permissions.assistant}
+              />
             </TabsContent>
-          }
+          )}
         </Tabs>
       </main>
     </div>);
