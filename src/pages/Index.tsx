@@ -119,8 +119,8 @@ const Index = () => {
 
         {canSeeAssistant && (
           <TabsContent value="assistant" className="mt-0">
-            {/* Full height: viewport minus header (57px) minus tab bar (52px when visible) */}
-            <div className="px-6 lg:px-10 py-4" style={{ height: canSeeRepository ? 'calc(100vh - 57px - 52px - 2rem)' : 'calc(100vh - 57px - 2rem)' }}>
+            {/* Full height edge-to-edge: no padding, no border radius on chat container */}
+            <div style={{ height: canSeeRepository ? 'calc(100vh - 57px - 52px)' : 'calc(100vh - 57px)' }}>
               <TechnicianChat
                 hasDocuments={hasDocuments}
                 chunksCount={chunksCount}
