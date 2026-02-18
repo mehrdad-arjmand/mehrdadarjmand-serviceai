@@ -382,7 +382,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         >
           {/* Repository / Assistant tabs — px-4 (16px) to match New Chat + items */}
           {showTabBar && onTabChange && (
-            <div style={{ padding: '16px 16px 12px 24px', flexShrink: 0 }}>
+            <div className="flex-shrink-0 pl-6 lg:pl-10 pr-4 pt-4 pb-3">
               <div className="inline-flex items-center gap-1 bg-muted/60 p-1 rounded-xl">
                 <button
                   onClick={() => onTabChange("repository")}

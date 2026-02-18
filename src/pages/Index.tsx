@@ -91,7 +91,7 @@ const Index = () => {
             <TabsContent value="repository" className="flex-1 mt-0" style={{ overflowY: 'auto', minHeight: 0 }}>
               {/* Tab bar — px-4 (16px) matches sidebar tabs exactly */}
               {canSeeRepository && canSeeAssistant && (
-                <div style={{ padding: '16px 16px 0 24px' }}>
+                <div className="pl-6 lg:pl-10 pt-4">
                   <TabsList className="bg-muted/60 p-1 rounded-xl">
                     <TabsTrigger
                       value="repository"
