@@ -17,25 +17,22 @@ export const UserMenu = () => {
   const permissions = usePermissions();
   const navigate = useNavigate();
 
-  // Only admins can see the roles management option
   const isAdmin = permissions.role === 'admin';
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className="gap-2 text-muted-foreground hover:text-foreground hover:bg-accent/80 transition-all duration-200"
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent/80 transition-all duration-200"
+          title={user?.email}
         >
           <User className="h-4 w-4" />
-          <span className="hidden sm:inline truncate max-w-[180px]">
-            {user?.email}
-          </span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent 
-        align="end" 
+      <DropdownMenuContent
+        align="end"
         className="w-56 bg-popover border border-border shadow-lg z-50"
       >
         <DropdownMenuLabel className="font-normal">
@@ -52,27 +49,25 @@ export const UserMenu = () => {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        
-        {/* Profile/Settings - available to all users */}
-        <DropdownMenuItem 
+
+        <DropdownMenuItem
           onClick={() => navigate('/settings')}
           className="cursor-pointer"
         >
           <Settings className="mr-2 h-4 w-4" />
           <span>Settings</span>
         </DropdownMenuItem>
-        
-        {/* Admin-only: Roles Management */}
+
         {isAdmin && (
           <>
-            <DropdownMenuItem 
+            <DropdownMenuItem
               onClick={() => navigate('/admin/roles')}
               className="cursor-pointer"
             >
               <Shield className="mr-2 h-4 w-4" />
               <span>Manage Roles & Permissions</span>
             </DropdownMenuItem>
-            <DropdownMenuItem 
+            <DropdownMenuItem
               onClick={() => navigate('/admin/analytics')}
               className="cursor-pointer"
             >
@@ -81,9 +76,9 @@ export const UserMenu = () => {
             </DropdownMenuItem>
           </>
         )}
-        
+
         <DropdownMenuSeparator />
-        <DropdownMenuItem 
+        <DropdownMenuItem
           onClick={signOut}
           className="cursor-pointer text-destructive focus:text-destructive"
         >
