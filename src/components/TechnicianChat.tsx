@@ -380,14 +380,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
             borderRight: '1px solid hsl(var(--sidebar-border))',
           }}
         >
-          {/* Repository / Assistant tabs — px-6 to align with header logo */}
+          {/* Repository / Assistant tabs — px-4 (16px) to match New Chat + items */}
           {showTabBar && onTabChange && (
-            <div className="px-6 pt-4 pb-3 flex-shrink-0">
+            <div style={{ padding: '16px 16px 12px 16px', flexShrink: 0 }}>
               <div className="inline-flex items-center gap-1 bg-muted/60 p-1 rounded-xl">
                 <button
                   onClick={() => onTabChange("repository")}
                   className={cn(
-                    "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                    "rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
                     currentTab === "repository"
                       ? "bg-background shadow-sm text-foreground"
                       : "text-muted-foreground hover:text-foreground"
@@ -398,7 +398,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 <button
                   onClick={() => onTabChange("assistant")}
                   className={cn(
-                    "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                    "rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
                     currentTab === "assistant"
                       ? "bg-background shadow-sm text-foreground"
                       : "text-muted-foreground hover:text-foreground"
