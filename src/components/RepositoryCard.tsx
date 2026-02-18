@@ -1,4 +1,4 @@
-import { Trash2, Loader2, CheckCircle, AlertCircle, Clock, Check, ChevronsUpDown, Pencil, Search, X, SlidersHorizontal } from "lucide-react";
+import { Trash2, Loader2, CheckCircle, AlertCircle, Clock, Check, ChevronsUpDown, Pencil, Search, X, SlidersHorizontal, MoreHorizontal } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { TabPermissions } from "@/hooks/usePermissions";
 
@@ -760,7 +761,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                     <TableCell>
                       {doc.ingestionStatus === 'complete' && (
                         <div className="flex flex-col items-start gap-0.5">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
+                          <CheckCircle className="h-4 w-4" style={{ color: 'hsl(142 76% 36%)' }} />
                           <span className="text-[10px] text-muted-foreground">{doc.embeddedChunks}/{doc.totalChunks}</span>
                         </div>
                       )}
@@ -775,7 +776,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                       )}
                       {(doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') && (
                         <div className="flex flex-col items-start gap-0.5">
-                          <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+                          <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'hsl(38 92% 50%)' }} />
                           <span className="text-[10px] text-muted-foreground">{doc.embeddedChunks}/{doc.totalChunks}</span>
                         </div>
                       )}
@@ -786,17 +787,33 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
                         </div>
                       )}
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-1">
-                        {canWrite && (
-                          <Button variant="ghost" size="icon" onClick={(e) => handleEditClick(e, doc)} className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Edit metadata">
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: doc.id, fileName: doc.fileName }); }} className="h-8 w-8 text-muted-foreground hover:text-destructive" title="Delete">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end">
+                        {(canWrite || canDelete) && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-36">
+                              {canWrite && (
+                                <DropdownMenuItem onClick={(e) => handleEditClick(e, doc)} className="gap-2">
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  Edit
+                                </DropdownMenuItem>
+                              )}
+                              {canDelete && (
+                                <DropdownMenuItem
+                                  className="gap-2 text-destructive focus:text-destructive"
+                                  onClick={() => setDeleteTarget({ id: doc.id, fileName: doc.fileName })}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Delete
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         )}
                       </div>
                     </TableCell>
