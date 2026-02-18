@@ -11,16 +11,17 @@ const Index = () => {
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [chunksCount, setChunksCount] = useState(0);
   const [hasDocuments, setHasDocuments] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("");
   const permissions = usePermissions();
 
   const fetchStats = async () => {
-    const { count: docsCount } = await supabase.
-    from('documents').
-    select('*', { count: 'exact', head: true });
+    const { count: docsCount } = await supabase
+      .from('documents')
+      .select('*', { count: 'exact', head: true });
 
-    const { count: chunksCount } = await supabase.
-    from('chunks').
-    select('*', { count: 'exact', head: true });
+    const { count: chunksCount } = await supabase
+      .from('chunks')
+      .select('*', { count: 'exact', head: true });
 
     setHasDocuments((docsCount || 0) > 0);
     setChunksCount(chunksCount || 0);
@@ -29,11 +30,11 @@ const Index = () => {
   useEffect(() => {
     fetchStats();
 
-    const docsChannel = supabase.
-    channel('docs-stats').
-    on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats).
-    on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchStats).
-    subscribe();
+    const docsChannel = supabase
+      .channel('docs-stats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchStats)
+      .subscribe();
 
     return () => {
       supabase.removeChannel(docsChannel);
@@ -50,13 +51,14 @@ const Index = () => {
             <span>Loading permissions...</span>
           </div>
         </main>
-      </div>);
-
+      </div>
+    );
   }
 
   const canSeeRepository = permissions.repository.read;
   const canSeeAssistant = permissions.assistant.read;
   const defaultTab = canSeeRepository ? "repository" : canSeeAssistant ? "assistant" : "none";
+  const currentTab = activeTab || defaultTab;
 
   if (!canSeeRepository && !canSeeAssistant) {
     return (
@@ -68,63 +70,68 @@ const Index = () => {
             <p className="text-muted-foreground">
               Your account does not have access to any features. Please contact an administrator.
             </p>
-            {permissions.role &&
-            <p className="text-sm text-muted-foreground mt-4">
+            {permissions.role && (
+              <p className="text-sm text-muted-foreground mt-4">
                 Current role: <span className="font-medium capitalize">{permissions.role}</span>
               </p>
-            }
+            )}
           </div>
         </main>
-      </div>);
-
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
 
-      <main className="px-6 lg:px-10 py-6">
-        <Tabs defaultValue={defaultTab} className="w-full">
-          {canSeeRepository && canSeeAssistant && (
-            <div className="mb-4">
-              <TabsList className="bg-muted/60 p-1 rounded-xl">
-                <TabsTrigger
-                  value="repository"
-                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
-                >
-                  Repository
-                </TabsTrigger>
-                <TabsTrigger
-                  value="assistant"
-                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
-                >
-                  Assistant
-                </TabsTrigger>
-              </TabsList>
-            </div>
-          )}
+      <Tabs value={currentTab} onValueChange={setActiveTab} className="w-full">
+        {/* Tab bar + page content */}
+        {canSeeRepository && canSeeAssistant && (
+          <div className="px-6 lg:px-10 pt-4 pb-0">
+            <TabsList className="bg-muted/60 p-1 rounded-xl">
+              <TabsTrigger
+                value="repository"
+                className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+              >
+                Repository
+              </TabsTrigger>
+              <TabsTrigger
+                value="assistant"
+                className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+              >
+                Assistant
+              </TabsTrigger>
+            </TabsList>
+          </div>
+        )}
 
-          {canSeeRepository && (
-            <TabsContent value="repository" className="mt-0">
+        {canSeeRepository && (
+          <TabsContent value="repository" className="mt-0">
+            <main className="px-6 lg:px-10 py-6">
               <RepositoryCard
                 onDocumentSelect={setSelectedDocumentId}
                 permissions={permissions.repository}
               />
-            </TabsContent>
-          )}
-          {canSeeAssistant && (
-            <TabsContent value="assistant" className="mt-0">
+            </main>
+          </TabsContent>
+        )}
+
+        {canSeeAssistant && (
+          <TabsContent value="assistant" className="mt-0">
+            {/* Full height: viewport minus header (57px) minus tab bar (52px when visible) */}
+            <div className="px-6 lg:px-10 py-4" style={{ height: canSeeRepository ? 'calc(100vh - 57px - 52px - 2rem)' : 'calc(100vh - 57px - 2rem)' }}>
               <TechnicianChat
                 hasDocuments={hasDocuments}
                 chunksCount={chunksCount}
                 permissions={permissions.assistant}
               />
-            </TabsContent>
-          )}
-        </Tabs>
-      </main>
-    </div>);
-
+            </div>
+          </TabsContent>
+        )}
+      </Tabs>
+    </div>
+  );
 };
 
 export default Index;

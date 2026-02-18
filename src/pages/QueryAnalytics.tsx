@@ -212,12 +212,10 @@ const QueryAnalytics = () => {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <main className="px-6 lg:px-10 py-10">
-        <div className="flex items-center gap-4 mb-8">
-          <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4 mr-2" />Back
-          </Button>
-        </div>
+      <main className="px-6 lg:px-10 py-8">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="text-muted-foreground hover:text-foreground mb-6 -ml-2">
+          <ArrowLeft className="h-4 w-4 mr-2" />Back
+        </Button>
 
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-foreground tracking-tight flex items-center gap-3">
