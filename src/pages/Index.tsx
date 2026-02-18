@@ -89,19 +89,19 @@ const Index = () => {
         <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0" style={{ minHeight: 0 }}>
           {canSeeRepository && (
             <TabsContent value="repository" className="flex-1 mt-0" style={{ overflowY: 'auto', minHeight: 0 }}>
-              {/* Tab bar — same px-6 as sidebar tabs to align with logo */}
+              {/* Tab bar — px-4 (16px) matches sidebar tabs exactly */}
               {canSeeRepository && canSeeAssistant && (
-                <div className="px-6 pt-4 pb-0">
+                <div style={{ padding: '16px 16px 0 16px' }}>
                   <TabsList className="bg-muted/60 p-1 rounded-xl">
                     <TabsTrigger
                       value="repository"
-                      className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                      className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
                     >
                       Repository
                     </TabsTrigger>
                     <TabsTrigger
                       value="assistant"
-                      className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                      className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
                     >
                       Assistant
                     </TabsTrigger>

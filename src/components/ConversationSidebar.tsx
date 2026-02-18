@@ -66,6 +66,12 @@ export function ConversationSidebar({
     setConversationToDelete(null);
   };
 
+  const handleRenameStart = (conv: Conversation) => {
+    if (!onRenameConversation) return;
+    setEditingId(conv.id);
+    setEditingTitle(conv.title);
+  };
+
   const handleRenameConfirm = () => {
     if (editingId && onRenameConversation && editingTitle.trim()) {
       onRenameConversation(editingId, editingTitle.trim());
@@ -86,9 +92,15 @@ export function ConversationSidebar({
 
   return (
     <>
+      <style>{`
+        .conv-item:hover .conv-three-dot {
+          opacity: 1 !important;
+        }
+      `}</style>
+
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* New chat button — px-6 aligns with header logo */}
-        <div className="px-6 pb-2 pt-1 flex-shrink-0">
+        {/* New chat button — px-4 left so its left border aligns with logo */}
+        <div style={{ padding: '4px 16px 8px 16px', flexShrink: 0 }}>
           <Button
             onClick={onNewConversation}
             variant="outline"
@@ -101,9 +113,9 @@ export function ConversationSidebar({
 
         {/* Conversation list — isolated scroll */}
         <ScrollArea className="flex-1 min-h-0">
-          <div className="pb-3 space-y-0.5">
+          <div style={{ paddingBottom: '12px' }}>
             {conversations.length === 0 ? (
-              <div className="px-6 py-4 text-center text-sm text-sidebar-foreground/50">
+              <div style={{ padding: '16px', textAlign: 'center', fontSize: '14px', opacity: 0.5 }}>
                 No conversations yet
               </div>
             ) : (
@@ -111,19 +123,31 @@ export function ConversationSidebar({
                 <div
                   key={conv.id}
                   className={cn(
-                    /* mx-6 = 24px left margin — aligns the item BORDER with the AI logo & tabs */
-                    "group relative flex items-center gap-2 mx-6 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150",
+                    "conv-item",
                     conv.id === activeConversationId
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                   )}
-                  onClick={() => onSelectConversation(conv.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    margin: '1px 16px',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    position: 'relative',
+                  }}
+                  onClick={() => {
+                    if (editingId !== conv.id) onSelectConversation(conv.id);
+                  }}
+                  onDoubleClick={() => handleRenameStart(conv)}
                 >
-                  <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 opacity-40" />
+                  <MessageSquare style={{ width: '14px', height: '14px', flexShrink: 0, opacity: 0.4 }} />
 
                   {editingId === conv.id ? (
                     <div
-                      className="flex items-center gap-1 flex-1 min-w-0"
+                      style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1, minWidth: 0 }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Input
@@ -143,40 +167,63 @@ export function ConversationSidebar({
                     </div>
                   ) : (
                     <>
-                      {/*
-                        flex-1 min-w-0 on the text ensures it truncates.
-                        The 3-dot wrapper is flex-shrink-0 so it ALWAYS reserves its 24px.
-                        Text can never overlap the button.
-                      */}
-                      <span className="text-sm truncate flex-1 min-w-0">
+                      {/* Title: truncates before the 3-dot */}
+                      <span
+                        style={{
+                          fontSize: '14px',
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
                         {conv.title}
                       </span>
 
-                      {/* 3-dot: fixed 24px width, always in layout, opacity fades in on hover */}
+                      {/* 3-dot: always reserves 24px space, invisible until hover via CSS */}
                       <div
-                        className="flex-shrink-0 w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="conv-three-dot"
+                        style={{
+                          flexShrink: 0,
+                          width: '24px',
+                          height: '24px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: 0,
+                          transition: 'opacity 150ms',
+                        }}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button
                               type="button"
-                              className="w-6 h-6 flex items-center justify-center rounded hover:bg-sidebar-accent text-sidebar-foreground/60 hover:text-sidebar-foreground outline-none"
+                              style={{
+                                width: '24px',
+                                height: '24px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: '4px',
+                                border: 'none',
+                                background: 'transparent',
+                                cursor: 'pointer',
+                                color: 'inherit',
+                                opacity: 0.6,
+                              }}
                             >
-                              <MoreHorizontal className="h-3.5 w-3.5" />
+                              <MoreHorizontal style={{ width: '14px', height: '14px' }} />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             align="end"
-                            className="w-36 bg-popover border border-border shadow-lg z-[100]"
+                            className="w-36 bg-popover border border-border shadow-lg"
+                            style={{ zIndex: 9999 }}
                           >
                             {onRenameConversation && (
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setEditingId(conv.id);
-                                  setEditingTitle(conv.title);
-                                }}
-                              >
+                              <DropdownMenuItem onClick={() => handleRenameStart(conv)}>
                                 Rename
                               </DropdownMenuItem>
                             )}
