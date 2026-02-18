@@ -16,7 +16,6 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TabPermissions } from "@/hooks/usePermissions";
 
-
 interface TechnicianChatProps {
   hasDocuments: boolean;
   chunksCount: number;
@@ -66,6 +65,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   });
 
   const [filtersLocked, setFiltersLocked] = useState(false);
+  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
 
   useEffect(() => {
     ensureActiveConversation();
@@ -89,23 +89,19 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     currentFiltersRef.current = currentFilters;
   }, [currentFilters]);
 
-  // Filter options loaded from documents
   const [docTypes, setDocTypes] = useState<string[]>([]);
   const [sites, setSites] = useState<string[]>([]);
   const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
   const [equipmentMakes, setEquipmentMakes] = useState<string[]>([]);
   const [equipmentModels, setEquipmentModels] = useState<string[]>([]);
 
-  // Also load from dropdown_options table for consistency with Repository page
   useEffect(() => {
     const fetchFilterOptions = async () => {
       try {
-        // Load from dropdown_options table (same as repository page)
         const { data: dropdownData } = await supabase
           .from('dropdown_options')
           .select('category, value')
           .order('value');
-
         if (dropdownData) {
           setDocTypes(dropdownData.filter(d => d.category === 'docType').map(d => d.value));
           setSites(dropdownData.filter(d => d.category === 'site').map(d => d.value));
@@ -117,7 +113,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         console.error('Error fetching filter options:', error);
       }
     };
-
     fetchFilterOptions();
   }, [hasDocuments]);
 
@@ -128,41 +123,25 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   }, [chatHistory]);
 
   useEffect(() => {
-    const initVoice = () => {
-      selectedVoiceRef.current = selectBestVoice();
-    };
+    const initVoice = () => { selectedVoiceRef.current = selectBestVoice(); };
     initVoice();
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.onvoiceschanged = initVoice;
-    }
+    if ('speechSynthesis' in window) { window.speechSynthesis.onvoiceschanged = initVoice; }
     return () => {
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = null;
-      }
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
       stopListening();
       stopSpeaking();
     };
   }, []);
 
   const stopListening = useCallback(() => {
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
-      recognitionRef.current = null;
-    }
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch (e) {} recognitionRef.current = null; }
     setIsDictating(false);
     currentTranscriptRef.current = '';
   }, []);
 
   const stopSpeaking = useCallback(() => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      utteranceQueueRef.current++;
-    }
+    if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
     setIsSpeaking(false);
     setConversationState(prev => prev === "speaking" ? "idle" : prev);
   }, []);
@@ -170,8 +149,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const speakText = useCallback((text: string, onComplete?: () => void) => {
     if (!('speechSynthesis' in window)) {
       toast({ title: "TTS not supported", description: "Voice playback is not supported in this browser.", variant: "destructive" });
-      onComplete?.();
-      return;
+      onComplete?.(); return;
     }
     window.speechSynthesis.cancel();
     const cleanText = renderAnswerForSpeech(text);
@@ -385,17 +363,31 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const activeFilters = Object.entries(currentFilters).filter(([_, v]) => v && v !== "");
 
-  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
-
-
   return (
-    <div className="flex h-full overflow-hidden relative">
-      {/* Sidebar — full height, fixed, no scroll with main content */}
-      <div className={cn(
-        "flex-shrink-0 flex flex-col bg-sidebar-background border-r border-sidebar-border h-full transition-all duration-200 overflow-hidden",
-        sidebarOpen ? "w-64" : "w-0"
-      )}>
-        {/* Tabs at top of sidebar — matching repository page style */}
+    /**
+     * LAYOUT CONTRACT:
+     * - This component fills its parent exactly (h-full, overflow-hidden).
+     * - Sidebar: fixed column, never participates in page scroll.
+     * - Main area: flex column. Messages div is flex-1 overflow-y-auto (only thing that scrolls).
+     * - Input: flex-shrink-0 — always pinned at the bottom, text scrolls behind it.
+     */
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', position: 'relative' }}>
+
+      {/* ── SIDEBAR ─────────────────────────────────────────────────── */}
+      <div
+        style={{
+          width: sidebarOpen ? '256px' : '0px',
+          flexShrink: 0,
+          height: '100%',
+          overflow: 'hidden',
+          transition: 'width 0.2s',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: 'hsl(var(--sidebar-background))',
+          borderRight: '1px solid hsl(var(--sidebar-border))',
+        }}
+      >
+        {/* Repository / Assistant tabs — px-6 matches the header logo's left edge */}
         {showTabBar && onTabChange && (
           <div className="px-6 pt-4 pb-2 flex-shrink-0">
             <Tabs value={currentTab} onValueChange={onTabChange}>
@@ -417,7 +409,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           </div>
         )}
 
-        {/* Conversation list fills remaining sidebar height — items aligned with px-6 */}
+        {/* Conversation list — self-contained scroll, never scrolls the page */}
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -430,8 +422,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         />
       </div>
 
-      {/* Sidebar toggle — floats at the top-left of the main area, outside sidebar */}
-      <div className="absolute top-3 z-20" style={{ left: sidebarOpen ? '268px' : '12px' }}>
+      {/* Sidebar toggle — floats OUTSIDE the sidebar, always clickable */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '12px',
+          left: sidebarOpen ? '268px' : '12px',
+          transition: 'left 0.2s',
+          zIndex: 20,
+        }}
+      >
         <Button
           variant="ghost"
           size="icon"
@@ -443,10 +443,23 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         </Button>
       </div>
 
-      {/* Main chat area — flex column, messages scroll, input stays at bottom */}
-      <div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
-        {/* Chat messages scroll area */}
-        <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
+      {/* ── MAIN CHAT AREA ──────────────────────────────────────────── */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          height: '100%',
+          overflow: 'hidden',
+          backgroundColor: 'hsl(var(--background))',
+        }}
+      >
+        {/* Messages — the ONLY scrolling region; text scrolls up behind the input box */}
+        <div
+          ref={chatContainerRef}
+          style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}
+        >
           {chatHistory.length === 0 && !isQuerying ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
               Start a conversation by asking a question
@@ -455,9 +468,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
             <div className="max-w-3xl mx-auto w-full px-6 py-8 space-y-8">
               {chatHistory.map((msg) => (
                 <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                  <div className={cn(
-                    msg.role === "user" ? "max-w-[75%] text-right" : "w-full text-left"
-                  )}>
+                  <div className={cn(msg.role === "user" ? "max-w-[75%] text-right" : "w-full text-left")}>
                     <p className="text-xs text-muted-foreground mb-1.5 font-medium">
                       {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
                     </p>
@@ -497,7 +508,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           )}
         </div>
 
-        {/* Sources — above input, shrinks gracefully */}
+        {/* Sources — above input, never scrolls page */}
         {sources.length > 0 && (
           <div className="max-w-3xl mx-auto w-full px-6 pb-2 flex-shrink-0">
             <div className="space-y-1 max-h-24 overflow-y-auto">
@@ -518,92 +529,90 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
         {/* Input area — always sticks to bottom */}
         <div className="py-5 flex-shrink-0 bg-background">
-            {!canWrite ? (
-              <div className="text-center py-4 text-muted-foreground text-sm">You have read-only access.</div>
-            ) : (
-              <div className="max-w-3xl mx-auto px-6">
-                <div className="relative rounded-2xl border border-border/60 bg-background shadow-sm focus-within:shadow-md focus-within:border-border transition-all overflow-hidden">
-                  {/* Active filter chips above textarea */}
-                  {activeFilters.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 px-4 pt-3">
-                      {activeFilters.map(([key, value]) => (
-                        <Badge key={key} variant="secondary" className="text-xs gap-1 h-5 px-2 bg-primary/10 text-primary hover:bg-primary/20">
-                          {value as string}
-                          <X className="h-3 w-3 cursor-pointer" onClick={() => handleFilterChange(key as keyof ConversationFilters, "__all__")} />
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  <Textarea
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder={
-                      isConversationMode
-                        ? (conversationState === "listening" ? "Listening..." : conversationState === "processing" ? "Processing..." : conversationState === "speaking" ? "Speaking..." : "Voice active...")
-                        : "Ask a question..."
-                    }
-                    rows={3}
-                    disabled={isQuerying || isConversationMode}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) { e.preventDefault(); handleSend(); } }}
-                    className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-10 px-4 text-sm leading-relaxed"
-                  />
-                  {/* Bottom toolbar */}
-                  <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
-                    <div className="flex items-center gap-1">
-                      {hasDocuments && (
+          {!canWrite ? (
+            <div className="text-center py-4 text-muted-foreground text-sm">You have read-only access.</div>
+          ) : (
+            <div className="max-w-3xl mx-auto px-6">
+              <div className="relative rounded-2xl border border-border/60 bg-background shadow-sm focus-within:shadow-md focus-within:border-border transition-all overflow-hidden">
+                {activeFilters.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 px-4 pt-3">
+                    {activeFilters.map(([key, value]) => (
+                      <Badge key={key} variant="secondary" className="text-xs gap-1 h-5 px-2 bg-primary/10 text-primary hover:bg-primary/20">
+                        {value as string}
+                        <X className="h-3 w-3 cursor-pointer" onClick={() => handleFilterChange(key as keyof ConversationFilters, "__all__")} />
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <Textarea
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder={
+                    isConversationMode
+                      ? (conversationState === "listening" ? "Listening..." : conversationState === "processing" ? "Processing..." : conversationState === "speaking" ? "Speaking..." : "Voice active...")
+                      : "Ask a question..."
+                  }
+                  rows={3}
+                  disabled={isQuerying || isConversationMode}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) { e.preventDefault(); handleSend(); } }}
+                  className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-10 px-4 text-sm leading-relaxed"
+                />
+                <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    {hasDocuments && (
+                      <Button
+                        onClick={() => setFiltersModalOpen(true)}
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-muted-foreground gap-1.5 rounded-lg hover:text-foreground"
+                      >
+                        <SlidersHorizontal className="h-3.5 w-3.5" />
+                        Filters{activeFilters.length > 0 && ` (${activeFilters.length})`}
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {isConversationMode ? (
+                      <Button onClick={handleConversationToggle} variant="destructive" size="icon" className="h-8 w-8 rounded-lg">
+                        <Square className="h-4 w-4" />
+                      </Button>
+                    ) : (
+                      <>
                         <Button
-                          onClick={() => setFiltersModalOpen(true)}
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs text-muted-foreground gap-1.5 rounded-lg hover:text-foreground"
+                          onClick={handleDictateToggle}
+                          disabled={isQuerying || !hasDocuments}
+                          variant={isDictating ? "destructive" : "ghost"}
+                          size="icon"
+                          className={cn("h-8 w-8 rounded-lg", isDictating && "animate-pulse")}
+                          title={isDictating ? "Stop" : "Dictate"}
                         >
-                          <SlidersHorizontal className="h-3.5 w-3.5" />
-                          Filters{activeFilters.length > 0 && ` (${activeFilters.length})`}
+                          <Mic className="h-4 w-4" />
                         </Button>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {isConversationMode ? (
-                        <Button onClick={handleConversationToggle} variant="destructive" size="icon" className="h-8 w-8 rounded-lg">
-                          <Square className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            onClick={handleDictateToggle}
-                            disabled={isQuerying || !hasDocuments}
-                            variant={isDictating ? "destructive" : "ghost"}
-                            size="icon"
-                            className={cn("h-8 w-8 rounded-lg", isDictating && "animate-pulse")}
-                            title={isDictating ? "Stop" : "Dictate"}
-                          >
-                            <Mic className="h-4 w-4" />
+                        {showConversationButton && (
+                          <Button onClick={handleConversationToggle} disabled={isQuerying || !hasDocuments} variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
+                            <AudioWaveform className="h-4 w-4" />
                           </Button>
-                          {showConversationButton && (
-                            <Button onClick={handleConversationToggle} disabled={isQuerying || !hasDocuments} variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
-                              <AudioWaveform className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {showSendButton && (
-                            <Button
-                              onClick={handleSend}
-                              disabled={isQuerying || !hasDocuments || !hasText}
-                              size="icon"
-                              className="h-8 w-8 rounded-lg bg-brand text-brand-foreground hover:bg-brand-hover"
-                            >
-                              {isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                            </Button>
-                          )}
-                        </>
-                      )}
-                    </div>
+                        )}
+                        {showSendButton && (
+                          <Button
+                            onClick={handleSend}
+                            disabled={isQuerying || !hasDocuments || !hasText}
+                            size="icon"
+                            className="h-8 w-8 rounded-lg bg-brand text-brand-foreground hover:bg-brand-hover"
+                          >
+                            {isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                          </Button>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
-                {!hasDocuments && (
-                  <p className="text-xs text-muted-foreground text-center mt-2">Upload documents to start querying</p>
-                )}
               </div>
-            )}
+              {!hasDocuments && (
+                <p className="text-xs text-muted-foreground text-center mt-2">Upload documents to start querying</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Filters Modal */}
@@ -666,4 +675,3 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     </div>
   );
 };
-
