@@ -33,19 +33,6 @@ interface ConversationSidebarProps {
   canDelete?: boolean;
 }
 
-function formatRelativeTime(date: Date): string {
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
-}
-
 export function ConversationSidebar({
   conversations,
   activeConversationId,
@@ -99,9 +86,9 @@ export function ConversationSidebar({
 
   return (
     <>
-      <div className="flex flex-col h-full bg-sidebar-background">
-        {/* Header */}
-        <div className="p-3 pt-4">
+      <div className="flex flex-col flex-1 min-h-0">
+        {/* New chat button */}
+        <div className="px-3 pb-2 pt-1">
           <Button
             onClick={onNewConversation}
             variant="outline"
@@ -132,55 +119,64 @@ export function ConversationSidebar({
                   onClick={() => onSelectConversation(conv.id)}
                 >
                   <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
-                  <div className="flex-1 min-w-0">
-                    {editingId === conv.id ? (
-                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <Input
-                          ref={inputRef}
-                          value={editingTitle}
-                          onChange={(e) => setEditingTitle(e.target.value)}
-                          onKeyDown={handleRenameKeyDown}
-                          onBlur={handleRenameConfirm}
-                          className="h-6 text-xs py-0 px-1"
-                        />
-                        <Button variant="ghost" size="icon" className="h-5 w-5 flex-shrink-0" onClick={handleRenameConfirm}>
-                          <Check className="h-3 w-3" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-5 w-5 flex-shrink-0" onClick={handleRenameCancel}>
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <p className="text-sm truncate">{conv.title}</p>
-                    )}
-                  </div>
 
-                  {/* 3-dot menu — only visible on hover */}
-                  {editingId !== conv.id && (
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground">
-                            <MoreHorizontal className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-36">
-                          {onRenameConversation && (
-                            <DropdownMenuItem onClick={() => { setEditingId(conv.id); setEditingTitle(conv.title); }}>
-                              Rename
-                            </DropdownMenuItem>
-                          )}
-                          {canDelete && (
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => handleDeleteClick(conv.id)}
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                  {editingId === conv.id ? (
+                    <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+                      <Input
+                        ref={inputRef}
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={handleRenameKeyDown}
+                        onBlur={handleRenameConfirm}
+                        className="h-6 text-xs py-0 px-1 flex-1"
+                      />
+                      <Button variant="ghost" size="icon" className="h-5 w-5 flex-shrink-0" onClick={handleRenameConfirm}>
+                        <Check className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-5 w-5 flex-shrink-0" onClick={handleRenameCancel}>
+                        <X className="h-3 w-3" />
+                      </Button>
                     </div>
+                  ) : (
+                    <>
+                      {/* Title — truncated, takes available space but leaves room for 3-dot */}
+                      <p className="text-sm truncate flex-1 min-w-0 pr-1">{conv.title}</p>
+
+                      {/* 3-dot menu — only visible on hover, always stays in view */}
+                      <div
+                        className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                            >
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-36">
+                            {onRenameConversation && (
+                              <DropdownMenuItem
+                                onClick={() => { setEditingId(conv.id); setEditingTitle(conv.title); }}
+                              >
+                                Rename
+                              </DropdownMenuItem>
+                            )}
+                            {canDelete && (
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => handleDeleteClick(conv.id)}
+                              >
+                                Delete
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </>
                   )}
                 </div>
               ))
@@ -199,7 +195,10 @@ export function ConversationSidebar({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

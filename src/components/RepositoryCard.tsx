@@ -701,7 +701,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               </label>
             </div>
             <div className="flex justify-end">
-              <Button size="sm" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || selectedRoles.length === 0}>
+              <Button size="sm" onClick={handleUpload} disabled={selectedFiles.length === 0 || isUploading || selectedRoles.length === 0} className="bg-brand text-brand-foreground hover:bg-brand-hover">
                 {isUploading ? "Uploading..." : "Upload"}
               </Button>
             </div>
@@ -896,7 +896,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
           </div>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => { setDocType(""); setSite(""); setEquipmentType(""); setEquipmentMake(""); setEquipmentModel(""); setSelectedRoles(["all"]); }}>Reset</Button>
-            <Button onClick={() => setFiltersModalOpen(false)}>Apply</Button>
+            <Button onClick={() => setFiltersModalOpen(false)} className="bg-brand text-brand-foreground hover:bg-brand-hover">Apply</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

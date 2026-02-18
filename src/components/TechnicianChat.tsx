@@ -11,14 +11,19 @@ import { useChatHistory, ChatMessage, ConversationFilters } from "@/hooks/useCha
 import { ConversationSidebar } from "@/components/ConversationSidebar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TabPermissions } from "@/hooks/usePermissions";
+
 
 interface TechnicianChatProps {
   hasDocuments: boolean;
   chunksCount: number;
   permissions: TabPermissions;
+  showTabBar?: boolean;
+  currentTab?: string;
+  onTabChange?: (tab: string) => void;
 }
 
 interface Source {
@@ -28,7 +33,7 @@ interface Source {
   similarity: number;
 }
 
-export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: TechnicianChatProps) => {
+export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTabBar, currentTab, onTabChange }: TechnicianChatProps) => {
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
   const [question, setQuestion] = useState("");
@@ -387,44 +392,67 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
 
   return (
     <div className="flex h-full overflow-hidden">
-      {/* Conversation Sidebar — no rounded corners, goes edge to edge top */}
-      <div className={cn(
-        "flex-shrink-0 flex flex-col bg-sidebar-background border-r border-sidebar-border transition-all duration-200",
-        sidebarOpen ? `w-64` : "w-0 overflow-hidden border-r-0"
-      )}>
-        {/* Sidebar toggle inside sidebar top */}
-        <div className="flex items-center justify-between px-3 pt-3 pb-1 flex-shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-sidebar-foreground/60 hover:text-sidebar-foreground"
-            onClick={() => setSidebarOpen(v => !v)}
-            title="Hide sidebar"
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </Button>
-        </div>
-        <ConversationSidebar
-          conversations={conversations}
-          activeConversationId={activeConversationId}
-          onNewConversation={startNewConversation}
-          onSelectConversation={switchConversation}
-          onDeleteConversation={deleteConversation}
-          onRenameConversation={renameConversation}
-          onReorderConversations={reorderConversations}
-          canDelete={canDelete}
-        />
-      </div>
+      {/* Sidebar — full height, no border-radius, goes edge to edge */}
+      {sidebarOpen && (
+        <div className="w-64 flex-shrink-0 flex flex-col bg-sidebar-background border-r border-sidebar-border h-full">
+          {/* Tabs at top of sidebar (Repository / Assistant) */}
+          {showTabBar && onTabChange && (
+            <div className="px-3 pt-3 pb-2 flex-shrink-0">
+              <Tabs value={currentTab} onValueChange={onTabChange}>
+                <TabsList className="w-full bg-sidebar-accent/60 p-0.5 rounded-lg h-8">
+                  <TabsTrigger
+                    value="repository"
+                    className="flex-1 text-xs rounded-md h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                  >
+                    Repository
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="assistant"
+                    className="flex-1 text-xs rounded-md h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                  >
+                    Assistant
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          )}
 
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-background">
-        {/* Show-sidebar button when sidebar is closed */}
-        {!sidebarOpen && (
-          <div className="flex items-center px-3 pt-3 flex-shrink-0">
+          {/* Hide sidebar button */}
+          <div className="flex items-center px-3 pb-1 flex-shrink-0">
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 text-sidebar-foreground/60 hover:text-sidebar-foreground"
+              onClick={() => setSidebarOpen(false)}
+              title="Hide sidebar"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Conversation list fills remaining sidebar height */}
+          <ConversationSidebar
+            conversations={conversations}
+            activeConversationId={activeConversationId}
+            onNewConversation={startNewConversation}
+            onSelectConversation={switchConversation}
+            onDeleteConversation={deleteConversation}
+            onRenameConversation={renameConversation}
+            onReorderConversations={reorderConversations}
+            canDelete={canDelete}
+          />
+        </div>
+      )}
+
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col min-w-0 bg-background">
+        {/* Show-sidebar button outside sidebar, always visible when closed */}
+        {!sidebarOpen && (
+          <div className="absolute left-2 top-[calc(57px+12px)] z-10">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground bg-background shadow-sm border border-border/40 rounded-lg"
               onClick={() => setSidebarOpen(true)}
               title="Show sidebar"
             >
@@ -441,7 +469,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
                 Start a conversation by asking a question
               </div>
             ) : (
-              <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
+              <div className="max-w-3xl mx-auto w-full px-6 py-8 space-y-8">
                 {chatHistory.map((msg) => (
                   <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
                     <div className={cn(
@@ -578,7 +606,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
                               onClick={handleSend}
                               disabled={isQuerying || !hasDocuments || !hasText}
                               size="icon"
-                              className="h-8 w-8 rounded-lg bg-foreground text-background hover:bg-foreground/90"
+                              className="h-8 w-8 rounded-lg bg-brand text-brand-foreground hover:bg-brand-hover"
                             >
                               {isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                             </Button>
@@ -648,7 +676,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
               >
                 Reset
               </Button>
-              <Button onClick={() => setFiltersModalOpen(false)}>Apply</Button>
+              <Button onClick={() => setFiltersModalOpen(false)} className="bg-brand text-brand-foreground hover:bg-brand-hover">Apply</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

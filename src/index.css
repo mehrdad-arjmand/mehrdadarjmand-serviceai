@@ -26,6 +26,11 @@
     --primary: 0 0% 9%;
     --primary-foreground: 0 0% 98%;
 
+    /* Brand accent — Apple-inspired deep blue for CTAs */
+    --brand: 213 94% 43%;
+    --brand-foreground: 0 0% 100%;
+    --brand-hover: 213 94% 37%;
+
     /* Secondary - subtle background tint */
     --secondary: 0 0% 96%;
     --secondary-foreground: 0 0% 9%;
@@ -79,6 +84,10 @@
 
     --primary: 0 0% 98%;
     --primary-foreground: 0 0% 9%;
+
+    --brand: 213 90% 55%;
+    --brand-foreground: 0 0% 100%;
+    --brand-hover: 213 90% 48%;
 
     --secondary: 0 0% 15%;
     --secondary-foreground: 0 0% 98%;
