@@ -382,13 +382,28 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
 
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
 
+  // Width of sidebar
+  const SIDEBAR_WIDTH = 256;
+
   return (
-    <div className="flex h-full overflow-hidden rounded-xl border border-border/30">
-      {/* Conversation Sidebar */}
+    <div className="flex h-full overflow-hidden">
+      {/* Conversation Sidebar — no rounded corners, goes edge to edge top */}
       <div className={cn(
-        "flex-shrink-0 flex flex-col bg-sidebar-background border-r border-border/30 transition-all duration-200",
-        sidebarOpen ? "w-60" : "w-0 overflow-hidden border-r-0"
+        "flex-shrink-0 flex flex-col bg-sidebar-background border-r border-sidebar-border transition-all duration-200",
+        sidebarOpen ? `w-64` : "w-0 overflow-hidden border-r-0"
       )}>
+        {/* Sidebar toggle inside sidebar top */}
+        <div className="flex items-center justify-between px-3 pt-3 pb-1 flex-shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-sidebar-foreground/60 hover:text-sidebar-foreground"
+            onClick={() => setSidebarOpen(v => !v)}
+            title="Hide sidebar"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </Button>
+        </div>
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -403,53 +418,54 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0 bg-background">
-        {/* Top bar with sidebar toggle */}
-        <div className="flex items-center px-4 py-2 border-b border-border/20 flex-shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={() => setSidebarOpen(v => !v)}
-            title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-          >
-            {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
-          </Button>
-        </div>
+        {/* Show-sidebar button when sidebar is closed */}
+        {!sidebarOpen && (
+          <div className="flex items-center px-3 pt-3 flex-shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              onClick={() => setSidebarOpen(true)}
+              title="Show sidebar"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-          {/* Chat messages - clean, no boxes, ChatGPT/Gemini style */}
-          <div ref={chatContainerRef} className="flex-1 overflow-y-auto py-8 space-y-8">
+          {/* Chat messages — borderless, ChatGPT/Gemini style */}
+          <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
             {chatHistory.length === 0 && !isQuerying ? (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 Start a conversation by asking a question
               </div>
             ) : (
-              <div className="max-w-3xl mx-auto px-6 space-y-8">
+              <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
                 {chatHistory.map((msg) => (
-                  <div key={msg.id} className={cn("flex gap-3", msg.role === "user" ? "justify-end" : "justify-start")}>
+                  <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
                     <div className={cn(
-                      "max-w-[80%]",
-                      msg.role === "user" ? "text-right" : "text-left w-full"
+                      msg.role === "user" ? "max-w-[75%] text-right" : "w-full text-left"
                     )}>
-                      <p className="text-xs text-muted-foreground mb-2 font-medium">
+                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">
                         {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
                       </p>
                       {msg.role === "assistant" ? (
-                        <div className="text-sm leading-7 text-foreground">
-                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-2 prose-li:my-0.5">
+                        <div className="text-sm text-foreground">
+                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7">
                             <ReactMarkdown>{msg.content}</ReactMarkdown>
                           </div>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
-                            className="mt-2 h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                            className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                           >
                             {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
                           </Button>
                         </div>
                       ) : (
-                        <div className="bg-muted/60 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-relaxed inline-block">
+                        <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
                           {msg.content}
                         </div>
                       )}
@@ -457,9 +473,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
                   </div>
                 ))}
                 {isQuerying && (
-                  <div className="flex gap-3 justify-start">
+                  <div className="flex justify-start">
                     <div>
-                      <p className="text-xs text-muted-foreground mb-2 font-medium">Service AI</p>
+                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">Service AI</p>
                       <div className="flex items-center gap-2 text-muted-foreground text-sm">
                         <Loader2 className="h-4 w-4 animate-spin" /><span>Thinking...</span>
                       </div>
@@ -489,13 +505,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
             </div>
           )}
 
-          {/* Input area */}
-          <div className="py-4 border-t border-border/20 flex-shrink-0">
+          {/* Input area — aligned with max-w-3xl same as messages */}
+          <div className="py-5 flex-shrink-0">
             {!canWrite ? (
               <div className="text-center py-4 text-muted-foreground text-sm">You have read-only access.</div>
             ) : (
               <div className="max-w-3xl mx-auto px-6">
-                <div className="relative rounded-2xl border border-border/50 bg-background shadow-sm focus-within:shadow-md focus-within:border-border/80 transition-all overflow-hidden">
+                <div className="relative rounded-2xl border border-border/60 bg-background shadow-sm focus-within:shadow-md focus-within:border-border transition-all overflow-hidden">
                   {/* Active filter chips above textarea */}
                   {activeFilters.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 px-4 pt-3">
@@ -613,7 +629,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
                       disabled={filtersLocked}
                     >
                       <SelectTrigger className="h-9 text-sm">
-                        <SelectValue placeholder={`All`} />
+                        <SelectValue placeholder="All" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__all__">All</SelectItem>
