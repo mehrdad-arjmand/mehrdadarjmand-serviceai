@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Plus, MessageSquare, MoreHorizontal, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Conversation } from "@/hooks/useChatHistory";
@@ -99,8 +99,8 @@ export function ConversationSidebar({
       `}</style>
 
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* New chat button — px-4 left so its left border aligns with logo */}
-        <div style={{ padding: '4px 16px 8px 16px', flexShrink: 0 }}>
+        {/* New chat button — left edge aligns with header logo (px-6 = 24px) */}
+        <div style={{ padding: '4px 16px 8px 24px', flexShrink: 0 }}>
           <Button
             onClick={onNewConversation}
             variant="outline"
@@ -111,11 +111,11 @@ export function ConversationSidebar({
           </Button>
         </div>
 
-        {/* Conversation list — isolated scroll */}
-        <ScrollArea className="flex-1 min-h-0">
+        {/* Conversation list — use plain div with overflow-y-auto so hover CSS works */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
           <div style={{ paddingBottom: '12px' }}>
             {conversations.length === 0 ? (
-              <div style={{ padding: '16px', textAlign: 'center', fontSize: '14px', opacity: 0.5 }}>
+              <div style={{ padding: '16px 24px', textAlign: 'center', fontSize: '14px', opacity: 0.5 }}>
                 No conversations yet
               </div>
             ) : (
@@ -132,8 +132,8 @@ export function ConversationSidebar({
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    margin: '1px 16px',
-                    padding: '8px 12px',
+                    margin: '1px 16px 1px 24px',
+                    padding: '8px 8px 8px 8px',
                     borderRadius: '8px',
                     cursor: 'pointer',
                     position: 'relative',
@@ -244,7 +244,7 @@ export function ConversationSidebar({
               ))
             )}
           </div>
-        </ScrollArea>
+        </div>
       </div>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
