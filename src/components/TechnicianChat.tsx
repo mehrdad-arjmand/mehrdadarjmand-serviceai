@@ -459,14 +459,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         {/* Messages — THE ONLY scrolling region. Input box is always below this. */}
         <div
           ref={chatContainerRef}
-          style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, scrollbarGutter: 'stable' }}
+          style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}
         >
           {chatHistory.length === 0 && !isQuerying ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
               Start a conversation by asking a question
             </div>
           ) : (
-            <div className="px-6 py-8 space-y-8">
+            <div className="max-w-3xl mx-auto w-full pl-10 pr-8 py-8 space-y-8">
               {chatHistory.map((msg) => (
                 <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
                   <div className={cn(msg.role === "user" ? "max-w-[75%] text-right" : "w-full text-left")}>
@@ -511,7 +511,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
         {/* Sources — above input, never scrolls page */}
         {sources.length > 0 && (
-          <div className="px-6 pb-2 flex-shrink-0">
+          <div className="max-w-3xl mx-auto w-full pl-10 pr-8 pb-2 flex-shrink-0">
             <div className="space-y-1 max-h-24 overflow-y-auto">
               {sources.map((source, idx) => (
                 <details key={idx} className="group">
@@ -533,7 +533,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           {!canWrite ? (
             <div className="text-center py-4 text-muted-foreground text-sm">You have read-only access.</div>
           ) : (
-            <div className="px-6">
+            <div className="max-w-3xl mx-auto pl-10 pr-8">
               <div className="relative rounded-2xl border border-border/60 bg-background shadow-sm focus-within:shadow-md focus-within:border-border transition-all overflow-hidden">
                 {activeFilters.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 px-4 pt-3">
