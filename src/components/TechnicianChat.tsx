@@ -2,32 +2,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
 import { useChatHistory, ChatMessage, ConversationFilters } from "@/hooks/useChatHistory";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { CalendarIcon } from "lucide-react";
-import { format, parse } from "date-fns";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-
 import { TabPermissions } from "@/hooks/usePermissions";
 
 interface TechnicianChatProps {
@@ -402,9 +387,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
 
   const activeFilters = Object.entries(currentFilters).filter(([_, v]) => v && v !== "");
 
+  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
+
   return (
-    <div className="flex h-[calc(100vh-12rem)] min-h-[500px] overflow-hidden">
-      <div className="w-80 flex-shrink-0 hidden md:flex flex-col bg-sidebar-background border-r border-border/50 rounded-l-2xl">
+    <div className="flex h-[calc(100vh-8rem)] min-h-[500px] overflow-hidden rounded-xl border border-border/30">
+      {/* Conversation Sidebar - full height */}
+      <div className="w-64 flex-shrink-0 hidden md:flex flex-col bg-sidebar-background border-r border-border/30">
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -417,169 +405,49 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
         />
       </div>
 
-      <div className="flex-1 flex flex-col min-w-0 bg-background rounded-r-2xl border border-border/50 border-l-0">
-        <div className="px-8 py-5 border-b border-border/50 bg-card flex-shrink-0 rounded-tr-2xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground tracking-tight">
-                Technician Assistant
-              </h2>
-              <p className="text-sm text-muted-foreground font-normal mt-0.5">
-                Ask questions about your equipment and procedures
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={startNewConversation}
-              className="h-9 md:hidden rounded-lg"
-              title="Start new conversation"
-            >
-              New
-            </Button>
-          </div>
-        </div>
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col min-w-0 bg-background">
+        {/* No header text - open and clean */}
 
-        {hasDocuments && (
-          <Collapsible defaultOpen={false} className="border-b border-border/50 bg-muted/20 flex-shrink-0">
-            <CollapsibleTrigger asChild>
-              <button className="w-full px-8 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors">
-                <div className="flex items-center gap-2">
-                  <ChevronRight className="h-4 w-4 transition-transform duration-200 [[data-state=open]>&]:rotate-90" />
-                  <Label className="text-sm font-medium cursor-pointer">Optional Filters</Label>
-                  <span className="text-xs text-muted-foreground font-normal ml-1">Scopes retrieval</span>
-                </div>
-                <span className="text-xs text-muted-foreground font-normal">Applies to next question</span>
-              </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="px-8 pb-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="filter-doc-type" className="text-xs">Document Type</Label>
-                    <Select value={currentFilters.docType || "__all__"} onValueChange={(v) => handleFilterChange("docType", v)} disabled={filtersLocked}>
-                      <SelectTrigger id="filter-doc-type" className="h-9"><SelectValue placeholder="All types" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All types</SelectItem>
-                        {docTypes.map((type) => (<SelectItem key={type} value={type}>{type}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="filter-site" className="text-xs">Site</Label>
-                    <Select value={currentFilters.site || "__all__"} onValueChange={(v) => handleFilterChange("site", v)} disabled={filtersLocked}>
-                      <SelectTrigger id="filter-site" className="h-9"><SelectValue placeholder="All sites" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All sites</SelectItem>
-                        {sites.map((s) => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="filter-equipment-type" className="text-xs">Equipment Type</Label>
-                    <Select value={currentFilters.equipmentType || "__all__"} onValueChange={(v) => handleFilterChange("equipmentType", v)} disabled={filtersLocked}>
-                      <SelectTrigger id="filter-equipment-type" className="h-9"><SelectValue placeholder="All types" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All types</SelectItem>
-                        {equipmentTypes.map((type) => (<SelectItem key={type} value={type}>{type}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="filter-equipment-make" className="text-xs">Equipment Make</Label>
-                    <Select value={currentFilters.equipmentMake || "__all__"} onValueChange={(v) => handleFilterChange("equipmentMake", v)} disabled={filtersLocked}>
-                      <SelectTrigger id="filter-equipment-make" className="h-9"><SelectValue placeholder="All makes" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All makes</SelectItem>
-                        {equipmentMakes.map((make) => (<SelectItem key={make} value={make}>{make}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="filter-equipment-model" className="text-xs">Equipment Model</Label>
-                    <Select value={currentFilters.equipmentModel || "__all__"} onValueChange={(v) => handleFilterChange("equipmentModel", v)} disabled={filtersLocked}>
-                      <SelectTrigger id="filter-equipment-model" className="h-9"><SelectValue placeholder="All models" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All models</SelectItem>
-                        {equipmentModels.map((model) => (<SelectItem key={model} value={model}>{model}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between mt-3">
-                  <p className="text-xs text-muted-foreground italic">
-                    Use filters when documents overlap, to reduce ambiguity and enforce scoping.
-                  </p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs h-7"
-                    onClick={() => setCurrentFilters({ docType: "", uploadDate: undefined, site: "", equipmentType: "", equipmentMake: "", equipmentModel: "" })}
-                  >
-                    Reset
-                  </Button>
-                </div>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
-
-        <div className="flex-1 overflow-hidden flex flex-col p-6 min-h-0">
-          <div 
-            ref={chatContainerRef}
-            className="flex-1 min-h-[200px] overflow-y-auto space-y-4 p-4 bg-muted/10 rounded-xl border border-border/30"
-          >
+        <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+          {/* Chat messages - no box, clean like ChatGPT */}
+          <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
             {chatHistory.length === 0 && !isQuerying ? (
-              <div className="flex-1 flex items-center justify-center h-full text-muted-foreground text-sm">
-                Start a conversation by typing or speaking a question
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                Start a conversation by asking a question
               </div>
             ) : (
               <>
                 {chatHistory.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={cn(
-                      "p-4 rounded-xl text-sm transition-all duration-200",
-                      msg.role === "user" 
-                        ? "bg-primary/5 ml-12 border border-primary/10" 
-                        : "bg-card mr-12 shadow-sm border border-border/30"
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-muted-foreground font-medium">
+                  <div key={msg.id} className={cn("flex gap-3", msg.role === "user" ? "justify-end" : "justify-start")}>
+                    <div className={cn("max-w-[80%]", msg.role === "user" ? "text-right" : "text-left")}>
+                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">
                         {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
-                      </span>
-                      {msg.role === "assistant" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
-                          className="h-7 px-2.5 text-xs rounded-lg hover:bg-muted transition-colors"
-                        >
-                          {isSpeaking ? (
-                            <><VolumeX className="h-3.5 w-3.5 mr-1.5" />Stop</>
-                          ) : (
-                            <><Volume2 className="h-3.5 w-3.5 mr-1.5" />Listen</>
-                          )}
-                        </Button>
+                      </p>
+                      {msg.role === "assistant" ? (
+                        <div className="text-sm leading-relaxed text-foreground">
+                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-2 prose-p:leading-relaxed">
+                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          </div>
+                          <Button variant="ghost" size="sm" onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)} className="mt-1 h-6 px-2 text-xs text-muted-foreground hover:text-foreground">
+                            {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="bg-primary/8 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-relaxed inline-block">
+                          {msg.content}
+                        </div>
                       )}
                     </div>
-                    {msg.role === "assistant" ? (
-                      <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-1.5 prose-p:leading-relaxed">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <span className="text-foreground leading-relaxed">{msg.content}</span>
-                    )}
                   </div>
                 ))}
-                
                 {isQuerying && (
-                  <div className="p-4 rounded-xl text-sm bg-card mr-12 shadow-sm border border-border/30">
-                    <span className="text-xs text-muted-foreground font-medium block mb-2">Service AI</span>
-                    <div className="flex items-center gap-2.5 text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Thinking...</span>
+                  <div className="flex gap-3 justify-start">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">Service AI</p>
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                        <Loader2 className="h-4 w-4 animate-spin" /><span>Thinking...</span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -587,138 +455,114 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
             )}
           </div>
 
+          {/* Sources */}
           {sources.length > 0 && (
-            <div className="mt-4 flex-shrink-0 max-h-[30%]">
-              <h4 className="text-sm font-medium text-muted-foreground mb-3">
-                Referenced Context ({sources.length} sources)
-              </h4>
-              <div className="space-y-2 max-h-32 overflow-y-auto">
+            <div className="px-8 pb-2 flex-shrink-0">
+              <div className="space-y-1 max-h-24 overflow-y-auto">
                 {sources.map((source, idx) => (
                   <details key={idx} className="group">
                     <summary className="cursor-pointer list-none">
-                      <div className="flex items-start gap-3 p-3 bg-muted/30 rounded-xl hover:bg-muted/50 transition-colors text-sm border border-border/20">
-                        <span className="font-semibold text-foreground">[{idx + 1}]</span>
-                        <div className="flex-1">
-                          <p className="font-medium text-foreground">
-                            {source.filename} (Chunk {source.chunkIndex})
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            Similarity: {(source.similarity * 100).toFixed(1)}%
-                          </p>
-                        </div>
+                      <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                        <span className="font-medium">[{idx + 1}] {source.filename}</span>
+                        <span>· {(source.similarity * 100).toFixed(0)}%</span>
                       </div>
                     </summary>
-                    <div className="mt-2 ml-8 p-3 bg-card border border-border/30 rounded-xl text-xs text-muted-foreground max-h-24 overflow-y-auto">
-                      {source.text}
-                    </div>
+                    <div className="ml-4 p-2 bg-muted/30 rounded text-xs text-muted-foreground max-h-16 overflow-y-auto mb-1">{source.text}</div>
                   </details>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="px-8 py-5 border-t border-border/50 bg-card flex-shrink-0 rounded-br-2xl">
+          {/* Input area */}
+          <div className="px-8 py-4 border-t border-border/30 flex-shrink-0">
             {!canWrite ? (
-              <div className="text-center py-4 text-muted-foreground">
-                <p className="text-sm">You have read-only access to the assistant.</p>
-                <p className="text-xs mt-1">Contact an administrator for write permissions.</p>
-              </div>
+              <div className="text-center py-4 text-muted-foreground text-sm">You have read-only access.</div>
             ) : (
-              <div className="max-w-3xl mx-auto space-y-2">
-                <div className="relative rounded-xl border border-border/50 bg-muted/30 focus-within:bg-background transition-colors overflow-hidden">
+              <div className="max-w-3xl mx-auto">
+                <div className="relative rounded-2xl border border-border/50 bg-background shadow-sm focus-within:shadow-md transition-shadow overflow-hidden">
                   <Textarea
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
-                    placeholder={
-                      isConversationMode 
-                        ? conversationState === "listening" 
-                          ? "Listening..." 
-                          : conversationState === "processing" 
-                            ? "Processing..." 
-                            : conversationState === "speaking" 
-                              ? "Speaking..." 
-                              : "Voice conversation active..."
-                        : "What troubleshooting steps should I take?"
-                    }
+                    placeholder={isConversationMode ? (conversationState === "listening" ? "Listening..." : conversationState === "processing" ? "Processing..." : conversationState === "speaking" ? "Speaking..." : "Voice active...") : "Ask a question..."}
                     rows={2}
                     disabled={isQuerying || isConversationMode}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) {
-                        e.preventDefault();
-                        handleSend();
-                      }
-                    }}
-                    className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pr-24"
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) { e.preventDefault(); handleSend(); } }}
+                    className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-10 px-4 text-sm leading-relaxed"
                   />
-                  
+                  {/* Active filter chips */}
                   {activeFilters.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+                    <div className="flex flex-wrap gap-1.5 px-4 pb-2">
                       {activeFilters.map(([key, value]) => (
-                        <Badge
-                          key={key}
-                          variant="secondary"
-                          className="text-xs gap-1 h-6 px-2 bg-primary/10 text-primary hover:bg-primary/20"
-                        >
+                        <Badge key={key} variant="secondary" className="text-xs gap-1 h-5 px-2 bg-primary/10 text-primary hover:bg-primary/20">
                           {value}
-                          <X
-                            className="h-3 w-3 cursor-pointer"
-                            onClick={() => handleFilterChange(key as keyof ConversationFilters, "__all__")}
-                          />
+                          <X className="h-3 w-3 cursor-pointer" onClick={() => handleFilterChange(key as keyof ConversationFilters, "__all__")} />
                         </Badge>
                       ))}
                     </div>
                   )}
-
-                  <div className="absolute right-2 bottom-2 flex items-center gap-1">
-                    {isConversationMode && (
-                      <Button onClick={handleConversationToggle} variant="destructive" size="icon" className="h-9 w-9 rounded-lg" title="End conversation">
-                        <Square className="h-4 w-4" />
-                      </Button>
-                    )}
-                    {!isConversationMode && (
-                      <>
-                        <Button onClick={handleDictateToggle} disabled={isQuerying || !hasDocuments} variant={isDictating ? "destructive" : "ghost"} size="icon"
-                          className={cn("h-9 w-9 rounded-lg transition-all duration-200", isDictating && "animate-pulse")}
-                          title={isDictating ? "Stop recording" : "Start dictation"}>
-                          <Mic className="h-4 w-4" />
+                  {/* Bottom toolbar */}
+                  <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      {hasDocuments && (
+                        <Button onClick={() => setFiltersModalOpen(true)} variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground gap-1.5 rounded-lg">
+                          <SlidersHorizontal className="h-3.5 w-3.5" />
+                          Filters{activeFilters.length > 0 && ` (${activeFilters.length})`}
                         </Button>
-                        {showConversationButton ? (
-                          <Button onClick={handleConversationToggle} disabled={isQuerying || !hasDocuments} variant="ghost" size="icon" className="h-9 w-9 rounded-lg" title="Start voice conversation">
-                            <AudioWaveform className="h-4 w-4" />
-                          </Button>
-                        ) : showSendButton ? (
-                          <Button onClick={handleSend} disabled={isQuerying || !hasDocuments || !hasText} size="icon"
-                            className="h-9 w-9 rounded-lg bg-foreground text-background hover:bg-foreground/90 shadow-sm" title="Send question">
-                            {isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                          </Button>
-                        ) : null}
-                      </>
-                    )}
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {isConversationMode ? (
+                        <Button onClick={handleConversationToggle} variant="destructive" size="icon" className="h-8 w-8 rounded-lg"><Square className="h-4 w-4" /></Button>
+                      ) : (
+                        <>
+                          <Button onClick={handleDictateToggle} disabled={isQuerying || !hasDocuments} variant={isDictating ? "destructive" : "ghost"} size="icon" className={cn("h-8 w-8 rounded-lg", isDictating && "animate-pulse")} title={isDictating ? "Stop" : "Dictate"}><Mic className="h-4 w-4" /></Button>
+                          {showConversationButton && <Button onClick={handleConversationToggle} disabled={isQuerying || !hasDocuments} variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><AudioWaveform className="h-4 w-4" /></Button>}
+                          {showSendButton && <Button onClick={handleSend} disabled={isQuerying || !hasDocuments || !hasText} size="icon" className="h-8 w-8 rounded-lg bg-foreground text-background hover:bg-foreground/90">{isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button>}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-                
-                <div className="text-xs text-muted-foreground font-normal text-center">
-                  {!hasDocuments ? (
-                    <span>Upload documents to start ({chunksCount} chunks indexed)</span>
-                  ) : isDictating ? (
-                    <span className="text-foreground animate-pulse">Recording... Click mic to stop</span>
-                  ) : isConversationMode ? (
-                    <span className={cn(
-                      conversationState === "listening" && "text-foreground animate-pulse",
-                      conversationState === "speaking" && "text-foreground"
-                    )}>
-                      Conversation: {conversationState === "listening" ? "Listening..." : 
-                                     conversationState === "processing" ? "Thinking..." : 
-                                     conversationState === "speaking" ? "Speaking..." : "Ready"}
-                    </span>
-                  ) : (
-                    <span>Filters persist for this conversation and apply to the next question. Collapse filters when not needed.</span>
-                  )}
-                </div>
+                {!hasDocuments && <p className="text-xs text-muted-foreground text-center mt-2">Upload documents to start querying</p>}
               </div>
             )}
           </div>
         </div>
+
+        {/* Filters Modal */}
+        <Dialog open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Query Filters</DialogTitle>
+              <DialogDescription>Scope retrieval to specific documents.</DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-3 py-3">
+              {[
+                { label: "Document Type", key: "docType" as keyof ConversationFilters, options: docTypes },
+                { label: "Site", key: "site" as keyof ConversationFilters, options: sites },
+                { label: "Equipment Type", key: "equipmentType" as keyof ConversationFilters, options: equipmentTypes },
+                { label: "Equipment Make", key: "equipmentMake" as keyof ConversationFilters, options: equipmentMakes },
+                { label: "Equipment Model", key: "equipmentModel" as keyof ConversationFilters, options: equipmentModels },
+              ].map(({ label, key, options }) => (
+                <div key={key} className="space-y-1.5">
+                  <Label className="text-xs">{label}</Label>
+                  <Select value={(currentFilters[key] as string) || "__all__"} onValueChange={(v) => handleFilterChange(key, v)} disabled={filtersLocked}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder={`All ${label.toLowerCase()}`} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">All</SelectItem>
+                      {options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" size="sm" onClick={() => setCurrentFilters({ docType: "", uploadDate: undefined, site: "", equipmentType: "", equipmentMake: "", equipmentModel: "" })}>Reset</Button>
+              <Button onClick={() => setFiltersModalOpen(false)}>Apply</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
