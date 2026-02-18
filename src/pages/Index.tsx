@@ -88,21 +88,19 @@ const Index = () => {
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
         <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0" style={{ minHeight: 0 }}>
           {canSeeRepository && (
-            <TabsContent value="repository" className="flex-1 mt-0 flex flex-col" style={{ minHeight: 0, overflow: 'hidden' }}>
+            <TabsContent
+              value="repository"
+              className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
+              style={{ minHeight: 0, overflow: 'hidden' }}
+            >
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
                 {canSeeRepository && canSeeAssistant && (
                   <div className="pl-4 pt-4">
                     <TabsList className="bg-muted/60 p-1 rounded-xl">
-                      <TabsTrigger
-                        value="repository"
-                        className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
-                      >
+                      <TabsTrigger value="repository" className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
                         Repository
                       </TabsTrigger>
-                      <TabsTrigger
-                        value="assistant"
-                        className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
-                      >
+                      <TabsTrigger value="assistant" className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
                         Assistant
                       </TabsTrigger>
                     </TabsList>
@@ -119,7 +117,11 @@ const Index = () => {
           )}
 
           {canSeeAssistant && (
-            <TabsContent value="assistant" className="flex-1 mt-0" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <TabsContent
+              value="assistant"
+              className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
+              style={{ overflow: 'hidden', minHeight: 0 }}
+            >
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
                 <TechnicianChat
                   hasDocuments={hasDocuments}
