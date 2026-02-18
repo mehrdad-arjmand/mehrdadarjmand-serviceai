@@ -101,9 +101,9 @@ export function ConversationSidebar({
 
         {/* Conversation list — isolated scroll */}
         <ScrollArea className="flex-1 min-h-0">
-          <div className="pb-3 space-y-0.5 px-3">
+          <div className="pb-3 space-y-0.5">
             {conversations.length === 0 ? (
-              <div className="px-3 py-4 text-center text-sm text-sidebar-foreground/50">
+              <div className="px-6 py-4 text-center text-sm text-sidebar-foreground/50">
                 No conversations yet
               </div>
             ) : (
@@ -111,7 +111,8 @@ export function ConversationSidebar({
                 <div
                   key={conv.id}
                   className={cn(
-                    "group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150",
+                    /* mx-6 = 24px left margin — aligns the item BORDER with the AI logo & tabs */
+                    "group relative flex items-center gap-2 mx-6 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150",
                     conv.id === activeConversationId
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
@@ -143,35 +144,31 @@ export function ConversationSidebar({
                   ) : (
                     <>
                       {/*
-                        KEY: text gets flex-1 min-w-0 so it truncates.
-                        The 3-dot button is flex-shrink-0 and always takes space in layout
-                        (just opacity-0 until hover). This guarantees text NEVER overlaps the button.
+                        flex-1 min-w-0 on the text ensures it truncates.
+                        The 3-dot wrapper is flex-shrink-0 so it ALWAYS reserves its 24px.
+                        Text can never overlap the button.
                       */}
-                      <span
-                        className="text-sm truncate flex-1 min-w-0 select-none"
-                        style={{ paddingRight: '4px' }}
-                      >
+                      <span className="text-sm truncate flex-1 min-w-0">
                         {conv.title}
                       </span>
 
-                      {/* 3-dot: always in layout (reserves space), only visible on hover */}
+                      {/* 3-dot: fixed 24px width, always in layout, opacity fades in on hover */}
                       <div
-                        className="flex-shrink-0"
+                        className="flex-shrink-0 w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                            <button
+                              type="button"
+                              className="w-6 h-6 flex items-center justify-center rounded hover:bg-sidebar-accent text-sidebar-foreground/60 hover:text-sidebar-foreground outline-none"
                             >
                               <MoreHorizontal className="h-3.5 w-3.5" />
-                            </Button>
+                            </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             align="end"
-                            className="w-36"
+                            className="w-36 bg-popover border border-border shadow-lg z-[100]"
                           >
                             {onRenameConversation && (
                               <DropdownMenuItem
