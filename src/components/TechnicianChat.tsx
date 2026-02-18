@@ -387,154 +387,137 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
 
-  // Width of sidebar
-  const SIDEBAR_WIDTH = 256;
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Sidebar — full height, no border-radius, goes edge to edge */}
-      {sidebarOpen && (
-        <div className="w-64 flex-shrink-0 flex flex-col bg-sidebar-background border-r border-sidebar-border h-full">
-          {/* Tabs at top of sidebar (Repository / Assistant) */}
-          {showTabBar && onTabChange && (
-            <div className="px-3 pt-3 pb-2 flex-shrink-0">
-              <Tabs value={currentTab} onValueChange={onTabChange}>
-                <TabsList className="w-full bg-sidebar-accent/60 p-0.5 rounded-lg h-8">
-                  <TabsTrigger
-                    value="repository"
-                    className="flex-1 text-xs rounded-md h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-                  >
-                    Repository
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="assistant"
-                    className="flex-1 text-xs rounded-md h-7 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-                  >
-                    Assistant
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-          )}
-
-          {/* Hide sidebar button */}
-          <div className="flex items-center px-3 pb-1 flex-shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-sidebar-foreground/60 hover:text-sidebar-foreground"
-              onClick={() => setSidebarOpen(false)}
-              title="Hide sidebar"
-            >
-              <PanelLeftClose className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {/* Conversation list fills remaining sidebar height */}
-          <ConversationSidebar
-            conversations={conversations}
-            activeConversationId={activeConversationId}
-            onNewConversation={startNewConversation}
-            onSelectConversation={switchConversation}
-            onDeleteConversation={deleteConversation}
-            onRenameConversation={renameConversation}
-            onReorderConversations={reorderConversations}
-            canDelete={canDelete}
-          />
-        </div>
-      )}
-
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-background">
-        {/* Show-sidebar button outside sidebar, always visible when closed */}
-        {!sidebarOpen && (
-          <div className="absolute left-2 top-[calc(57px+12px)] z-10">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground bg-background shadow-sm border border-border/40 rounded-lg"
-              onClick={() => setSidebarOpen(true)}
-              title="Show sidebar"
-            >
-              <PanelLeftOpen className="h-4 w-4" />
-            </Button>
+    <div className="flex h-full overflow-hidden relative">
+      {/* Sidebar — full height, fixed, no scroll with main content */}
+      <div className={cn(
+        "flex-shrink-0 flex flex-col bg-sidebar-background border-r border-sidebar-border h-full transition-all duration-200 overflow-hidden",
+        sidebarOpen ? "w-64" : "w-0"
+      )}>
+        {/* Tabs at top of sidebar — matching repository page style */}
+        {showTabBar && onTabChange && (
+          <div className="px-6 pt-4 pb-2 flex-shrink-0">
+            <Tabs value={currentTab} onValueChange={onTabChange}>
+              <TabsList className="bg-muted/60 p-1 rounded-xl">
+                <TabsTrigger
+                  value="repository"
+                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                >
+                  Repository
+                </TabsTrigger>
+                <TabsTrigger
+                  value="assistant"
+                  className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
+                >
+                  Assistant
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
         )}
 
-        <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-          {/* Chat messages — borderless, ChatGPT/Gemini style */}
-          <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
-            {chatHistory.length === 0 && !isQuerying ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                Start a conversation by asking a question
-              </div>
-            ) : (
-              <div className="max-w-3xl mx-auto w-full px-6 py-8 space-y-8">
-                {chatHistory.map((msg) => (
-                  <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                    <div className={cn(
-                      msg.role === "user" ? "max-w-[75%] text-right" : "w-full text-left"
-                    )}>
-                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">
-                        {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
-                      </p>
-                      {msg.role === "assistant" ? (
-                        <div className="text-sm text-foreground">
-                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7">
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
-                            className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                          >
-                            {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
-                          {msg.content}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {isQuerying && (
-                  <div className="flex justify-start">
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">Service AI</p>
-                      <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                        <Loader2 className="h-4 w-4 animate-spin" /><span>Thinking...</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+        {/* Conversation list fills remaining sidebar height — items aligned with px-6 */}
+        <ConversationSidebar
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onNewConversation={startNewConversation}
+          onSelectConversation={switchConversation}
+          onDeleteConversation={deleteConversation}
+          onRenameConversation={renameConversation}
+          onReorderConversations={reorderConversations}
+          canDelete={canDelete}
+        />
+      </div>
 
-          {/* Sources */}
-          {sources.length > 0 && (
-            <div className="max-w-3xl mx-auto w-full px-6 pb-2 flex-shrink-0">
-              <div className="space-y-1 max-h-24 overflow-y-auto">
-                {sources.map((source, idx) => (
-                  <details key={idx} className="group">
-                    <summary className="cursor-pointer list-none">
-                      <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                        <span className="font-medium">[{idx + 1}] {source.filename}</span>
-                        <span>· {(source.similarity * 100).toFixed(0)}%</span>
+      {/* Sidebar toggle — floats at the top-left of the main area, outside sidebar */}
+      <div className="absolute top-3 z-20" style={{ left: sidebarOpen ? '268px' : '12px' }}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          onClick={() => setSidebarOpen(prev => !prev)}
+          title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+        >
+          {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      {/* Main chat area — flex column, messages scroll, input stays at bottom */}
+      <div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
+        {/* Chat messages scroll area */}
+        <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
+          {chatHistory.length === 0 && !isQuerying ? (
+            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+              Start a conversation by asking a question
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto w-full px-6 py-8 space-y-8">
+              {chatHistory.map((msg) => (
+                <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
+                  <div className={cn(
+                    msg.role === "user" ? "max-w-[75%] text-right" : "w-full text-left"
+                  )}>
+                    <p className="text-xs text-muted-foreground mb-1.5 font-medium">
+                      {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
+                    </p>
+                    {msg.role === "assistant" ? (
+                      <div className="text-sm text-foreground">
+                        <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
+                          className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
+                        </Button>
                       </div>
-                    </summary>
-                    <div className="ml-4 p-2 bg-muted/30 rounded text-xs text-muted-foreground max-h-16 overflow-y-auto mb-1">{source.text}</div>
-                  </details>
-                ))}
-              </div>
+                    ) : (
+                      <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
+                        {msg.content}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {isQuerying && (
+                <div className="flex justify-start">
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1.5 font-medium">Service AI</p>
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <Loader2 className="h-4 w-4 animate-spin" /><span>Thinking...</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
+        </div>
 
-          {/* Input area — aligned with max-w-3xl same as messages */}
-          <div className="py-5 flex-shrink-0">
+        {/* Sources — above input, shrinks gracefully */}
+        {sources.length > 0 && (
+          <div className="max-w-3xl mx-auto w-full px-6 pb-2 flex-shrink-0">
+            <div className="space-y-1 max-h-24 overflow-y-auto">
+              {sources.map((source, idx) => (
+                <details key={idx} className="group">
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                      <span className="font-medium">[{idx + 1}] {source.filename}</span>
+                      <span>· {(source.similarity * 100).toFixed(0)}%</span>
+                    </div>
+                  </summary>
+                  <div className="ml-4 p-2 bg-muted/30 rounded text-xs text-muted-foreground max-h-16 overflow-y-auto mb-1">{source.text}</div>
+                </details>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Input area — always sticks to bottom */}
+        <div className="py-5 flex-shrink-0 bg-background">
             {!canWrite ? (
               <div className="text-center py-4 text-muted-foreground text-sm">You have read-only access.</div>
             ) : (
@@ -621,10 +604,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 )}
               </div>
             )}
-          </div>
         </div>
 
-        {/* Filters Modal - all 6 filters */}
+        {/* Filters Modal */}
         <Dialog open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
@@ -684,3 +666,4 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     </div>
   );
 };
+
