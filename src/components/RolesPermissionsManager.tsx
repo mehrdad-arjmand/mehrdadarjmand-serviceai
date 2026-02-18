@@ -31,7 +31,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { Loader2, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { RoleWithPermissions } from "@/hooks/useRolesManagement";
 import type { AppRole } from "@/hooks/usePermissions";
 
@@ -198,28 +204,29 @@ export const RolesPermissionsManager = ({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEditClick(role)}
-                        disabled={isUpdating}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      {!isAdminRole(role.role) && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setDeletingRole(role)}
-                          disabled={isUpdating || role.user_count > 0}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          title={role.user_count > 0 ? "Cannot delete: users assigned" : "Delete role"}
-                        >
-                          <Trash2 className="h-4 w-4" />
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isUpdating}>
+                          <MoreHorizontal className="h-4 w-4" />
                         </Button>
-                      )}
-                    </div>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-36">
+                        <DropdownMenuItem onClick={() => handleEditClick(role)}>
+                          <Pencil className="h-3.5 w-3.5 mr-2" />
+                          Edit
+                        </DropdownMenuItem>
+                        {!isAdminRole(role.role) && (
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            disabled={role.user_count > 0}
+                            onClick={() => setDeletingRole(role)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" />
+                            {role.user_count > 0 ? "In use" : "Delete"}
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}
