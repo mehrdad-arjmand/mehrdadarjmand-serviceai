@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
@@ -35,6 +35,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
   const [sources, setSources] = useState<Source[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const { toast } = useToast();
 
   const {
@@ -83,11 +84,37 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
     currentFiltersRef.current = currentFilters;
   }, [currentFilters]);
 
+  // Filter options loaded from documents
   const [docTypes, setDocTypes] = useState<string[]>([]);
   const [sites, setSites] = useState<string[]>([]);
   const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
   const [equipmentMakes, setEquipmentMakes] = useState<string[]>([]);
   const [equipmentModels, setEquipmentModels] = useState<string[]>([]);
+
+  // Also load from dropdown_options table for consistency with Repository page
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Load from dropdown_options table (same as repository page)
+        const { data: dropdownData } = await supabase
+          .from('dropdown_options')
+          .select('category, value')
+          .order('value');
+
+        if (dropdownData) {
+          setDocTypes(dropdownData.filter(d => d.category === 'docType').map(d => d.value));
+          setSites(dropdownData.filter(d => d.category === 'site').map(d => d.value));
+          setEquipmentTypes(dropdownData.filter(d => d.category === 'equipmentType').map(d => d.value));
+          setEquipmentMakes(dropdownData.filter(d => d.category === 'equipmentMake').map(d => d.value));
+          setEquipmentModels(dropdownData.filter(d => d.category === 'equipmentModel').map(d => d.value));
+        }
+      } catch (error) {
+        console.error('Error fetching filter options:', error);
+      }
+    };
+
+    fetchFilterOptions();
+  }, [hasDocuments]);
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -113,47 +140,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
     };
   }, []);
 
-  useEffect(() => {
-    const fetchFilterOptions = async () => {
-      try {
-        const { data: documents } = await supabase
-          .from('documents')
-          .select('doc_type, site, equipment_make, equipment_model');
-
-        const { data: chunks } = await supabase
-          .from('chunks')
-          .select('equipment')
-          .not('equipment', 'is', null);
-
-        if (documents) {
-          setDocTypes([...new Set(documents.map(d => d.doc_type).filter(Boolean))] as string[]);
-          setSites([...new Set(documents.map(d => d.site).filter(Boolean))] as string[]);
-          setEquipmentMakes([...new Set(documents.map(d => d.equipment_make).filter(Boolean))] as string[]);
-          setEquipmentModels([...new Set(documents.map(d => d.equipment_model).filter(Boolean))] as string[]);
-        }
-
-        if (chunks) {
-          setEquipmentTypes([...new Set(chunks.map(c => c.equipment).filter(Boolean))] as string[]);
-        }
-      } catch (error) {
-        console.error('Error fetching filter options:', error);
-      }
-    };
-
-    if (hasDocuments) {
-      fetchFilterOptions();
-    }
-  }, [hasDocuments]);
-
   const stopListening = useCallback(() => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {}
+      try { recognitionRef.current.stop(); } catch (e) {}
       recognitionRef.current = null;
     }
     setIsDictating(false);
@@ -390,9 +383,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] min-h-[500px] overflow-hidden rounded-xl border border-border/30">
-      {/* Conversation Sidebar - full height */}
-      <div className="w-64 flex-shrink-0 hidden md:flex flex-col bg-sidebar-background border-r border-border/30">
+    <div className="flex h-full overflow-hidden rounded-xl border border-border/30">
+      {/* Conversation Sidebar */}
+      <div className={cn(
+        "flex-shrink-0 flex flex-col bg-sidebar-background border-r border-border/30 transition-all duration-200",
+        sidebarOpen ? "w-60" : "w-0 overflow-hidden border-r-0"
+      )}>
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -407,34 +403,53 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0 bg-background">
-        {/* No header text - open and clean */}
+        {/* Top bar with sidebar toggle */}
+        <div className="flex items-center px-4 py-2 border-b border-border/20 flex-shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            onClick={() => setSidebarOpen(v => !v)}
+            title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+          >
+            {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+          </Button>
+        </div>
 
         <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-          {/* Chat messages - no box, clean like ChatGPT */}
-          <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+          {/* Chat messages - clean, no boxes, ChatGPT/Gemini style */}
+          <div ref={chatContainerRef} className="flex-1 overflow-y-auto py-8 space-y-8">
             {chatHistory.length === 0 && !isQuerying ? (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 Start a conversation by asking a question
               </div>
             ) : (
-              <>
+              <div className="max-w-3xl mx-auto px-6 space-y-8">
                 {chatHistory.map((msg) => (
                   <div key={msg.id} className={cn("flex gap-3", msg.role === "user" ? "justify-end" : "justify-start")}>
-                    <div className={cn("max-w-[80%]", msg.role === "user" ? "text-right" : "text-left")}>
-                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">
+                    <div className={cn(
+                      "max-w-[80%]",
+                      msg.role === "user" ? "text-right" : "text-left w-full"
+                    )}>
+                      <p className="text-xs text-muted-foreground mb-2 font-medium">
                         {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
                       </p>
                       {msg.role === "assistant" ? (
-                        <div className="text-sm leading-relaxed text-foreground">
-                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-p:my-2 prose-p:leading-relaxed">
+                        <div className="text-sm leading-7 text-foreground">
+                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-2 prose-li:my-0.5">
                             <ReactMarkdown>{msg.content}</ReactMarkdown>
                           </div>
-                          <Button variant="ghost" size="sm" onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)} className="mt-1 h-6 px-2 text-xs text-muted-foreground hover:text-foreground">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
+                            className="mt-2 h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          >
                             {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
                           </Button>
                         </div>
                       ) : (
-                        <div className="bg-primary/8 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-relaxed inline-block">
+                        <div className="bg-muted/60 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-relaxed inline-block">
                           {msg.content}
                         </div>
                       )}
@@ -444,20 +459,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
                 {isQuerying && (
                   <div className="flex gap-3 justify-start">
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">Service AI</p>
+                      <p className="text-xs text-muted-foreground mb-2 font-medium">Service AI</p>
                       <div className="flex items-center gap-2 text-muted-foreground text-sm">
                         <Loader2 className="h-4 w-4 animate-spin" /><span>Thinking...</span>
                       </div>
                     </div>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
 
           {/* Sources */}
           {sources.length > 0 && (
-            <div className="px-8 pb-2 flex-shrink-0">
+            <div className="max-w-3xl mx-auto w-full px-6 pb-2 flex-shrink-0">
               <div className="space-y-1 max-h-24 overflow-y-auto">
                 {sources.map((source, idx) => (
                   <details key={idx} className="group">
@@ -475,37 +490,46 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
           )}
 
           {/* Input area */}
-          <div className="px-8 py-4 border-t border-border/30 flex-shrink-0">
+          <div className="py-4 border-t border-border/20 flex-shrink-0">
             {!canWrite ? (
               <div className="text-center py-4 text-muted-foreground text-sm">You have read-only access.</div>
             ) : (
-              <div className="max-w-3xl mx-auto">
-                <div className="relative rounded-2xl border border-border/50 bg-background shadow-sm focus-within:shadow-md transition-shadow overflow-hidden">
-                  <Textarea
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder={isConversationMode ? (conversationState === "listening" ? "Listening..." : conversationState === "processing" ? "Processing..." : conversationState === "speaking" ? "Speaking..." : "Voice active...") : "Ask a question..."}
-                    rows={2}
-                    disabled={isQuerying || isConversationMode}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) { e.preventDefault(); handleSend(); } }}
-                    className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-10 px-4 text-sm leading-relaxed"
-                  />
-                  {/* Active filter chips */}
+              <div className="max-w-3xl mx-auto px-6">
+                <div className="relative rounded-2xl border border-border/50 bg-background shadow-sm focus-within:shadow-md focus-within:border-border/80 transition-all overflow-hidden">
+                  {/* Active filter chips above textarea */}
                   {activeFilters.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 px-4 pb-2">
+                    <div className="flex flex-wrap gap-1.5 px-4 pt-3">
                       {activeFilters.map(([key, value]) => (
                         <Badge key={key} variant="secondary" className="text-xs gap-1 h-5 px-2 bg-primary/10 text-primary hover:bg-primary/20">
-                          {value}
+                          {value as string}
                           <X className="h-3 w-3 cursor-pointer" onClick={() => handleFilterChange(key as keyof ConversationFilters, "__all__")} />
                         </Badge>
                       ))}
                     </div>
                   )}
+                  <Textarea
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    placeholder={
+                      isConversationMode
+                        ? (conversationState === "listening" ? "Listening..." : conversationState === "processing" ? "Processing..." : conversationState === "speaking" ? "Speaking..." : "Voice active...")
+                        : "Ask a question..."
+                    }
+                    rows={3}
+                    disabled={isQuerying || isConversationMode}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) { e.preventDefault(); handleSend(); } }}
+                    className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-10 px-4 text-sm leading-relaxed"
+                  />
                   {/* Bottom toolbar */}
                   <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
                     <div className="flex items-center gap-1">
                       {hasDocuments && (
-                        <Button onClick={() => setFiltersModalOpen(true)} variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground gap-1.5 rounded-lg">
+                        <Button
+                          onClick={() => setFiltersModalOpen(true)}
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground gap-1.5 rounded-lg hover:text-foreground"
+                        >
                           <SlidersHorizontal className="h-3.5 w-3.5" />
                           Filters{activeFilters.length > 0 && ` (${activeFilters.length})`}
                         </Button>
@@ -513,24 +537,50 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
                     </div>
                     <div className="flex items-center gap-1">
                       {isConversationMode ? (
-                        <Button onClick={handleConversationToggle} variant="destructive" size="icon" className="h-8 w-8 rounded-lg"><Square className="h-4 w-4" /></Button>
+                        <Button onClick={handleConversationToggle} variant="destructive" size="icon" className="h-8 w-8 rounded-lg">
+                          <Square className="h-4 w-4" />
+                        </Button>
                       ) : (
                         <>
-                          <Button onClick={handleDictateToggle} disabled={isQuerying || !hasDocuments} variant={isDictating ? "destructive" : "ghost"} size="icon" className={cn("h-8 w-8 rounded-lg", isDictating && "animate-pulse")} title={isDictating ? "Stop" : "Dictate"}><Mic className="h-4 w-4" /></Button>
-                          {showConversationButton && <Button onClick={handleConversationToggle} disabled={isQuerying || !hasDocuments} variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><AudioWaveform className="h-4 w-4" /></Button>}
-                          {showSendButton && <Button onClick={handleSend} disabled={isQuerying || !hasDocuments || !hasText} size="icon" className="h-8 w-8 rounded-lg bg-foreground text-background hover:bg-foreground/90">{isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button>}
+                          <Button
+                            onClick={handleDictateToggle}
+                            disabled={isQuerying || !hasDocuments}
+                            variant={isDictating ? "destructive" : "ghost"}
+                            size="icon"
+                            className={cn("h-8 w-8 rounded-lg", isDictating && "animate-pulse")}
+                            title={isDictating ? "Stop" : "Dictate"}
+                          >
+                            <Mic className="h-4 w-4" />
+                          </Button>
+                          {showConversationButton && (
+                            <Button onClick={handleConversationToggle} disabled={isQuerying || !hasDocuments} variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
+                              <AudioWaveform className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {showSendButton && (
+                            <Button
+                              onClick={handleSend}
+                              disabled={isQuerying || !hasDocuments || !hasText}
+                              size="icon"
+                              className="h-8 w-8 rounded-lg bg-foreground text-background hover:bg-foreground/90"
+                            >
+                              {isQuerying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>
                   </div>
                 </div>
-                {!hasDocuments && <p className="text-xs text-muted-foreground text-center mt-2">Upload documents to start querying</p>}
+                {!hasDocuments && (
+                  <p className="text-xs text-muted-foreground text-center mt-2">Upload documents to start querying</p>
+                )}
               </div>
             )}
           </div>
         </div>
 
-        {/* Filters Modal */}
+        {/* Filters Modal - all 6 filters */}
         <Dialog open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
@@ -544,21 +594,44 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions }: Techn
                 { label: "Equipment Type", key: "equipmentType" as keyof ConversationFilters, options: equipmentTypes },
                 { label: "Equipment Make", key: "equipmentMake" as keyof ConversationFilters, options: equipmentMakes },
                 { label: "Equipment Model", key: "equipmentModel" as keyof ConversationFilters, options: equipmentModels },
+                { label: "Upload Date", key: "uploadDate" as keyof ConversationFilters, options: [] },
               ].map(({ label, key, options }) => (
                 <div key={key} className="space-y-1.5">
                   <Label className="text-xs">{label}</Label>
-                  <Select value={(currentFilters[key] as string) || "__all__"} onValueChange={(v) => handleFilterChange(key, v)} disabled={filtersLocked}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder={`All ${label.toLowerCase()}`} /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All</SelectItem>
-                      {options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  {key === "uploadDate" ? (
+                    <input
+                      type="date"
+                      value={(currentFilters[key] as string) || ""}
+                      onChange={(e) => handleFilterChange(key, e.target.value || undefined)}
+                      disabled={filtersLocked}
+                      className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+                    />
+                  ) : (
+                    <Select
+                      value={(currentFilters[key] as string) || "__all__"}
+                      onValueChange={(v) => handleFilterChange(key, v)}
+                      disabled={filtersLocked}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder={`All`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All</SelectItem>
+                        {options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               ))}
             </div>
             <DialogFooter>
-              <Button variant="ghost" size="sm" onClick={() => setCurrentFilters({ docType: "", uploadDate: undefined, site: "", equipmentType: "", equipmentMake: "", equipmentModel: "" })}>Reset</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setCurrentFilters({ docType: "", uploadDate: undefined, site: "", equipmentType: "", equipmentMake: "", equipmentModel: "" })}
+              >
+                Reset
+              </Button>
               <Button onClick={() => setFiltersModalOpen(false)}>Apply</Button>
             </DialogFooter>
           </DialogContent>
