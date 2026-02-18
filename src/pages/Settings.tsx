@@ -72,12 +72,12 @@ export default function Settings() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
-      <main className="px-6 lg:px-10 py-10">
+
+      <main className="px-6 lg:px-10 py-8">
         <Button
           variant="ghost"
           onClick={() => navigate("/")}
-          className="mb-6 gap-2"
+          className="mb-6 gap-2 -ml-2"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Home
