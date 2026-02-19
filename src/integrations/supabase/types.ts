@@ -435,24 +435,44 @@ export type Database = {
           user_id: string
         }[]
       }
-      match_chunks: {
-        Args: {
-          match_count?: number
-          match_threshold?: number
-          query_embedding: string
-        }
-        Returns: {
-          chunk_index: number
-          document_id: string
-          equipment: string
-          fault_code: string
-          filename: string
-          id: string
-          similarity: number
-          site: string
-          text: string
-        }[]
-      }
+      match_chunks:
+        | {
+            Args: {
+              match_count?: number
+              match_threshold?: number
+              query_embedding: string
+            }
+            Returns: {
+              chunk_index: number
+              document_id: string
+              equipment: string
+              fault_code: string
+              filename: string
+              id: string
+              similarity: number
+              site: string
+              text: string
+            }[]
+          }
+        | {
+            Args: {
+              match_count?: number
+              match_threshold?: number
+              p_user_id?: string
+              query_embedding: string
+            }
+            Returns: {
+              chunk_index: number
+              document_id: string
+              equipment: string
+              fault_code: string
+              filename: string
+              id: string
+              similarity: number
+              site: string
+              text: string
+            }[]
+          }
       update_role_permissions: {
         Args: {
           p_assistant_delete?: boolean
