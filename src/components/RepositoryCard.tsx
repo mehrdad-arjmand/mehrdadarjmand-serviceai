@@ -542,8 +542,16 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setVisibleCount(10); }}
               placeholder="Search documents by filters"
-              className="pl-10 h-11 rounded-full border-border bg-background"
+              className="pl-10 pr-10 h-11 rounded-full border-border bg-background"
             />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(""); setVisibleCount(10); }}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
           <button
             onClick={() => setFiltersOpen(!filtersOpen)}
@@ -595,10 +603,11 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
       {/* ── Documents List ── */}
       <div>
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">Documents</h2>
           <span className="text-sm text-muted-foreground">{filteredDocuments.length} result{filteredDocuments.length !== 1 ? 's' : ''}</span>
         </div>
+        <Separator className="mb-4" />
 
         <div className="divide-y divide-border">
           {visibleDocuments.length === 0 && (
