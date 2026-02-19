@@ -89,21 +89,23 @@ const InlineSelect = ({ label, value, onChange, options, placeholder = "All", al
     return (
       <div>
         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">{label}</p>
-        <div className="flex items-center gap-1 h-10 border border-border rounded-lg px-3 bg-background">
+        <div className="flex items-center h-10 border border-border rounded-lg bg-background overflow-hidden">
           <input
             ref={inputRef}
             value={newValue}
             onChange={e => setNewValue(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleConfirmAdd(); if (e.key === 'Escape') handleCancelAdd(); }}
             placeholder={`Add new ${label.toLowerCase()}`}
-            className="flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground/60"
+            className="flex-1 min-w-0 text-sm bg-transparent outline-none placeholder:text-muted-foreground/60 px-3"
           />
-          <button onClick={handleConfirmAdd} className="text-primary hover:text-primary/80 p-0.5">
-            <Check className="h-4 w-4" />
-          </button>
-          <button onClick={handleCancelAdd} className="text-muted-foreground hover:text-foreground p-0.5">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-0 border-l border-border flex-shrink-0">
+            <button onClick={handleConfirmAdd} className="text-primary hover:text-primary/80 px-2.5 h-10 flex items-center">
+              <Check className="h-3.5 w-3.5" />
+            </button>
+            <button onClick={handleCancelAdd} className="text-muted-foreground hover:text-foreground px-2.5 h-10 flex items-center border-l border-border">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -468,7 +470,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   };
 
   return (
-    <div className="max-w-3xl space-y-8 pb-12">
+    <div className="max-w-3xl mx-auto space-y-8 pb-12">
 
       {/* ── Upload Box ── */}
       {canWrite && (
@@ -611,18 +613,16 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               <div key={doc.id}>
                 {/* Row */}
                 <div
-                  className="py-5 flex items-start justify-between cursor-pointer hover:bg-muted/30 px-2 -mx-2 rounded-lg transition-colors"
+                  className="py-5 flex items-start justify-between cursor-pointer hover:bg-muted/30 px-2 -mx-2 rounded-lg transition-colors min-h-[72px]"
                   onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
                 >
                   <div className="flex-1 min-w-0 pr-4">
                     <p className="text-sm font-semibold text-foreground">{doc.fileName}</p>
-                    {tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {tags.map(tag => (
-                          <span key={tag} className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background">{tag}</span>
-                        ))}
-                      </div>
-                    )}
+                    <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
+                      {tags.map(tag => (
+                        <span key={tag} className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background">{tag}</span>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <StatusBadge doc={doc} />
@@ -701,30 +701,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
             <DialogTitle>Edit metadata</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-x-6 gap-y-5 py-2">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Document Type</p>
-              <InlineSelect label="Document Type" value={editDocType} onChange={setEditDocType} options={docTypeOptions} />
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Site</p>
-              <InlineSelect label="Site" value={editSite} onChange={setEditSite} options={siteOptions} />
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Equipment Type</p>
-              <InlineSelect label="Equipment Type" value={editEquipmentType} onChange={setEditEquipmentType} options={equipmentTypeOptions} />
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Make</p>
-              <InlineSelect label="Make" value={editEquipmentMake} onChange={setEditEquipmentMake} options={equipmentMakeOptions} />
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Model</p>
-              <InlineSelect label="Model" value={editEquipmentModel} onChange={setEditEquipmentModel} options={equipmentModelOptions} />
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Access Role</p>
-              <RoleSelect label="Access Role" selectedRoles={editSelectedRoles} availableRoles={availableRoles} onChange={setEditSelectedRoles} />
-            </div>
+            <InlineSelect label="Document Type" value={editDocType} onChange={setEditDocType} options={docTypeOptions} />
+            <InlineSelect label="Site" value={editSite} onChange={setEditSite} options={siteOptions} />
+            <InlineSelect label="Equipment Type" value={editEquipmentType} onChange={setEditEquipmentType} options={equipmentTypeOptions} />
+            <InlineSelect label="Make" value={editEquipmentMake} onChange={setEditEquipmentMake} options={equipmentMakeOptions} />
+            <InlineSelect label="Model" value={editEquipmentModel} onChange={setEditEquipmentModel} options={equipmentModelOptions} />
+            <RoleSelect label="Access Role" selectedRoles={editSelectedRoles} availableRoles={availableRoles} onChange={setEditSelectedRoles} />
           </div>
           <DialogFooter>
             <button onClick={() => setEditTarget(null)} className="px-5 py-2 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Cancel</button>
