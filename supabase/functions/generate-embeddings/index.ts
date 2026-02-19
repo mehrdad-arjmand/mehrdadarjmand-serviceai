@@ -238,7 +238,7 @@ Deno.serve(async (req) => {
     } catch {}
 
     return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ success: false, error: 'Embedding generation failed. Please try again.' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     )
   }
@@ -295,8 +295,9 @@ async function generateEmbeddings(texts: string[]): Promise<string[]> {
         }
 
         if (!response.ok) {
-          const error = await response.text()
-          throw new Error(`Failed to generate embedding: ${error}`)
+          const errorText = await response.text()
+          console.error(`Embedding API error (status ${response.status}):`, errorText)
+          throw new Error(`Embedding API returned status ${response.status}`)
         }
 
         const data = await response.json()
