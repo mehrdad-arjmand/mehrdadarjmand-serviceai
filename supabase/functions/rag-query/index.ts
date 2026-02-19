@@ -277,7 +277,8 @@ Deno.serve(async (req) => {
       {
         query_embedding: embeddingStr,
         match_threshold: 0.15, // Very low threshold
-        match_count: 50 // Get many chunks to ensure we find actual content
+        match_count: 50, // Get many chunks to ensure we find actual content
+        p_user_id: user.id // Enforce document-level access control within the function
       }
     )
 
