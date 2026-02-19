@@ -283,7 +283,10 @@ Deno.serve(async (req) => {
 
     if (searchError) {
       console.error('Search error:', searchError)
-      throw searchError
+      return new Response(
+        JSON.stringify({ error: 'Search failed. Please try again.' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     console.log(`Found ${chunks?.length || 0} semantic chunks`)
@@ -311,7 +314,10 @@ Deno.serve(async (req) => {
       
       if (filterError) {
         console.error('Filter error:', filterError)
-        throw filterError
+        return new Response(
+          JSON.stringify({ error: 'Filter query failed. Please try again.' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
       
       if (!matchingDocs || matchingDocs.length === 0) {
@@ -508,9 +514,8 @@ Please provide a clear, concise answer based on the actual procedural content in
     )
   } catch (error) {
     console.error('Error processing RAG query:', error)
-    const message = error instanceof Error ? error.message : 'Unknown error occurred'
     return new Response(
-      JSON.stringify({ error: message }),
+      JSON.stringify({ error: 'An error occurred processing your request. Please try again.' }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500 
