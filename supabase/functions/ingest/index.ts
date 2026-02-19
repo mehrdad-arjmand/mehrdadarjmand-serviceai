@@ -340,7 +340,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error('Error in ingest:', error)
     return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ success: false, error: 'Document processing failed. Please try again.' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     )
   }
