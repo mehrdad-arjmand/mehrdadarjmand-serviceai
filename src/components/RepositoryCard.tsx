@@ -461,28 +461,28 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   };
 
   const StatusBadge = ({ doc }: { doc: Document }) => {
-    if (doc.ingestionStatus === 'complete') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">Indexed</span>;
-    if (doc.ingestionStatus === 'failed') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200"><AlertCircle className="h-3 w-3" />Failed</span>;
-    if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200"><Loader2 className="h-3 w-3 animate-spin" />Processing</span>;
+    if (doc.ingestionStatus === 'complete') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
+    if (doc.ingestionStatus === 'failed') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(0 86% 97%)', color: 'hsl(0 72% 51%)', borderColor: 'hsl(0 72% 80%)' }}><AlertCircle className="h-3 w-3" />Failed</span>;
+    if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(38 92% 96%)', color: 'hsl(32 95% 44%)', borderColor: 'hsl(38 80% 75%)' }}><Loader2 className="h-3 w-3 animate-spin" />Processing</span>;
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
   };
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="max-w-3xl space-y-8 pb-12">
 
       {/* ── Upload Box ── */}
       {canWrite && (
-        <div className="border-2 border-dashed border-border/60 rounded-2xl bg-background">
+        <div className="border-2 border-dashed border-border rounded-2xl bg-background">
           {/* Drop zone */}
-          <div className="p-8 text-center">
+          <div className="py-12 px-8 text-center">
             <input type="file" id="file-upload" multiple accept=".pdf,.docx,.txt" className="hidden" onChange={e => setSelectedFiles(Array.from(e.target.files || []))} />
             <label htmlFor="file-upload" className="cursor-pointer">
-              <p className="text-sm font-medium text-foreground">Upload documents</p>
-              <p className="text-sm mt-1">
-                <span className="text-primary cursor-pointer">Drag &amp; drop files here or click to browse</span>
+              <p className="text-base font-semibold text-foreground">Upload documents</p>
+              <p className="text-sm mt-2">
+                <span className="text-primary cursor-pointer">Drag &amp; drop files here or <span className="underline">click to browse</span></span>
               </p>
               {selectedFiles.length > 0 && (
-                <p className="text-xs text-muted-foreground mt-2">{selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected</p>
+                <p className="text-xs text-muted-foreground mt-3">{selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected</p>
               )}
             </label>
           </div>
@@ -532,7 +532,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       )}
 
       {/* ── Search & Filters ── */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -540,7 +540,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setVisibleCount(10); }}
               placeholder="Search documents by filters"
-              className="pl-10 h-11 rounded-full border-border/60 bg-background"
+              className="pl-10 h-11 rounded-full border-border bg-background"
             />
           </div>
           <button
@@ -593,12 +593,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
       {/* ── Documents List ── */}
       <div>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-semibold text-foreground">Documents</h2>
           <span className="text-sm text-muted-foreground">{filteredDocuments.length} result{filteredDocuments.length !== 1 ? 's' : ''}</span>
         </div>
 
-        <div className="divide-y divide-border/60">
+        <div className="divide-y divide-border">
           {visibleDocuments.length === 0 && (
             <p className="py-12 text-center text-sm text-muted-foreground">No documents found.</p>
           )}
@@ -611,13 +611,13 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
               <div key={doc.id}>
                 {/* Row */}
                 <div
-                  className="py-4 flex items-start justify-between cursor-pointer hover:bg-muted/30 px-2 -mx-2 rounded-lg transition-colors"
+                  className="py-5 flex items-start justify-between cursor-pointer hover:bg-muted/30 px-2 -mx-2 rounded-lg transition-colors"
                   onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
                 >
                   <div className="flex-1 min-w-0 pr-4">
                     <p className="text-sm font-semibold text-foreground">{doc.fileName}</p>
                     {tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      <div className="flex flex-wrap gap-1.5 mt-2">
                         {tags.map(tag => (
                           <span key={tag} className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background">{tag}</span>
                         ))}
