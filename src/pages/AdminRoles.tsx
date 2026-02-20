@@ -94,7 +94,7 @@ const AdminRoles = () => {
           </TabsList>
 
           <TabsContent value="roles" className="mt-0">
-            <div className="max-w-4xl">
+            <div className="max-w-4xl mx-auto">
               <RolesPermissionsManager
                 roles={rolesManagement.roles}
                 isUpdating={rolesManagement.isUpdating}
@@ -106,7 +106,7 @@ const AdminRoles = () => {
           </TabsContent>
 
           <TabsContent value="users" className="mt-0">
-            <div className="max-w-4xl">
+            <div className="max-w-4xl mx-auto">
               <UsersRolesList
                 users={rolesManagement.users}
                 roles={rolesManagement.roles}
