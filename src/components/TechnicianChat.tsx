@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen, ArrowDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
@@ -76,6 +76,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const utteranceQueueRef = useRef<number>(0);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const conversationActiveRef = useRef(false);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentTranscriptRef = useRef<string>("");
@@ -112,11 +113,22 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     fetchFilterOptions();
   }, [hasDocuments]);
 
-  useEffect(() => {
+  const scrollToBottom = useCallback(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [chatHistory]);
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [chatHistory, scrollToBottom]);
+
+  const handleChatScroll = useCallback(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollDown(distanceFromBottom > 150);
+  }, []);
 
   useEffect(() => {
     const initVoice = () => {selectedVoiceRef.current = selectBestVoice();};
@@ -449,61 +461,75 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           overflow: 'hidden'
         }}>
 
-        {/* Messages — THE ONLY scrolling region. Input box is always below this. */}
-        <div
-          ref={chatContainerRef}
-          style={{ flex: 1, overflowY: 'auto', minHeight: 0 }} className="bg-popover">
+        {/* Messages wrapper with scroll-to-bottom */}
+        <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+          <div
+            ref={chatContainerRef}
+            onScroll={handleChatScroll}
+            style={{ height: '100%', overflowY: 'auto' }} className="bg-popover">
 
-          {chatHistory.length === 0 && !isQuerying ?
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              Start a conversation by asking a question
-            </div> :
+            {chatHistory.length === 0 && !isQuerying ?
+            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                Start a conversation by asking a question
+              </div> :
 
-          <div className="max-w-3xl mx-auto w-full pl-10 pr-8 py-8 space-y-8">
-              {chatHistory.map((msg) =>
-            <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                  <div className={cn(msg.role === "user" ? "max-w-[75%] text-left" : "w-full text-left")}>
-                    <p className="text-xs text-muted-foreground mb-1.5 font-medium">
-                      {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
-                    </p>
-                    {msg.role === "assistant" ?
-                <div className="text-sm text-foreground">
-                        <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7">
-                          <MarkdownWithCitations
-                            content={msg.content}
-                            sources={msg.sources}
-                            onOpenDocument={(docId, text, fname, chunkIdx) => setDocumentViewer({ open: true, documentId: docId, highlightText: text, filename: fname, chunkIndex: chunkIdx })}
-                          />
+            <div className="max-w-3xl mx-auto w-full pl-10 pr-8 py-8 space-y-8">
+                {chatHistory.map((msg) =>
+              <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
+                    <div className={cn(msg.role === "user" ? "max-w-[75%] text-left" : "w-full text-left")}>
+                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">
+                        {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
+                      </p>
+                      {msg.role === "assistant" ?
+                  <div className="text-sm text-foreground">
+                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7">
+                            <MarkdownWithCitations
+                              content={msg.content}
+                              sources={msg.sources}
+                              onOpenDocument={(docId, text, fname, chunkIdx) => setDocumentViewer({ open: true, documentId: docId, highlightText: text, filename: fname, chunkIndex: chunkIdx })}
+                            />
+                          </div>
+                          <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
+                      className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
+
+                            {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
+                          </Button>
+                        </div> :
+
+                  <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
+                          {msg.content}
                         </div>
-                        <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
-                    className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
-
-                          {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
-                        </Button>
-                      </div> :
-
-                <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
-                        {msg.content}
-                      </div>
-                }
-                  </div>
-                </div>
-            )}
-              {isQuerying &&
-            <div className="flex justify-start">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1.5 font-medium">Service AI</p>
-                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                      <Loader2 className="h-4 w-4 animate-spin" /><span>Thinking...</span>
+                  }
                     </div>
                   </div>
-                </div>
+              )}
+                {isQuerying &&
+              <div className="flex justify-start">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">Service AI</p>
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                        <Loader2 className="h-4 w-4 animate-spin" /><span>Thinking...</span>
+                      </div>
+                    </div>
+                  </div>
+              }
+              </div>
             }
-            </div>
-          }
+          </div>
+
+          {/* Scroll to bottom button */}
+          {showScrollDown && (
+            <button
+              onClick={scrollToBottom}
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 h-8 w-8 rounded-full bg-background border border-border shadow-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:shadow-lg transition-all"
+              title="Scroll to latest"
+            >
+              <ArrowDown className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {/* Document Viewer Modal */}
