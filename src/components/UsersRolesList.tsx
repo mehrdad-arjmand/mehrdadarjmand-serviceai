@@ -62,9 +62,9 @@ export const UsersRolesList = ({
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[300px]">User</TableHead>
-              <TableHead className="w-[180px]">Role</TableHead>
-              <TableHead>Assigned</TableHead>
+              <TableHead className="w-1/3">User</TableHead>
+              <TableHead className="w-1/3">Role</TableHead>
+              <TableHead className="w-1/3">Assigned</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

@@ -94,22 +94,26 @@ const AdminRoles = () => {
           </TabsList>
 
           <TabsContent value="roles" className="mt-0">
-            <RolesPermissionsManager
-              roles={rolesManagement.roles}
-              isUpdating={rolesManagement.isUpdating}
-              onUpdateRole={rolesManagement.updateRolePermissions}
-              onCreateRole={rolesManagement.createRole}
-              onDeleteRole={rolesManagement.deleteRole}
-            />
+            <div className="max-w-4xl">
+              <RolesPermissionsManager
+                roles={rolesManagement.roles}
+                isUpdating={rolesManagement.isUpdating}
+                onUpdateRole={rolesManagement.updateRolePermissions}
+                onCreateRole={rolesManagement.createRole}
+                onDeleteRole={rolesManagement.deleteRole}
+              />
+            </div>
           </TabsContent>
 
           <TabsContent value="users" className="mt-0">
-            <UsersRolesList
-              users={rolesManagement.users}
-              roles={rolesManagement.roles}
-              isUpdating={rolesManagement.isUpdating}
-              onAssignRole={rolesManagement.assignUserRole}
-            />
+            <div className="max-w-4xl">
+              <UsersRolesList
+                users={rolesManagement.users}
+                roles={rolesManagement.roles}
+                isUpdating={rolesManagement.isUpdating}
+                onAssignRole={rolesManagement.assignUserRole}
+              />
+            </div>
           </TabsContent>
         </Tabs>
       </main>
