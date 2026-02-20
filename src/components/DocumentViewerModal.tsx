@@ -9,6 +9,7 @@ interface DocumentViewerModalProps {
   documentId: string;
   highlightText: string;
   filename: string;
+  chunkIndex: number;
 }
 
 export function DocumentViewerModal({
@@ -17,6 +18,7 @@ export function DocumentViewerModal({
   documentId,
   highlightText,
   filename,
+  chunkIndex,
 }: DocumentViewerModalProps) {
   const [chunks, setChunks] = useState<{ text: string; chunk_index: number }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -50,9 +52,8 @@ export function DocumentViewerModal({
     }
   }, [loading, chunks]);
 
-  // Find which chunk best matches the highlight text (use first 100 chars for matching)
-  const matchSnippet = highlightText.slice(0, 100);
-  const highlightChunkIdx = chunks.findIndex((c) => c.text.includes(matchSnippet));
+  // Match by chunk_index instead of text content to avoid off-by-one errors
+  const highlightChunkIdx = chunks.findIndex((c) => c.chunk_index === chunkIndex);
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
