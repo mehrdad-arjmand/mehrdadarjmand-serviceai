@@ -32,7 +32,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
   const [question, setQuestion] = useState("");
-  const [documentViewer, setDocumentViewer] = useState<{ open: boolean; documentId: string; highlightText: string; filename: string }>({ open: false, documentId: "", highlightText: "", filename: "" });
+  const [documentViewer, setDocumentViewer] = useState<{ open: boolean; documentId: string; highlightText: string; filename: string; chunkIndex: number }>({ open: false, documentId: "", highlightText: "", filename: "", chunkIndex: 0 });
   const [isQuerying, setIsQuerying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -472,7 +472,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                           <MarkdownWithCitations
                             content={msg.content}
                             sources={msg.sources}
-                            onOpenDocument={(docId, text, fname) => setDocumentViewer({ open: true, documentId: docId, highlightText: text, filename: fname })}
+                            onOpenDocument={(docId, text, fname, chunkIdx) => setDocumentViewer({ open: true, documentId: docId, highlightText: text, filename: fname, chunkIndex: chunkIdx })}
                           />
                         </div>
                         <Button
@@ -513,6 +513,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           documentId={documentViewer.documentId}
           highlightText={documentViewer.highlightText}
           filename={documentViewer.filename}
+          chunkIndex={documentViewer.chunkIndex}
         />
 
         {/* Input area — always sticks to bottom */}
