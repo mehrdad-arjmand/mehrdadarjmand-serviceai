@@ -376,13 +376,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           {/* Repository / Assistant tabs — px-4 (16px) to match New Chat + items */}
           {showTabBar && onTabChange &&
         <div className="flex-shrink-0 pl-4 pr-4 pt-4 pb-3">
-              <div className="inline-flex items-center gap-1 bg-muted/60 p-1 rounded-xl">
+              <div className="inline-flex items-center gap-1 bg-border/60 p-1 rounded-xl w-full">
                 <button
               onClick={() => onTabChange("repository")}
               className={cn(
-                "rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
+                "flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
                 currentTab === "repository" ?
-                "bg-background shadow-sm text-foreground" :
+                "bg-card shadow-sm text-foreground" :
                 "text-muted-foreground hover:text-foreground"
               )}>
 
@@ -391,9 +391,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 <button
               onClick={() => onTabChange("assistant")}
               className={cn(
-                "rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
+                "flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
                 currentTab === "assistant" ?
-                "bg-background shadow-sm text-foreground" :
+                "bg-card shadow-sm text-foreground" :
                 "text-muted-foreground hover:text-foreground"
               )}>
 
@@ -462,7 +462,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           <div className="max-w-3xl mx-auto w-full pl-10 pr-8 py-8 space-y-8">
               {chatHistory.map((msg) =>
             <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                  <div className={cn(msg.role === "user" ? "max-w-[75%] text-right" : "w-full text-left")}>
+                  <div className={cn(msg.role === "user" ? "max-w-[75%] text-left" : "w-full text-left")}>
                     <p className="text-xs text-muted-foreground mb-1.5 font-medium">
                       {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
                     </p>
@@ -517,7 +517,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         />
 
         {/* Input area — always sticks to bottom */}
-        <div className="py-5 flex-shrink-0 bg-background">
+        <div className="py-5 flex-shrink-0 bg-popover">
           {!canWrite ?
           <div className="text-center py-4 text-muted-foreground text-sm">You have read-only access.</div> :
 
