@@ -25,10 +25,10 @@ export const UserMenu = () => {
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent/80 transition-all duration-200"
+          className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent/80 transition-all duration-200 [&_svg]:size-6"
           title={user?.email}
         >
-          <User className="h-10 w-10" />
+          <User />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
