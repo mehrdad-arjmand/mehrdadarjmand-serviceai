@@ -1,12 +1,21 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
+export interface ChatSource {
+  filename: string;
+  chunkIndex: number;
+  text: string;
+  similarity: number;
+  documentId: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   inputMode?: "text" | "dictation" | "voice";
   timestamp: Date;
+  sources?: ChatSource[];
 }
 
 export interface ConversationFilters {
