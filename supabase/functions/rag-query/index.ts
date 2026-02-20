@@ -448,7 +448,8 @@ Please provide a clear, concise answer based on the actual procedural content in
       filename: chunk.filename || 'Unknown',
       chunkIndex: chunk.chunk_index,
       text: chunk.text,
-      similarity: chunk.similarity
+      similarity: chunk.similarity,
+      documentId: chunk.document_id || ''
     }))
 
     // Log to query_logs and trigger background retrieval evaluation
