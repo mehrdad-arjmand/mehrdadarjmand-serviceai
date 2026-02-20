@@ -28,7 +28,7 @@ export const UserMenu = () => {
           className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent/80 transition-all duration-200"
           title={user?.email}
         >
-          <User className="h-7 w-7" />
+          <User className="h-10 w-10" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
