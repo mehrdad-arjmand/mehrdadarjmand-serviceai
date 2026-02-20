@@ -25,10 +25,10 @@ export const UserMenu = () => {
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent/80 transition-all duration-200"
+          className="h-10 w-10 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent/80 transition-all duration-200"
           title={user?.email}
         >
-          <User className="h-4 w-4" />
+          <User className="h-5 w-5" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -36,17 +36,9 @@ export const UserMenu = () => {
         className="w-56 bg-popover border border-border shadow-lg z-50"
       >
         <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">Account</p>
-            <p className="text-xs leading-none text-muted-foreground truncate">
-              {user?.email}
-            </p>
-            {permissions.role && (
-              <p className="text-xs leading-none text-muted-foreground capitalize">
-                Role: {permissions.role}
-              </p>
-            )}
-          </div>
+          <p className="text-sm font-medium leading-none truncate">
+            {user?.email}
+          </p>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
@@ -65,7 +57,7 @@ export const UserMenu = () => {
               className="cursor-pointer"
             >
               <Shield className="mr-2 h-4 w-4" />
-              <span>Manage Roles & Permissions</span>
+              <span>Roles & Permissions</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => navigate('/admin/analytics')}

@@ -82,7 +82,7 @@ const Index = () => {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }} className="bg-background">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }} className="bg-popover">
       <Header />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>

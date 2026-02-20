@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, User, Lock, Mail } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -18,7 +17,6 @@ export default function Settings() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
@@ -61,7 +59,6 @@ export default function Settings() {
         title: "Password changed",
         description: "Your password has been successfully updated.",
       });
-      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     }
@@ -80,10 +77,10 @@ export default function Settings() {
           className="mb-6 gap-2 -ml-2"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Home
+          Back
         </Button>
 
-        <div className="max-w-2xl space-y-6">
+        <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Account Information */}
           <Card>
             <CardHeader>
@@ -126,8 +123,6 @@ export default function Settings() {
               )}
             </CardContent>
           </Card>
-
-          <Separator />
 
           {/* Change Password */}
           <Card>
