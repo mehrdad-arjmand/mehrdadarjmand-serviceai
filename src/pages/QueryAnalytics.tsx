@@ -2,9 +2,9 @@ import { Header } from "@/components/Header";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History } from "lucide-react";
+import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History, Copy, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -73,6 +73,28 @@ interface EvalRun {
   notes: string | null;
 }
 
+const SQL_REFERENCE = `-- Latency percentiles
+SELECT
+  COUNT(*) AS sample_size,
+  PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY execution_time_ms) AS p50,
+  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY execution_time_ms) AS p95,
+  PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY execution_time_ms) AS p99,
+  AVG(execution_time_ms)::int AS avg_ms,
+  MIN(execution_time_ms) AS min_ms,
+  MAX(execution_time_ms) AS max_ms
+FROM query_logs;
+
+-- Retrieval quality (evaluated queries only)
+SELECT
+  COUNT(*) AS evaluated_queries,
+  AVG(precision_at_k) AS avg_precision,
+  AVG(recall_at_k) AS avg_recall,
+  AVG(hit_rate_at_k) AS avg_hit_rate,
+  AVG(CASE WHEN first_relevant_rank IS NOT NULL
+    THEN 1.0 / first_relevant_rank ELSE 0 END) AS mrr
+FROM query_logs
+WHERE evaluated_at IS NOT NULL;`;
+
 const QueryAnalytics = () => {
   const navigate = useNavigate();
   const permissions = usePermissions();
@@ -83,6 +105,7 @@ const QueryAnalytics = () => {
   const [retrievalEval, setRetrievalEval] = useState<RetrievalEvalResult | null>(null);
   const [evalRuns, setEvalRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
+  const [sqlCopied, setSqlCopied] = useState(false);
 
   const callEvalFunction = async (action: string, params?: Record<string, string>) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -115,6 +138,13 @@ const QueryAnalytics = () => {
       setLoading(null);
     }
   };
+
+  // Auto-load analytics on mount
+  useEffect(() => {
+    if (isAdmin) {
+      fetchAnalytics();
+    }
+  }, [isAdmin]);
 
   const exportCSV = async () => {
     setLoading("export");
@@ -185,6 +215,13 @@ const QueryAnalytics = () => {
     }
   };
 
+  const handleCopySQL = async () => {
+    await navigator.clipboard.writeText(SQL_REFERENCE);
+    setSqlCopied(true);
+    toast.success("SQL copied to clipboard");
+    setTimeout(() => setSqlCopied(false), 2000);
+  };
+
   if (permissions.isLoading) {
     return (
       <div className="min-h-screen bg-background">
@@ -226,29 +263,35 @@ const QueryAnalytics = () => {
 
         {/* Action buttons */}
         <div className="flex flex-wrap gap-3 mb-8">
-          <Button onClick={fetchAnalytics} disabled={loading !== null}>
-            {loading === "analytics" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BarChart3 className="h-4 w-4 mr-2" />}
-            Load Analytics
-          </Button>
           <Button onClick={exportCSV} variant="outline" disabled={loading !== null}>
             {loading === "export" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
             Export CSV
           </Button>
-          <Button onClick={runEval} variant="outline" disabled={loading !== null}>
-            {loading === "eval" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+          <Button onClick={handleCopySQL} variant="outline" disabled={loading !== null}>
+            {sqlCopied ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
+            {sqlCopied ? "Copied!" : "SQL Reference Queries"}
+          </Button>
+          <Button onClick={runEval} variant="outline" disabled className="opacity-50">
+            <Play className="h-4 w-4 mr-2" />
             Ground-Truth Eval
           </Button>
-          <Button onClick={runRetrievalEval} variant="outline" disabled={loading !== null}>
-            {loading === "retrieval-eval" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Target className="h-4 w-4 mr-2" />}
+          <Button onClick={runRetrievalEval} variant="outline" disabled className="opacity-50">
+            <Target className="h-4 w-4 mr-2" />
             LLM Retrieval Eval
           </Button>
-          <Button onClick={fetchEvalRuns} variant="outline" disabled={loading !== null}>
-            {loading === "eval-runs" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <History className="h-4 w-4 mr-2" />}
+          <Button onClick={fetchEvalRuns} variant="outline" disabled className="opacity-50">
+            <History className="h-4 w-4 mr-2" />
             Eval History
           </Button>
         </div>
 
         {/* Analytics cards */}
+        {loading === "analytics" && !analytics && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
         {analytics && (
           <div className={`grid gap-6 mb-8 ${analytics.retrieval_eval ? 'md:grid-cols-2 lg:grid-cols-4' : 'md:grid-cols-3'}`}>
             <Card>
@@ -462,27 +505,7 @@ const QueryAnalytics = () => {
             <CardDescription>Run these manually to recompute metrics</CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="bg-muted/50 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap text-foreground">{`-- Latency percentiles
-SELECT
-  COUNT(*) AS sample_size,
-  PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY execution_time_ms) AS p50,
-  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY execution_time_ms) AS p95,
-  PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY execution_time_ms) AS p99,
-  AVG(execution_time_ms)::int AS avg_ms,
-  MIN(execution_time_ms) AS min_ms,
-  MAX(execution_time_ms) AS max_ms
-FROM query_logs;
-
--- Retrieval quality (evaluated queries only)
-SELECT
-  COUNT(*) AS evaluated_queries,
-  AVG(precision_at_k) AS avg_precision,
-  AVG(recall_at_k) AS avg_recall,
-  AVG(hit_rate_at_k) AS avg_hit_rate,
-  AVG(CASE WHEN first_relevant_rank IS NOT NULL
-    THEN 1.0 / first_relevant_rank ELSE 0 END) AS mrr
-FROM query_logs
-WHERE evaluated_at IS NOT NULL;`}</pre>
+            <pre className="bg-muted/50 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap text-foreground">{SQL_REFERENCE}</pre>
           </CardContent>
         </Card>
       </main>

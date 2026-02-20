@@ -170,8 +170,8 @@ export const RolesPermissionsManager = ({
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-[140px]">Role</TableHead>
                 <TableHead className="w-[180px]">Description</TableHead>
-                <TableHead className="text-center">Repository<br /><span className="text-xs font-normal">R / W / D</span></TableHead>
-                <TableHead className="text-center">Assistant<br /><span className="text-xs font-normal">R / W / D</span></TableHead>
+                <TableHead className="text-center">Repository<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
+                <TableHead className="text-center">Assistant<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
                 <TableHead className="text-center w-[80px]">Users</TableHead>
                 <TableHead className="w-[100px]"></TableHead>
               </TableRow>
