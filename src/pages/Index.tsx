@@ -96,11 +96,11 @@ const Index = () => {
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
                 {canSeeRepository && canSeeAssistant &&
               <div className="pl-4 pt-4 bg-popover">
-                    <TabsList className="bg-muted/60 p-1 rounded-xl">
-                      <TabsTrigger value="repository" className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
+                    <TabsList className="bg-border/60 p-1 rounded-xl">
+                      <TabsTrigger value="repository" className="rounded-lg px-6 py-1.5 text-sm font-medium data-[state=active]:bg-card data-[state=active]:shadow-sm transition-all duration-200">
                         Repository
                       </TabsTrigger>
-                      <TabsTrigger value="assistant" className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
+                      <TabsTrigger value="assistant" className="rounded-lg px-6 py-1.5 text-sm font-medium data-[state=active]:bg-card data-[state=active]:shadow-sm transition-all duration-200">
                         Assistant
                       </TabsTrigger>
                     </TabsList>
