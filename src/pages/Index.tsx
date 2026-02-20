@@ -15,13 +15,13 @@ const Index = () => {
   const permissions = usePermissions();
 
   const fetchStats = async () => {
-    const { count: docsCount } = await supabase
-      .from('documents')
-      .select('*', { count: 'exact', head: true });
+    const { count: docsCount } = await supabase.
+    from('documents').
+    select('*', { count: 'exact', head: true });
 
-    const { count: chunksCount } = await supabase
-      .from('chunks')
-      .select('*', { count: 'exact', head: true });
+    const { count: chunksCount } = await supabase.
+    from('chunks').
+    select('*', { count: 'exact', head: true });
 
     setHasDocuments((docsCount || 0) > 0);
     setChunksCount(chunksCount || 0);
@@ -30,11 +30,11 @@ const Index = () => {
   useEffect(() => {
     fetchStats();
 
-    const docsChannel = supabase
-      .channel('docs-stats')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchStats)
-      .subscribe();
+    const docsChannel = supabase.
+    channel('docs-stats').
+    on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats).
+    on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchStats).
+    subscribe();
 
     return () => {
       supabase.removeChannel(docsChannel);
@@ -51,8 +51,8 @@ const Index = () => {
             <span>Loading permissions...</span>
           </div>
         </main>
-      </div>
-    );
+      </div>);
+
   }
 
   const canSeeRepository = permissions.repository.read;
@@ -70,15 +70,15 @@ const Index = () => {
             <p className="text-muted-foreground">
               Your account does not have access to any features. Please contact an administrator.
             </p>
-            {permissions.role && (
-              <p className="text-sm text-muted-foreground mt-4">
+            {permissions.role &&
+            <p className="text-sm text-muted-foreground mt-4">
                 Current role: <span className="font-medium capitalize">{permissions.role}</span>
               </p>
-            )}
+            }
           </div>
         </main>
-      </div>
-    );
+      </div>);
+
   }
 
   return (
@@ -87,15 +87,15 @@ const Index = () => {
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
         <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0" style={{ minHeight: 0 }}>
-          {canSeeRepository && (
-            <TabsContent
-              value="repository"
-              className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
-              style={{ minHeight: 0, overflow: 'hidden' }}
-            >
+          {canSeeRepository &&
+          <TabsContent
+            value="repository"
+            className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
+            style={{ minHeight: 0, overflow: 'hidden' }}>
+
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-                {canSeeRepository && canSeeAssistant && (
-                  <div className="pl-4 pt-4">
+                {canSeeRepository && canSeeAssistant &&
+              <div className="pl-4 pt-4 bg-popover">
                     <TabsList className="bg-muted/60 p-1 rounded-xl">
                       <TabsTrigger value="repository" className="rounded-lg px-4 py-1.5 text-sm font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200">
                         Repository
@@ -105,39 +105,39 @@ const Index = () => {
                       </TabsTrigger>
                     </TabsList>
                   </div>
-                )}
-                <main className="px-4 py-6">
+              }
+                <main className="px-4 py-6 bg-popover">
                   <RepositoryCard
-                    onDocumentSelect={setSelectedDocumentId}
-                    permissions={permissions.repository}
-                  />
+                  onDocumentSelect={setSelectedDocumentId}
+                  permissions={permissions.repository} />
+
                 </main>
               </div>
             </TabsContent>
-          )}
+          }
 
-          {canSeeAssistant && (
-            <TabsContent
-              value="assistant"
-              className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
-              style={{ overflow: 'hidden', minHeight: 0 }}
-            >
+          {canSeeAssistant &&
+          <TabsContent
+            value="assistant"
+            className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
+            style={{ overflow: 'hidden', minHeight: 0 }}>
+
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
                 <TechnicianChat
-                  hasDocuments={hasDocuments}
-                  chunksCount={chunksCount}
-                  permissions={permissions.assistant}
-                  showTabBar={canSeeRepository && canSeeAssistant}
-                  currentTab={currentTab}
-                  onTabChange={setActiveTab}
-                />
+                hasDocuments={hasDocuments}
+                chunksCount={chunksCount}
+                permissions={permissions.assistant}
+                showTabBar={canSeeRepository && canSeeAssistant}
+                currentTab={currentTab}
+                onTabChange={setActiveTab} />
+
               </div>
             </TabsContent>
-          )}
+          }
         </Tabs>
       </div>
-    </div>
-  );
+    </div>);
+
 };
 
 export default Index;
