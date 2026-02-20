@@ -6,7 +6,7 @@ import type { ChatSource } from "@/hooks/useChatHistory";
 interface MarkdownWithCitationsProps {
   content: string;
   sources?: ChatSource[];
-  onOpenDocument: (documentId: string, highlightText: string, filename: string) => void;
+  onOpenDocument: (documentId: string, highlightText: string, filename: string, chunkIndex: number) => void;
 }
 
 /** Match patterns like (Source 7), (Source 7, Source 13), or Source 7 standalone */
@@ -39,6 +39,7 @@ function replaceCitations(
             sourceText={src.text}
             filename={src.filename}
             documentId={src.documentId}
+            chunkIndex={src.chunkIndex}
             onOpenDocument={onOpenDocument}
           />
         );

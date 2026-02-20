@@ -5,7 +5,8 @@ interface CitationCapsuleProps {
   sourceText: string;
   filename: string;
   documentId: string;
-  onOpenDocument: (documentId: string, highlightText: string, filename: string) => void;
+  chunkIndex: number;
+  onOpenDocument: (documentId: string, highlightText: string, filename: string, chunkIndex: number) => void;
 }
 
 export function CitationCapsule({
@@ -13,6 +14,7 @@ export function CitationCapsule({
   sourceText,
   filename,
   documentId,
+  chunkIndex,
   onOpenDocument,
 }: CitationCapsuleProps) {
   return (
@@ -23,7 +25,7 @@ export function CitationCapsule({
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            onOpenDocument(documentId, sourceText, filename);
+            onOpenDocument(documentId, sourceText, filename, chunkIndex);
           }}
           className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-full bg-primary/15 text-primary text-[10px] font-bold cursor-pointer hover:bg-primary/25 transition-colors align-super mx-[2px] leading-none"
         >
