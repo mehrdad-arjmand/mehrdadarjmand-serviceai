@@ -52,8 +52,8 @@ export function DocumentViewerModal({
     }
   }, [loading, chunks]);
 
-  // Match by chunk_index instead of text content to avoid off-by-one errors
-  const highlightChunkIdx = chunks.findIndex((c) => c.chunk_index === chunkIndex);
+  // Match by chunk_index; -1 means no highlight (full document view)
+  const highlightChunkIdx = chunkIndex >= 0 ? chunks.findIndex((c) => c.chunk_index === chunkIndex) : -1;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>

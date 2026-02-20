@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { DocumentViewerModal } from "@/components/DocumentViewerModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -679,29 +680,17 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
         )}
       </div>
 
-      {/* ── View Modal ── */}
-      <Dialog open={!!viewDoc} onOpenChange={open => !open && setViewDoc(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Document preview</DialogTitle>
-          </DialogHeader>
-          {viewDoc && (
-            <div className="space-y-4">
-              <p className="text-sm font-semibold text-foreground">{viewDoc.fileName}</p>
-              <ScrollArea className="h-64 rounded-xl border border-border bg-muted/30 p-4">
-                <pre className="text-xs text-foreground/80 whitespace-pre-wrap font-mono leading-relaxed">
-                  {viewDoc.extractedText.slice(0, 2000) || "No preview available."}
-                  {viewDoc.extractedText.length > 2000 ? "\n\n[Preview truncated to first 2000 characters]" : ""}
-                </pre>
-              </ScrollArea>
-              {viewDoc.pageCount && <p className="text-xs text-muted-foreground">Tagged metadata: {getMetaTags(viewDoc).join(', ') || 'None'}{viewDoc.allowedRoles.includes('all') ? ', All Roles' : `, ${formatRoles(viewDoc.allowedRoles)}`}.</p>}
-            </div>
-          )}
-          <DialogFooter>
-            <button onClick={() => setViewDoc(null)} className="px-5 py-2 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium">Close</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ── View Modal (uses same style as DocumentViewerModal) ── */}
+      {viewDoc && (
+        <DocumentViewerModal
+          open={!!viewDoc}
+          onClose={() => setViewDoc(null)}
+          documentId={viewDoc.id}
+          highlightText=""
+          filename={viewDoc.fileName}
+          chunkIndex={-1}
+        />
+      )}
 
       {/* ── Edit Modal ── */}
       <Dialog open={!!editTarget} onOpenChange={open => !open && setEditTarget(null)}>
