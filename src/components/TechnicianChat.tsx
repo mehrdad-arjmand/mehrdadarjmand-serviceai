@@ -5,9 +5,10 @@ import { Label } from "@/components/ui/label";
 import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import ReactMarkdown from "react-markdown";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
-import { useChatHistory, ChatMessage, ConversationFilters } from "@/hooks/useChatHistory";
+import { useChatHistory, ChatMessage, ConversationFilters, ChatSource } from "@/hooks/useChatHistory";
+import { MarkdownWithCitations } from "@/components/MarkdownWithCitations";
+import { DocumentViewerModal } from "@/components/DocumentViewerModal";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -25,18 +26,13 @@ interface TechnicianChatProps {
   onTabChange?: (tab: string) => void;
 }
 
-interface Source {
-  filename: string;
-  chunkIndex: number;
-  text: string;
-  similarity: number;
-}
+// Source type now imported as ChatSource from useChatHistory
 
 export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTabBar, currentTab, onTabChange }: TechnicianChatProps) => {
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
   const [question, setQuestion] = useState("");
-  const [sources, setSources] = useState<Source[]>([]);
+  const [documentViewer, setDocumentViewer] = useState<{ open: boolean; documentId: string; highlightText: string; filename: string }>({ open: false, documentId: "", highlightText: "", filename: "" });
   const [isQuerying, setIsQuerying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -242,16 +238,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const userMessage: ChatMessage = { id: `user-${Date.now()}`, role: "user", content: text.trim(), inputMode: "voice", timestamp: new Date() };
     addMessage(userMessage);
     setIsQuerying(true);
-    setSources([]);
+    
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true }
       });
       if (error) throw error;
-      const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, inputMode: "voice", timestamp: new Date() };
+      const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, inputMode: "voice", timestamp: new Date(), sources: data.sources || [] };
       addMessage(assistantMessage);
-      setSources(data.sources || []);
       if (data.answer && conversationActiveRef.current) {
         setConversationState("speaking");
         speakText(data.answer, () => {
@@ -277,17 +272,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     addMessage(userMessage);
     setQuestion("");
     setIsQuerying(true);
-    setSources([]);
+    
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false }
       });
       if (error) throw error;
-      const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, timestamp: new Date() };
+      const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, timestamp: new Date(), sources: data.sources || [] };
       addMessage(assistantMessage);
-      setSources(data.sources || []);
-      toast({ title: "Answer generated", description: `Found ${data.sources?.length || 0} relevant sources.` });
     } catch (error: any) {
       console.error("Error querying assistant:", error);
       toast({ title: "Error querying assistant", description: error.message || "An unexpected error occurred.", variant: "destructive" });
@@ -476,7 +469,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                     {msg.role === "assistant" ?
                 <div className="text-sm text-foreground">
                         <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          <MarkdownWithCitations
+                            content={msg.content}
+                            sources={msg.sources}
+                            onOpenDocument={(docId, text, fname) => setDocumentViewer({ open: true, documentId: docId, highlightText: text, filename: fname })}
+                          />
                         </div>
                         <Button
                     variant="ghost"
@@ -509,24 +506,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           }
         </div>
 
-        {/* Sources — above input, never scrolls page */}
-        {sources.length > 0 &&
-        <div className="max-w-3xl mx-auto w-full pl-10 pr-8 pb-2 flex-shrink-0">
-            <div className="space-y-1 max-h-24 overflow-y-auto">
-              {sources.map((source, idx) =>
-            <details key={idx} className="group">
-                  <summary className="cursor-pointer list-none">
-                    <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                      <span className="font-medium">[{idx + 1}] {source.filename}</span>
-                      <span>· {(source.similarity * 100).toFixed(0)}%</span>
-                    </div>
-                  </summary>
-                  <div className="ml-4 p-2 bg-muted/30 rounded text-xs text-muted-foreground max-h-16 overflow-y-auto mb-1">{source.text}</div>
-                </details>
-            )}
-            </div>
-          </div>
-        }
+        {/* Document Viewer Modal */}
+        <DocumentViewerModal
+          open={documentViewer.open}
+          onClose={() => setDocumentViewer(prev => ({ ...prev, open: false }))}
+          documentId={documentViewer.documentId}
+          highlightText={documentViewer.highlightText}
+          filename={documentViewer.filename}
+        />
 
         {/* Input area — always sticks to bottom */}
         <div className="py-5 flex-shrink-0 bg-background">
