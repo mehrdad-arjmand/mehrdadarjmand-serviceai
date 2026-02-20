@@ -497,17 +497,6 @@ const QueryAnalytics = () => {
             </CardContent>
           </Card>
         )}
-
-        {/* SQL Reference */}
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle className="text-base">SQL Reference Queries</CardTitle>
-            <CardDescription>Run these manually to recompute metrics</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <pre className="bg-muted/50 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap text-foreground">{SQL_REFERENCE}</pre>
-          </CardContent>
-        </Card>
       </main>
     </div>
   );
