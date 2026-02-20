@@ -393,6 +393,17 @@ Deno.serve(async (req) => {
       .join('\n\n---\n\n') || 'No relevant context found.'
 
     // Generate answer using Lovable AI (Gemini Flash)
+    const citationInstructions = `
+CITATION INSTRUCTIONS (MANDATORY):
+- You MUST cite every factual claim, measurement, procedure, or specific detail with its source using the format (Source N) immediately after the relevant sentence or phrase.
+- Use ALL relevant sources - do not limit yourself to one source. If multiple sources support a claim, cite all of them: (Source 1, Source 3).
+- Every sentence that conveys information from the documents MUST have at least one citation.
+- If the answer draws from multiple sources, cite each part to its specific source.
+- Do NOT list sources at the end. Citations must be inline only.
+- Do NOT omit citations. A response with zero citations when sources are available is WRONG.
+- Example: "The recommended clearance is 30 cm (Source 2). A DC breaker is required for each terminal (Source 5, Source 7)."
+`
+
     const systemPrompt = isConversationMode 
       ? `You are a voice assistant for field technicians working on industrial energy systems.
 
@@ -409,7 +420,8 @@ CRITICAL RETRIEVAL INSTRUCTIONS:
 - Search through ALL provided sources - actual content may be in later sources
 - IGNORE table of contents entries - look for actual procedural content
 - Quote specific details, numbers, procedures when relevant
-- Always mention safety warnings when relevant.`
+- Always mention safety warnings when relevant.
+${citationInstructions}`
       : `You are a field technician assistant for industrial energy systems. 
 
 CRITICAL INSTRUCTIONS:
@@ -419,8 +431,8 @@ CRITICAL INSTRUCTIONS:
 - If a source contains actual step-by-step instructions, specific values, or detailed procedures, prioritize that over TOC entries
 - Quote specific details, numbers, procedures, measurements, and warnings from the context
 - Look for sections that contain actual maintenance steps, not just section headings
-
-Always prioritize safety - mention safety warnings when relevant.`
+- Always prioritize safety - mention safety warnings when relevant.
+${citationInstructions}`
 
     // Build conversation context if in conversation mode
     let conversationContext = ''
@@ -437,7 +449,7 @@ ${conversationContext}
 Context from documents (search ALL sources carefully - actual content may be in later chunks):
 ${context}
 
-Please provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries.`
+Provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries. REMEMBER: You MUST include inline citations (Source N) for every factual claim. Every sentence with document-derived information needs a citation.`
 
     const { content: answer, usage } = await generateAnswer(systemPrompt, userPrompt)
 
