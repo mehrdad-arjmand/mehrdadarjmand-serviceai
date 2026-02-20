@@ -183,6 +183,12 @@ Deno.serve(async (req) => {
       const embedded = embeddedCount || 0
       isComplete = embedded >= totalChunks
 
+      // Update ingested_chunks for live progress tracking
+      await supabase
+        .from('documents')
+        .update({ ingested_chunks: embedded })
+        .eq('id', documentId)
+
       console.log(`Progress: ${embedded}/${totalChunks} chunks embedded`)
 
       if (!isFullMode) break // Legacy mode: return after one iteration

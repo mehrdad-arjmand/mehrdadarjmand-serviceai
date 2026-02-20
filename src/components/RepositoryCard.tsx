@@ -409,14 +409,76 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
   };
 
   // ── Reprocess ──
+  const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set());
+
   const handleReprocess = async (doc: Document) => {
     toast({ title: "Reprocessing", description: `Reindexing "${doc.fileName}"...` });
-    await supabase.from('documents').update({ ingestion_status: 'processing_embeddings', ingestion_error: null }).eq('id', doc.id);
+    setReprocessingIds(prev => new Set(prev).add(doc.id));
+
     try {
-      await supabase.functions.invoke('generate-embeddings', { body: { documentId: doc.id, mode: 'full' } });
-      toast({ title: "Reprocessing complete" });
-    } catch (e: any) { toast({ title: "Reprocessing failed", description: e.message, variant: "destructive" }); }
-    await fetchDocuments();
+      // 1. Clear existing embeddings so generate-embeddings will re-process them
+      const { error: clearError } = await supabase
+        .from('chunks')
+        .update({ embedding: null })
+        .eq('document_id', doc.id);
+      if (clearError) throw clearError;
+
+      // 2. Reset document status and embedded count
+      await supabase.from('documents').update({
+        ingestion_status: 'processing_embeddings',
+        ingestion_error: null,
+        ingested_chunks: 0,
+      }).eq('id', doc.id);
+
+      await fetchDocuments();
+
+      // 3. Poll with batch mode until complete
+      let complete = false;
+      let attempts = 0;
+      const maxAttempts = 200;
+
+      while (!complete && attempts < maxAttempts) {
+        attempts++;
+        const { data: embedResponse, error: embedError } = await supabase.functions.invoke(
+          'generate-embeddings',
+          { body: { documentId: doc.id } }
+        );
+
+        if (embedError) {
+          console.error("Embedding batch error:", embedError);
+          break;
+        }
+
+        complete = embedResponse?.complete === true;
+
+        // Update ingested_chunks in documents table for live progress
+        if (embedResponse?.embedded != null) {
+          await supabase.from('documents').update({
+            ingested_chunks: embedResponse.embedded,
+          }).eq('id', doc.id);
+        }
+
+        if (!complete) {
+          await new Promise(r => setTimeout(r, 200));
+        }
+      }
+
+      if (complete) {
+        await supabase.from('documents').update({ ingestion_status: 'complete' }).eq('id', doc.id);
+        toast({ title: "Reprocessing complete", description: `"${doc.fileName}" has been fully re-indexed.` });
+      } else {
+        toast({ title: "Reprocessing may be incomplete", description: "Check document status.", variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "Reprocessing failed", description: e.message, variant: "destructive" });
+      await supabase.from('documents').update({
+        ingestion_status: 'failed',
+        ingestion_error: e.message,
+      }).eq('id', doc.id);
+    } finally {
+      setReprocessingIds(prev => { const next = new Set(prev); next.delete(doc.id); return next; });
+      await fetchDocuments();
+    }
   };
 
   // ── Filter active tags ──
