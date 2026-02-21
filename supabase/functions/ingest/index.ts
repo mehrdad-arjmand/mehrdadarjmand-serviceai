@@ -353,34 +353,102 @@ async function extractTextFromTxt(arrayBuffer: ArrayBuffer): Promise<string> {
 async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   const uint8Array = new Uint8Array(arrayBuffer)
   const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
-  
+  const pageCount = document.numPages
+
+  // Try programmatic extraction first
   const textParts: string[] = []
-  for (let i = 1; i <= document.numPages; i++) {
+  for (let i = 1; i <= pageCount; i++) {
     const page = await document.getPage(i)
     const content = await page.getTextContent()
-    // Join items with proper spacing consideration
     const pageText = content.items.map((item: any) => item.str).join(' ')
     textParts.push(pageText)
   }
-  
-  // Normalize text: fix broken character spacing (e.g., "T i a n j i n" -> "Tianjin")
+
   let text = textParts.join('\n\n')
-  
-  // Fix single-character spacing pattern (common in PDF table extraction)
-  // Match sequences where single letters are separated by single spaces
-  text = text.replace(/\b([A-Za-z])\s+(?=[A-Za-z]\s+[A-Za-z])/g, (match, char) => {
-    return char
-  })
-  // Additional pass to clean remaining single-char spaces
-  text = text.replace(/(?<=[A-Za-z])\s(?=[A-Za-z](?:\s[A-Za-z])+\b)/g, '')
-  
-  // Final cleanup
+  // Basic cleanup
   text = text.replace(/\s+/g, ' ').trim()
-  
-  return {
-    text,
-    pageCount: document.numPages
+
+  // Quality check: detect garbled text (many single-char words = broken spacing)
+  const words = text.split(/\s+/)
+  const singleCharWords = words.filter(w => w.length === 1 && /[a-zA-Z]/.test(w)).length
+  const singleCharRatio = words.length > 0 ? singleCharWords / words.length : 0
+  const isGarbled = singleCharRatio > 0.15 || text.length < 50
+
+  if (isGarbled) {
+    console.log(`PDF text appears garbled (single-char ratio: ${(singleCharRatio * 100).toFixed(1)}%). Falling back to Gemini Vision API.`)
+    try {
+      const visionText = await extractPdfWithGeminiVision(uint8Array)
+      if (visionText && visionText.length > 50) {
+        console.log(`Gemini Vision extracted ${visionText.length} characters successfully.`)
+        return { text: visionText, pageCount }
+      }
+    } catch (err) {
+      console.error('Gemini Vision fallback failed, using pdfjs text with normalization:', err)
+    }
   }
+
+  // Apply normalization for mild spacing issues
+  // Fix single-character spacing pattern (e.g., "I n s u l a t e d" -> "Insulated")
+  text = textParts.join('\n\n')
+  text = text.replace(/\b([A-Za-z])\s+(?=[A-Za-z]\s+[A-Za-z])/g, (_match, char) => char)
+  text = text.replace(/(?<=[A-Za-z])\s(?=[A-Za-z](?:\s[A-Za-z])+\b)/g, '')
+  text = text.replace(/\s+/g, ' ').trim()
+
+  return { text, pageCount }
+}
+
+// Use Gemini Vision API to extract text from PDF with proper layout understanding
+async function extractPdfWithGeminiVision(pdfBytes: Uint8Array): Promise<string> {
+  const apiKey = Deno.env.get('GOOGLE_API_KEY')
+  if (!apiKey) throw new Error('GOOGLE_API_KEY not configured for Vision fallback')
+
+  const base64Pdf = arrayBufferToBase64(pdfBytes.buffer)
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            {
+              text: 'Extract ALL text from this PDF document. Preserve the original reading order, paragraph structure, and table layouts. Return ONLY the extracted text with no commentary or formatting instructions.'
+            },
+            {
+              inline_data: {
+                mime_type: 'application/pdf',
+                data: base64Pdf,
+              },
+            },
+          ],
+        }],
+        generationConfig: {
+          maxOutputTokens: 65536,
+        },
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`Gemini Vision API error (${response.status}): ${errorText}`)
+  }
+
+  const result = await response.json()
+  if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
+    return result.candidates[0].content.parts[0].text.trim()
+  }
+  throw new Error('Gemini Vision returned unexpected response structure')
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
 }
 
 async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
