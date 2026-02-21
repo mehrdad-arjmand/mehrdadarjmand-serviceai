@@ -368,14 +368,19 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
   // Basic cleanup
   text = text.replace(/\s+/g, ' ').trim()
 
-  // Quality check: detect garbled text (many single-char words = broken spacing)
+  // Quality check: detect garbled text
+  // Check both single-char words AND short fragment words (<=3 chars) which indicate
+  // broken spacing like "Ins ulat ed glov es" (not just "I n s u l a t e d")
   const words = text.split(/\s+/)
+  const commonShortWords = new Set(['a','an','the','is','in','on','to','of','it','or','as','at','by','if','no','so','up','we','do','be','he','me','my','us','am','go','oh','ok','vs','id'])
   const singleCharWords = words.filter(w => w.length === 1 && /[a-zA-Z]/.test(w)).length
+  const shortFragments = words.filter(w => w.length <= 3 && /^[a-zA-Z]+$/.test(w) && !commonShortWords.has(w.toLowerCase())).length
   const singleCharRatio = words.length > 0 ? singleCharWords / words.length : 0
-  const isGarbled = singleCharRatio > 0.15 || text.length < 50
+  const shortFragRatio = words.length > 0 ? shortFragments / words.length : 0
+  const isGarbled = singleCharRatio > 0.12 || shortFragRatio > 0.20 || text.length < 50
 
   if (isGarbled) {
-    console.log(`PDF text appears garbled (single-char ratio: ${(singleCharRatio * 100).toFixed(1)}%). Falling back to Gemini Vision API.`)
+    console.log(`PDF text appears garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Falling back to Gemini Vision API.`)
     try {
       const visionText = await extractPdfWithGeminiVision(uint8Array)
       if (visionText && visionText.length > 50) {
@@ -388,7 +393,6 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
   }
 
   // Apply normalization for mild spacing issues
-  // Fix single-character spacing pattern (e.g., "I n s u l a t e d" -> "Insulated")
   text = textParts.join('\n\n')
   text = text.replace(/\b([A-Za-z])\s+(?=[A-Za-z]\s+[A-Za-z])/g, (_match, char) => char)
   text = text.replace(/(?<=[A-Za-z])\s(?=[A-Za-z](?:\s[A-Za-z])+\b)/g, '')
