@@ -311,13 +311,12 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Fire-and-forget: trigger server-side embedding generation for each successful document
-    const supabaseUrlForFetch = supabaseUrl
+    // Trigger server-side embedding generation for each successful document
+    // Use EdgeRuntime.waitUntil to keep the function alive until background work completes
     for (const doc of documents) {
       if (doc.id && !doc.error) {
-        // Use EdgeRuntime.waitUntil if available, otherwise fire-and-forget
         const embeddingPromise = fetch(
-          `${supabaseUrlForFetch}/functions/v1/generate-embeddings`,
+          `${supabaseUrl}/functions/v1/generate-embeddings`,
           {
             method: 'POST',
             headers: {
@@ -327,9 +326,14 @@ Deno.serve(async (req) => {
             },
             body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
           }
-        ).catch(err => console.error(`Failed to trigger embeddings for ${doc.id}:`, err))
+        ).then(res => {
+          if (!res.ok) console.error(`Embeddings trigger failed for ${doc.id}: ${res.status}`)
+          else console.log(`Embeddings triggered successfully for ${doc.id}`)
+        }).catch(err => console.error(`Failed to trigger embeddings for ${doc.id}:`, err))
 
-        // Don't await - let it run in background
+        // Use EdgeRuntime.waitUntil to prevent the function from shutting down
+        // before the background fetch completes
+        ;(globalThis as any).EdgeRuntime?.waitUntil?.(embeddingPromise)
       }
     }
 
