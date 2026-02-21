@@ -418,50 +418,45 @@ function applyRegexNormalization(pageTexts: string[]): string {
   return text
 }
 
-// Send extracted TEXT to Gemini for cleanup — much lighter than sending PDF binary
+// Send extracted TEXT to Gemini for cleanup — single call with all pages
 async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): Promise<string> {
-  const BATCH_SIZE = 10 // pages per batch
-  const cleanedBatches: string[] = []
+  // Send all pages in one call — text payload is small (~100-200KB for 97 pages)
+  // This avoids multiple API round-trips that exceed edge function time limits
+  const fullText = pageTexts.map((t, idx) => `--- PAGE ${idx + 1} ---\n${t}`).join('\n\n')
 
-  for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
-    const batch = pageTexts.slice(i, i + BATCH_SIZE)
-    const batchText = batch.map((t, idx) => `--- PAGE ${i + idx + 1} ---\n${t}`).join('\n\n')
+  console.log(`Sending ${pageTexts.length} pages to Gemini for text cleanup (${fullText.length} chars)`)
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves", "Shua ng An" should be "Shuang An"). Fix ONLY the broken spacing to reconstruct proper words. Do NOT add, remove, summarize, or rephrase any content. Preserve all numbers, codes, table structures, and special characters exactly. Return ONLY the corrected text.\n\n${batchText}`
-            }],
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves", "Shua ng An" should be "Shuang An"). Fix ONLY the broken spacing to reconstruct proper words. Do NOT add, remove, summarize, or rephrase any content. Preserve all numbers, codes, table structures, and special characters exactly. Return ONLY the corrected text.\n\n${fullText}`
           }],
-          generationConfig: {
-            maxOutputTokens: 16384,
-          },
-        }),
-      }
-    )
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`Gemini API error (${response.status}): ${errorText}`)
+        }],
+        generationConfig: {
+          maxOutputTokens: 65536,
+        },
+      }),
     }
+  )
 
-    const result = await response.json()
-    const cleaned = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-    if (cleaned) {
-      cleanedBatches.push(cleaned)
-    } else {
-      cleanedBatches.push(batch.join('\n\n'))
-    }
-
-    console.log(`Cleaned pages ${i + 1}-${Math.min(i + BATCH_SIZE, pageTexts.length)} of ${pageTexts.length}`)
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`Gemini API error (${response.status}): ${errorText}`)
   }
 
-  return cleanedBatches.join('\n\n')
+  const result = await response.json()
+  const cleaned = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+  if (cleaned) {
+    console.log(`Gemini cleaned ${cleaned.length} characters successfully`)
+    return cleaned
+  }
+
+  throw new Error('Gemini returned empty response')
 }
 
 async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
