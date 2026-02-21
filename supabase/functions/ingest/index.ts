@@ -356,10 +356,40 @@ async function extractTextFromTxt(arrayBuffer: ArrayBuffer): Promise<string> {
 
 async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   const uint8Array = new Uint8Array(arrayBuffer)
-  const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
-  const pageCount = document.numPages
+  
+  // Get page count from pdfjs (fast, reliable for metadata)
+  let pageCount = 1
+  try {
+    const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
+    pageCount = document.numPages
+  } catch (err) {
+    console.warn('Could not get page count from pdfjs:', err)
+  }
 
-  // Try programmatic extraction first
+  // PRIMARY: Use Gemini Vision API for all PDFs — it handles layout, tables, 
+  // and complex formatting far better than pdfjs text extraction
+  const apiKey = Deno.env.get('GOOGLE_API_KEY')
+  if (apiKey) {
+    try {
+      console.log(`Using Gemini Vision as primary PDF extractor (${pageCount} pages)`)
+      const visionText = await extractPdfWithGeminiVision(uint8Array)
+      if (visionText && visionText.length > 50) {
+        console.log(`Gemini Vision extracted ${visionText.length} characters successfully.`)
+        return { text: visionText, pageCount }
+      }
+      console.warn('Gemini Vision returned insufficient text, falling back to pdfjs')
+    } catch (err) {
+      console.error('Gemini Vision extraction failed, falling back to pdfjs:', err)
+    }
+  } else {
+    console.warn('GOOGLE_API_KEY not set — using pdfjs fallback (may produce garbled text for complex PDFs)')
+  }
+
+  // FALLBACK: Use pdfjs-serverless if Gemini Vision is unavailable or fails
+  console.log('Using pdfjs fallback for PDF text extraction')
+  const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
+  pageCount = document.numPages
+
   const textParts: string[] = []
   for (let i = 1; i <= pageCount; i++) {
     const page = await document.getPage(i)
@@ -368,36 +398,8 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
     textParts.push(pageText)
   }
 
+  // Apply normalization for spacing issues
   let text = textParts.join('\n\n')
-  // Basic cleanup
-  text = text.replace(/\s+/g, ' ').trim()
-
-  // Quality check: detect garbled text
-  // Check both single-char words AND short fragment words (<=3 chars) which indicate
-  // broken spacing like "Ins ulat ed glov es" (not just "I n s u l a t e d")
-  const words = text.split(/\s+/)
-  const commonShortWords = new Set(['a','an','the','is','in','on','to','of','it','or','as','at','by','if','no','so','up','we','do','be','he','me','my','us','am','go','oh','ok','vs','id'])
-  const singleCharWords = words.filter(w => w.length === 1 && /[a-zA-Z]/.test(w)).length
-  const shortFragments = words.filter(w => w.length <= 3 && /^[a-zA-Z]+$/.test(w) && !commonShortWords.has(w.toLowerCase())).length
-  const singleCharRatio = words.length > 0 ? singleCharWords / words.length : 0
-  const shortFragRatio = words.length > 0 ? shortFragments / words.length : 0
-  const isGarbled = singleCharRatio > 0.12 || shortFragRatio > 0.20 || text.length < 50
-
-  if (isGarbled) {
-    console.log(`PDF text appears garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Falling back to Gemini Vision API.`)
-    try {
-      const visionText = await extractPdfWithGeminiVision(uint8Array)
-      if (visionText && visionText.length > 50) {
-        console.log(`Gemini Vision extracted ${visionText.length} characters successfully.`)
-        return { text: visionText, pageCount }
-      }
-    } catch (err) {
-      console.error('Gemini Vision fallback failed, using pdfjs text with normalization:', err)
-    }
-  }
-
-  // Apply normalization for mild spacing issues
-  text = textParts.join('\n\n')
   text = text.replace(/\b([A-Za-z])\s+(?=[A-Za-z]\s+[A-Za-z])/g, (_match, char) => char)
   text = text.replace(/(?<=[A-Za-z])\s(?=[A-Za-z](?:\s[A-Za-z])+\b)/g, '')
   text = text.replace(/\s+/g, ' ').trim()
