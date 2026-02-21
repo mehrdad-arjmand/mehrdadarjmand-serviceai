@@ -1,4 +1,3 @@
-import { getDocument } from 'https://esm.sh/pdfjs-serverless@0.2.2'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
@@ -12,7 +11,6 @@ const MAX_FILES = 50
 const MAX_METADATA_LENGTH = 500
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt']
 
-// Validation helpers
 function isValidMetadata(value: FormDataEntryValue | null, maxLength: number): boolean {
   if (value === null) return true
   if (typeof value !== 'string') return false
@@ -27,8 +25,7 @@ function sanitizeMetadata(value: FormDataEntryValue | null): string | null {
 
 function isValidDate(value: FormDataEntryValue | null): boolean {
   if (value === null) return true
-  if (typeof value !== 'string') return true // Will be validated as string
-  // Basic ISO date format check (YYYY-MM-DD)
+  if (typeof value !== 'string') return true
   return /^\d{4}-\d{2}-\d{2}$/.test(value) || value === ''
 }
 
@@ -60,7 +57,6 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Verify the user's JWT token using getUser
     const token = authHeader.replace('Bearer ', '')
     const authClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -78,10 +74,9 @@ Deno.serve(async (req) => {
 
     console.log(`Authenticated user: ${user.id}`)
 
-    // Use service role client for database operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Check permission: repository.write required for uploading
+    // Check permission
     const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
       p_tab: 'repository',
       p_action: 'write',
@@ -89,7 +84,6 @@ Deno.serve(async (req) => {
     })
 
     if (permError) {
-      console.error('Permission check error:', permError)
       return new Response(
         JSON.stringify({ error: 'Permission check failed' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -97,7 +91,6 @@ Deno.serve(async (req) => {
     }
 
     if (!hasPermission) {
-      console.log(`User ${user.id} denied: repository.write permission required`)
       return new Response(
         JSON.stringify({ error: 'Forbidden: You do not have permission to upload documents' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -127,45 +120,23 @@ Deno.serve(async (req) => {
     const allowedRolesRaw = formData.get('allowedRoles')
 
     // Validate file count
-    if (!files || files.length === 0) {
-      throw new Error('No files provided')
-    }
-    if (files.length > MAX_FILES) {
-      throw new Error(`Maximum ${MAX_FILES} files allowed per upload`)
-    }
+    if (!files || files.length === 0) throw new Error('No files provided')
+    if (files.length > MAX_FILES) throw new Error(`Maximum ${MAX_FILES} files allowed per upload`)
 
     // Validate each file
     for (const file of files) {
-      if (!(file instanceof File)) {
-        throw new Error('Invalid file format')
-      }
-      if (file.size > MAX_FILE_SIZE) {
-        throw new Error(`File "${file.name}" exceeds maximum size of ${MAX_FILE_SIZE / 1024 / 1024}MB`)
-      }
-      if (!isAllowedFileType(file.name)) {
-        throw new Error(`File "${file.name}" has unsupported type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`)
-      }
+      if (!(file instanceof File)) throw new Error('Invalid file format')
+      if (file.size > MAX_FILE_SIZE) throw new Error(`File "${file.name}" exceeds maximum size of ${MAX_FILE_SIZE / 1024 / 1024}MB`)
+      if (!isAllowedFileType(file.name)) throw new Error(`File "${file.name}" has unsupported type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`)
     }
 
     // Validate metadata
-    if (!isValidMetadata(docType, MAX_METADATA_LENGTH)) {
-      throw new Error(`docType exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
-    }
-    if (!isValidDate(uploadDate)) {
-      throw new Error('uploadDate must be in YYYY-MM-DD format')
-    }
-    if (!isValidMetadata(site, MAX_METADATA_LENGTH)) {
-      throw new Error(`site exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
-    }
-    if (!isValidMetadata(equipmentType, MAX_METADATA_LENGTH)) {
-      throw new Error(`equipmentType exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
-    }
-    if (!isValidMetadata(equipmentMake, MAX_METADATA_LENGTH)) {
-      throw new Error(`equipmentMake exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
-    }
-    if (!isValidMetadata(equipmentModel, MAX_METADATA_LENGTH)) {
-      throw new Error(`equipmentModel exceeds maximum length of ${MAX_METADATA_LENGTH} characters`)
-    }
+    if (!isValidMetadata(docType, MAX_METADATA_LENGTH)) throw new Error('docType too long')
+    if (!isValidDate(uploadDate)) throw new Error('uploadDate must be YYYY-MM-DD')
+    if (!isValidMetadata(site, MAX_METADATA_LENGTH)) throw new Error('site too long')
+    if (!isValidMetadata(equipmentType, MAX_METADATA_LENGTH)) throw new Error('equipmentType too long')
+    if (!isValidMetadata(equipmentMake, MAX_METADATA_LENGTH)) throw new Error('equipmentMake too long')
+    if (!isValidMetadata(equipmentModel, MAX_METADATA_LENGTH)) throw new Error('equipmentModel too long')
 
     // Sanitize metadata
     const sanitizedDocType = sanitizeMetadata(docType) || 'unknown'
@@ -175,8 +146,7 @@ Deno.serve(async (req) => {
     const sanitizedEquipmentMake = sanitizeMetadata(equipmentMake)
     const sanitizedEquipmentModel = sanitizeMetadata(equipmentModel)
     
-    // Parse allowed roles
-    let allowedRoles: string[] = ['admin'] // Default to admin only
+    let allowedRoles: string[] = ['admin']
     if (allowedRolesRaw && typeof allowedRolesRaw === 'string') {
       try {
         const parsed = JSON.parse(allowedRolesRaw)
@@ -192,151 +162,153 @@ Deno.serve(async (req) => {
 
     const documents = []
 
+    // Read file data into memory BEFORE returning (we need it for background processing)
+    const fileDataList: { name: string; arrayBuffer: ArrayBuffer; fileType: string }[] = []
     for (const file of files) {
+      fileDataList.push({
+        name: file.name,
+        arrayBuffer: await file.arrayBuffer(),
+        fileType: getFileExtension(file.name),
+      })
+    }
+
+    // Create document records immediately (as "in_progress")
+    for (const fileData of fileDataList) {
       const docId = crypto.randomUUID()
-      const fileType = getFileExtension(file.name)
       
-      let extractedText = ''
-      let pageCount = 0
-      let error: string | null = null
+      const { error: docError } = await supabase
+        .from('documents')
+        .insert({
+          id: docId,
+          filename: fileData.name.slice(0, 500),
+          doc_type: sanitizedDocType,
+          upload_date: sanitizedUploadDate || null,
+          site: sanitizedSite || null,
+          equipment_make: sanitizedEquipmentMake || null,
+          equipment_model: sanitizedEquipmentModel || null,
+          page_count: 0,
+          total_chunks: 0,
+          ingested_chunks: 0,
+          ingestion_status: 'in_progress',
+          allowed_roles: allowedRoles,
+        })
 
-      try {
-        const arrayBuffer = await file.arrayBuffer()
-        
-        switch (fileType) {
-          case 'txt':
-            extractedText = await extractTextFromTxt(arrayBuffer)
-            pageCount = 1
-            break
-          case 'pdf':
-            const pdfResult = await extractTextFromPdf(arrayBuffer)
-            extractedText = pdfResult.text
-            pageCount = pdfResult.pageCount
-            break
-          case 'docx':
-            extractedText = await extractTextFromDocx(arrayBuffer)
-            pageCount = Math.ceil(extractedText.length / 3000) // Estimate
-            break
-          default:
-            throw new Error(`Unsupported file type: ${fileType}`)
-        }
+      if (docError) {
+        console.error(`Failed to create document record for ${fileData.name}:`, docError)
+        continue
+      }
 
-        console.log(`Extracted ${extractedText.length} characters, ${pageCount} pages from ${file.name}`)
-        
-        // Split text into chunks FIRST to know total_chunks
-        const chunkSize = 800
-        const overlapSize = 200
-        const chunks = []
-        let chunkIndex = 0
-        
-        for (let i = 0; i < extractedText.length; i += (chunkSize - overlapSize)) {
-          const chunkText = extractedText.slice(i, i + chunkSize)
-          if (chunkText.trim().length > 0) {
-            chunks.push({
-              document_id: docId,
-              chunk_index: chunkIndex++,
-              text: chunkText,
-              equipment: sanitizedEquipmentType || null,
-            })
+      documents.push({ id: docId, fileName: fileData.name, status: 'in_progress' })
+    }
+
+    // Schedule ALL heavy processing in the background
+    const backgroundWork = (async () => {
+      for (let i = 0; i < fileDataList.length; i++) {
+        const fileData = fileDataList[i]
+        const doc = documents[i]
+        if (!doc) continue
+
+        try {
+          let extractedText = ''
+          let pageCount = 0
+
+          switch (fileData.fileType) {
+            case 'txt':
+              extractedText = new TextDecoder('utf-8').decode(fileData.arrayBuffer)
+              pageCount = 1
+              break
+            case 'pdf':
+              const pdfResult = await extractTextFromPdf(fileData.arrayBuffer)
+              extractedText = pdfResult.text
+              pageCount = pdfResult.pageCount
+              break
+            case 'docx':
+              extractedText = await extractTextFromDocx(fileData.arrayBuffer)
+              pageCount = Math.ceil(extractedText.length / 3000)
+              break
+            default:
+              throw new Error(`Unsupported file type: ${fileData.fileType}`)
           }
-        }
 
-        const totalChunks = chunks.length
+          console.log(`Extracted ${extractedText.length} chars, ${pageCount} pages from ${fileData.name}`)
 
-        // Save document to database with total_chunks known upfront
-        const { error: docError } = await supabase
-          .from('documents')
-          .insert({
-            id: docId,
-            filename: file.name.slice(0, 500), // Limit filename length
-            doc_type: sanitizedDocType,
-            upload_date: sanitizedUploadDate || null,
-            site: sanitizedSite || null,
-            equipment_make: sanitizedEquipmentMake || null,
-            equipment_model: sanitizedEquipmentModel || null,
-            page_count: pageCount,
-            total_chunks: totalChunks,
-            ingested_chunks: 0,
-            ingestion_status: 'in_progress',
-            allowed_roles: allowedRoles,
-          })
+          // Chunk the text
+          const chunkSize = 800
+          const overlapSize = 200
+          const chunks = []
+          let chunkIndex = 0
+          
+          for (let j = 0; j < extractedText.length; j += (chunkSize - overlapSize)) {
+            const chunkText = extractedText.slice(j, j + chunkSize)
+            if (chunkText.trim().length > 0) {
+              chunks.push({
+                document_id: doc.id,
+                chunk_index: chunkIndex++,
+                text: chunkText,
+                equipment: sanitizedEquipmentType || null,
+              })
+            }
+          }
 
-        if (docError) throw docError
+          // Update document with page count and total chunks
+          await supabase
+            .from('documents')
+            .update({ page_count: pageCount, total_chunks: chunks.length, ingested_chunks: 0 })
+            .eq('id', doc.id)
 
-        // Save all chunks WITHOUT embeddings
-        if (chunks.length > 0) {
+          // Insert chunks in batches
           const CHUNK_BATCH = 50
-          for (let i = 0; i < chunks.length; i += CHUNK_BATCH) {
-            const batch = chunks.slice(i, i + CHUNK_BATCH)
+          for (let j = 0; j < chunks.length; j += CHUNK_BATCH) {
+            const batch = chunks.slice(j, j + CHUNK_BATCH)
             const { error: chunksError } = await supabase.from('chunks').insert(batch)
             if (chunksError) throw chunksError
           }
 
-          // Update ingested_chunks to reflect all chunks are stored (but not yet embedded)
+          // Update status
           await supabase
             .from('documents')
-            .update({ 
-              ingested_chunks: totalChunks,
-              ingestion_status: 'processing_embeddings'
-            })
-            .eq('id', docId)
-        }
+            .update({ ingested_chunks: chunks.length, ingestion_status: 'processing_embeddings' })
+            .eq('id', doc.id)
 
-        documents.push({
-          id: docId,
-          fileName: file.name,
-          pageCount,
-          totalChunks,
-          status: 'processing_embeddings'
-        })
+          console.log(`Chunks saved for ${fileData.name}, triggering embeddings...`)
 
-      } catch (err) {
-        console.error(`Error processing ${file.name}:`, err)
-        error = err instanceof Error ? err.message : 'Unknown error'
-        
-        await supabase
-          .from('documents')
-          .upsert({
-            id: docId,
-            filename: file.name.slice(0, 500),
-            ingestion_status: 'failed',
-            ingestion_error: error.slice(0, 1000)
-          })
-
-        documents.push({
-          id: docId,
-          fileName: file.name,
-          error
-        })
-      }
-    }
-
-    // Trigger server-side embedding generation for each successful document
-    // Use EdgeRuntime.waitUntil to keep the function alive until background work completes
-    for (const doc of documents) {
-      if (doc.id && !doc.error) {
-        const embeddingPromise = fetch(
-          `${supabaseUrl}/functions/v1/generate-embeddings`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': req.headers.get('Authorization') || '',
-              'apikey': supabaseAnonKey,
-            },
-            body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
+          // Trigger embedding generation
+          const embRes = await fetch(
+            `${supabaseUrl}/functions/v1/generate-embeddings`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': authHeader!,
+                'apikey': supabaseAnonKey,
+              },
+              body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
+            }
+          )
+          if (!embRes.ok) {
+            console.error(`Embeddings trigger failed for ${doc.id}: ${embRes.status}`)
+            await embRes.text() // consume body
+          } else {
+            console.log(`Embeddings triggered for ${doc.id}`)
+            await embRes.text() // consume body
           }
-        ).then(res => {
-          if (!res.ok) console.error(`Embeddings trigger failed for ${doc.id}: ${res.status}`)
-          else console.log(`Embeddings triggered successfully for ${doc.id}`)
-        }).catch(err => console.error(`Failed to trigger embeddings for ${doc.id}:`, err))
 
-        // Use EdgeRuntime.waitUntil to prevent the function from shutting down
-        // before the background fetch completes
-        ;(globalThis as any).EdgeRuntime?.waitUntil?.(embeddingPromise)
+        } catch (err) {
+          console.error(`Error processing ${fileData.name}:`, err)
+          const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+          
+          await supabase
+            .from('documents')
+            .update({ ingestion_status: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
+            .eq('id', doc.id)
+        }
       }
-    }
+    })()
 
+    // Use EdgeRuntime.waitUntil to keep the worker alive for background processing
+    ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
+
+    // Return IMMEDIATELY — client will see status updates via realtime subscription
     return new Response(
       JSON.stringify({ success: true, documents }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -350,14 +322,10 @@ Deno.serve(async (req) => {
   }
 })
 
-async function extractTextFromTxt(arrayBuffer: ArrayBuffer): Promise<string> {
-  return new TextDecoder('utf-8').decode(arrayBuffer)
-}
-
 async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
+  const { getDocument } = await import('https://esm.sh/pdfjs-serverless@0.2.2')
   const uint8Array = new Uint8Array(arrayBuffer)
   
-  // Step 1: Extract text with pdfjs (low memory, fast)
   const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
   const pageCount = document.numPages
 
@@ -372,7 +340,7 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
   let rawText = pageTexts.join('\n\n')
   rawText = rawText.replace(/\s+/g, ' ').trim()
 
-  // Step 2: Check if text quality is good enough
+  // Check text quality
   const words = rawText.split(/\s+/)
   const commonShortWords = new Set(['a','an','the','is','in','on','to','of','it','or','as','at','by','if','no','so','up','we','do','be','he','me','my','us','am','go','oh','ok','vs','id','dc','ac'])
   const singleCharWords = words.filter(w => w.length === 1 && /[a-zA-Z]/.test(w)).length
@@ -382,17 +350,15 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
   const isGarbled = singleCharRatio > 0.10 || shortFragRatio > 0.15 || rawText.length < 50
 
   if (!isGarbled) {
-    console.log(`PDF text quality OK (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Using pdfjs output.`)
+    console.log(`PDF text quality OK (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%)`)
     return { text: rawText, pageCount }
   }
 
-  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending text to Gemini for cleanup.`)
+  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending to Gemini.`)
 
-  // Step 3: Send garbled TEXT (not the PDF binary) to Gemini for cleanup
-  // This uses minimal memory compared to base64-encoding the entire PDF
   const apiKey = Deno.env.get('GOOGLE_API_KEY')
   if (!apiKey) {
-    console.warn('GOOGLE_API_KEY not set — applying regex normalization only')
+    console.warn('GOOGLE_API_KEY not set — regex normalization only')
     return { text: applyRegexNormalization(pageTexts), pageCount }
   }
 
@@ -403,10 +369,9 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
       return { text: cleanedText, pageCount }
     }
   } catch (err) {
-    console.error('Gemini text cleanup failed:', err)
+    console.error('Gemini cleanup failed:', err)
   }
 
-  // Final fallback: regex normalization
   return { text: applyRegexNormalization(pageTexts), pageCount }
 }
 
@@ -418,12 +383,8 @@ function applyRegexNormalization(pageTexts: string[]): string {
   return text
 }
 
-// Send extracted TEXT to Gemini for cleanup — single call with all pages
 async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): Promise<string> {
-  // Send all pages in one call — text payload is small (~100-200KB for 97 pages)
-  // This avoids multiple API round-trips that exceed edge function time limits
   const fullText = pageTexts.map((t, idx) => `--- PAGE ${idx + 1} ---\n${t}`).join('\n\n')
-
   console.log(`Sending ${pageTexts.length} pages to Gemini for text cleanup (${fullText.length} chars)`)
 
   const response = await fetch(
@@ -434,12 +395,10 @@ async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): 
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves", "Shua ng An" should be "Shuang An"). Fix ONLY the broken spacing to reconstruct proper words. Do NOT add, remove, summarize, or rephrase any content. Preserve all numbers, codes, table structures, and special characters exactly. Return ONLY the corrected text.\n\n${fullText}`
+            text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${fullText}`
           }],
         }],
-        generationConfig: {
-          maxOutputTokens: 65536,
-        },
+        generationConfig: { maxOutputTokens: 65536 },
       }),
     }
   )
@@ -452,10 +411,9 @@ async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): 
   const result = await response.json()
   const cleaned = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
   if (cleaned) {
-    console.log(`Gemini cleaned ${cleaned.length} characters successfully`)
+    console.log(`Gemini cleaned ${cleaned.length} chars successfully`)
     return cleaned
   }
-
   throw new Error('Gemini returned empty response')
 }
 
