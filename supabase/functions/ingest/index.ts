@@ -357,108 +357,111 @@ async function extractTextFromTxt(arrayBuffer: ArrayBuffer): Promise<string> {
 async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   const uint8Array = new Uint8Array(arrayBuffer)
   
-  // Get page count from pdfjs (fast, reliable for metadata)
-  let pageCount = 1
-  try {
-    const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
-    pageCount = document.numPages
-  } catch (err) {
-    console.warn('Could not get page count from pdfjs:', err)
-  }
-
-  // PRIMARY: Use Gemini Vision API for all PDFs — it handles layout, tables, 
-  // and complex formatting far better than pdfjs text extraction
-  const apiKey = Deno.env.get('GOOGLE_API_KEY')
-  if (apiKey) {
-    try {
-      console.log(`Using Gemini Vision as primary PDF extractor (${pageCount} pages)`)
-      const visionText = await extractPdfWithGeminiVision(uint8Array)
-      if (visionText && visionText.length > 50) {
-        console.log(`Gemini Vision extracted ${visionText.length} characters successfully.`)
-        return { text: visionText, pageCount }
-      }
-      console.warn('Gemini Vision returned insufficient text, falling back to pdfjs')
-    } catch (err) {
-      console.error('Gemini Vision extraction failed, falling back to pdfjs:', err)
-    }
-  } else {
-    console.warn('GOOGLE_API_KEY not set — using pdfjs fallback (may produce garbled text for complex PDFs)')
-  }
-
-  // FALLBACK: Use pdfjs-serverless if Gemini Vision is unavailable or fails
-  console.log('Using pdfjs fallback for PDF text extraction')
+  // Step 1: Extract text with pdfjs (low memory, fast)
   const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
-  pageCount = document.numPages
+  const pageCount = document.numPages
 
-  const textParts: string[] = []
+  const pageTexts: string[] = []
   for (let i = 1; i <= pageCount; i++) {
     const page = await document.getPage(i)
     const content = await page.getTextContent()
     const pageText = content.items.map((item: any) => item.str).join(' ')
-    textParts.push(pageText)
+    pageTexts.push(pageText)
   }
 
-  // Apply normalization for spacing issues
-  let text = textParts.join('\n\n')
+  let rawText = pageTexts.join('\n\n')
+  rawText = rawText.replace(/\s+/g, ' ').trim()
+
+  // Step 2: Check if text quality is good enough
+  const words = rawText.split(/\s+/)
+  const commonShortWords = new Set(['a','an','the','is','in','on','to','of','it','or','as','at','by','if','no','so','up','we','do','be','he','me','my','us','am','go','oh','ok','vs','id','dc','ac'])
+  const singleCharWords = words.filter(w => w.length === 1 && /[a-zA-Z]/.test(w)).length
+  const shortFragments = words.filter(w => w.length <= 3 && /^[a-zA-Z]+$/.test(w) && !commonShortWords.has(w.toLowerCase())).length
+  const singleCharRatio = words.length > 0 ? singleCharWords / words.length : 0
+  const shortFragRatio = words.length > 0 ? shortFragments / words.length : 0
+  const isGarbled = singleCharRatio > 0.10 || shortFragRatio > 0.15 || rawText.length < 50
+
+  if (!isGarbled) {
+    console.log(`PDF text quality OK (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Using pdfjs output.`)
+    return { text: rawText, pageCount }
+  }
+
+  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending text to Gemini for cleanup.`)
+
+  // Step 3: Send garbled TEXT (not the PDF binary) to Gemini for cleanup
+  // This uses minimal memory compared to base64-encoding the entire PDF
+  const apiKey = Deno.env.get('GOOGLE_API_KEY')
+  if (!apiKey) {
+    console.warn('GOOGLE_API_KEY not set — applying regex normalization only')
+    return { text: applyRegexNormalization(pageTexts), pageCount }
+  }
+
+  try {
+    const cleanedText = await cleanGarbledTextWithGemini(pageTexts, apiKey)
+    if (cleanedText && cleanedText.length > 50) {
+      console.log(`Gemini cleaned text: ${cleanedText.length} characters`)
+      return { text: cleanedText, pageCount }
+    }
+  } catch (err) {
+    console.error('Gemini text cleanup failed:', err)
+  }
+
+  // Final fallback: regex normalization
+  return { text: applyRegexNormalization(pageTexts), pageCount }
+}
+
+function applyRegexNormalization(pageTexts: string[]): string {
+  let text = pageTexts.join('\n\n')
   text = text.replace(/\b([A-Za-z])\s+(?=[A-Za-z]\s+[A-Za-z])/g, (_match, char) => char)
   text = text.replace(/(?<=[A-Za-z])\s(?=[A-Za-z](?:\s[A-Za-z])+\b)/g, '')
   text = text.replace(/\s+/g, ' ').trim()
-
-  return { text, pageCount }
+  return text
 }
 
-// Use Gemini Vision API to extract text from PDF with proper layout understanding
-async function extractPdfWithGeminiVision(pdfBytes: Uint8Array): Promise<string> {
-  const apiKey = Deno.env.get('GOOGLE_API_KEY')
-  if (!apiKey) throw new Error('GOOGLE_API_KEY not configured for Vision fallback')
+// Send extracted TEXT to Gemini for cleanup — much lighter than sending PDF binary
+async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): Promise<string> {
+  const BATCH_SIZE = 10 // pages per batch
+  const cleanedBatches: string[] = []
 
-  const base64Pdf = arrayBufferToBase64(pdfBytes.buffer)
+  for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
+    const batch = pageTexts.slice(i, i + BATCH_SIZE)
+    const batchText = batch.map((t, idx) => `--- PAGE ${i + idx + 1} ---\n${t}`).join('\n\n')
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            {
-              text: 'Extract ALL text from this PDF document. Preserve the original reading order, paragraph structure, and table layouts. Return ONLY the extracted text with no commentary or formatting instructions.'
-            },
-            {
-              inline_data: {
-                mime_type: 'application/pdf',
-                data: base64Pdf,
-              },
-            },
-          ],
-        }],
-        generationConfig: {
-          maxOutputTokens: 65536,
-        },
-      }),
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves", "Shua ng An" should be "Shuang An"). Fix ONLY the broken spacing to reconstruct proper words. Do NOT add, remove, summarize, or rephrase any content. Preserve all numbers, codes, table structures, and special characters exactly. Return ONLY the corrected text.\n\n${batchText}`
+            }],
+          }],
+          generationConfig: {
+            maxOutputTokens: 16384,
+          },
+        }),
+      }
+    )
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Gemini API error (${response.status}): ${errorText}`)
     }
-  )
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`Gemini Vision API error (${response.status}): ${errorText}`)
+    const result = await response.json()
+    const cleaned = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+    if (cleaned) {
+      cleanedBatches.push(cleaned)
+    } else {
+      cleanedBatches.push(batch.join('\n\n'))
+    }
+
+    console.log(`Cleaned pages ${i + 1}-${Math.min(i + BATCH_SIZE, pageTexts.length)} of ${pageTexts.length}`)
   }
 
-  const result = await response.json()
-  if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
-    return result.candidates[0].content.parts[0].text.trim()
-  }
-  throw new Error('Gemini Vision returned unexpected response structure')
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  return btoa(binary)
+  return cleanedBatches.join('\n\n')
 }
 
 async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
