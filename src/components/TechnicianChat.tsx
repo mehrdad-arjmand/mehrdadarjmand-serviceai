@@ -401,7 +401,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
             <div className="flex-shrink-0 px-4 pt-3 pb-1">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground bg-sidebar-accent/40 border border-sidebar-border/50">
+                  <button className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
                     <span className="flex-1 text-left truncate">{currentProject.name}</span>
                     <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                   </button>
