@@ -343,7 +343,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       if (documents.some(d => d.ingestionStatus === 'in_progress' || d.ingestionStatus === 'processing_embeddings')) fetchDocuments();
     }, 3000);
     return () => { supabase.removeChannel(docsChannel); supabase.removeChannel(chunksChannel); clearInterval(poll); };
-  }, [documents.length]);
+  }, [projectId]);
 
   // ── Add new dropdown option ──
   const handleAddOption = async (category: string, value: string, setter: (opts: string[]) => void, currentOpts: string[]) => {
