@@ -3,6 +3,7 @@ import {
   SlidersHorizontal, ChevronRight, ChevronDown, X, Search, Plus
 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DocumentViewerModal } from "@/components/DocumentViewerModal";
 import { Button } from "@/components/ui/button";
@@ -45,10 +46,19 @@ interface Role {
   displayName: string | null;
 }
 
+interface Project {
+  id: string;
+  name: string;
+}
+
 interface RepositoryCardProps {
   onDocumentSelect?: (id: string | null) => void;
   permissions: TabPermissions;
   projectId?: string;
+  projects?: Project[];
+  currentProject?: Project | null;
+  onProjectSwitch?: (project: Project) => void;
+  tabSwitcher?: React.ReactNode;
 }
 
 // ─── Inline Select with Add New ─────────────────────────────────────────────
@@ -213,7 +223,7 @@ const RoleSelect = ({ label, selectedRoles, availableRoles, onChange }: RoleSele
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export const RepositoryCard = ({ onDocumentSelect, permissions, projectId }: RepositoryCardProps) => {
+export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, projects, currentProject, onProjectSwitch, tabSwitcher }: RepositoryCardProps) => {
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
 
@@ -538,6 +548,37 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId }: Rep
 
   return (
     <div className="max-w-3xl mx-auto space-y-8 pb-12">
+
+      {/* Project dropdown + tab switcher row */}
+      {(projects || tabSwitcher) && (
+        <div className="flex items-center justify-between">
+          {projects && currentProject && onProjectSwitch ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
+                  <span className="max-w-[200px] truncate">{currentProject.name}</span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56 bg-popover border border-border shadow-lg z-50">
+                {projects.map((project) => (
+                  <DropdownMenuItem
+                    key={project.id}
+                    onClick={() => onProjectSwitch(project)}
+                    className="flex items-center justify-between"
+                  >
+                    <span className="truncate">{project.name}</span>
+                    {project.id === currentProject.id && (
+                      <Check className="h-4 w-4 text-foreground flex-shrink-0" />
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : <div />}
+          {tabSwitcher}
+        </div>
+      )}
 
       {/* ── Upload Box ── */}
       {canWrite && (
