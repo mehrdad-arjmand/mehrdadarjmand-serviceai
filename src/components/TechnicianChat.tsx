@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen, ArrowDown } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen, ArrowDown, ChevronDown, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
@@ -13,9 +13,15 @@ import { ConversationSidebar } from "@/components/ConversationSidebar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TabPermissions } from "@/hooks/usePermissions";
+
+interface Project {
+  id: string;
+  name: string;
+}
 
 interface TechnicianChatProps {
   hasDocuments: boolean;
@@ -25,11 +31,15 @@ interface TechnicianChatProps {
   currentTab?: string;
   onTabChange?: (tab: string) => void;
   projectId?: string;
+  projects?: Project[];
+  currentProject?: Project | null;
+  onProjectSwitch?: (project: Project) => void;
+  tabSwitcher?: React.ReactNode;
 }
 
 // Source type now imported as ChatSource from useChatHistory
 
-export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTabBar, currentTab, onTabChange, projectId }: TechnicianChatProps) => {
+export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTabBar, currentTab, onTabChange, projectId, projects, currentProject, onProjectSwitch, tabSwitcher }: TechnicianChatProps) => {
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
   const [question, setQuestion] = useState("");
@@ -386,35 +396,33 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           borderRight: '1px solid hsl(var(--sidebar-border))'
         }}>
 
-          {/* Repository / Assistant tabs — px-4 (16px) to match New Chat + items */}
-          {showTabBar && onTabChange &&
-        <div className="flex-shrink-0 pl-4 pr-4 pt-4 pb-3">
-              <div className="inline-flex items-center gap-1 bg-border/60 p-1 rounded-xl w-full">
-                <button
-              onClick={() => onTabChange("repository")}
-              className={cn(
-                "flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
-                currentTab === "repository" ?
-                "bg-card shadow-sm text-foreground" :
-                "text-muted-foreground hover:text-foreground"
-              )}>
-
-                  Repository
-                </button>
-                <button
-              onClick={() => onTabChange("assistant")}
-              className={cn(
-                "flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
-                currentTab === "assistant" ?
-                "bg-card shadow-sm text-foreground" :
-                "text-muted-foreground hover:text-foreground"
-              )}>
-
-                  Assistant
-                </button>
-              </div>
+          {/* Project selector dropdown */}
+          {projects && currentProject && onProjectSwitch && (
+            <div className="flex-shrink-0 px-4 pt-3 pb-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground bg-sidebar-accent/40 border border-sidebar-border/50">
+                    <span className="flex-1 text-left truncate">{currentProject.name}</span>
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56 bg-popover border border-border shadow-lg z-50">
+                  {projects.map((project) => (
+                    <DropdownMenuItem
+                      key={project.id}
+                      onClick={() => onProjectSwitch(project)}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="truncate">{project.name}</span>
+                      {project.id === currentProject.id && (
+                        <Check className="h-4 w-4 text-foreground flex-shrink-0" />
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-        }
+          )}
 
           {/* Conversation list — self-contained scroll, never scrolls the page */}
           <ConversationSidebar
@@ -459,8 +467,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           flexDirection: 'column',
           minWidth: 0,
           height: '100%',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          position: 'relative'
         }}>
+
+        {/* Floating tab switcher — top right */}
+        {tabSwitcher && (
+          <div style={{ position: 'absolute', top: '12px', right: '16px', zIndex: 10 }}>
+            {tabSwitcher}
+          </div>
+        )}
 
         {/* Messages wrapper with scroll-to-bottom */}
         <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
