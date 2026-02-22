@@ -548,38 +548,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
   return (
     <div className="space-y-0 pb-12">
-
-      {/* Project dropdown + tab switcher row — full width, aligned with header */}
-      {(projects || tabSwitcher) && (
-        <div className="flex items-center justify-between px-4 py-3">
-          {projects && currentProject && onProjectSwitch ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 w-[228px] px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
-                  <span className="flex-1 text-left truncate">{currentProject.name}</span>
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56 bg-popover border border-border shadow-lg z-50">
-                {projects.map((project) => (
-                  <DropdownMenuItem
-                    key={project.id}
-                    onClick={() => onProjectSwitch(project)}
-                    className="flex items-center justify-between"
-                  >
-                    <span className="truncate">{project.name}</span>
-                    {project.id === currentProject.id && (
-                      <Check className="h-4 w-4 text-foreground flex-shrink-0" />
-                    )}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : <div />}
-          {tabSwitcher}
-        </div>
-      )}
-
       <div className="max-w-3xl mx-auto space-y-8 px-4">
 
       {/* ── Upload Box ── */}
