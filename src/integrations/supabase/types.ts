@@ -70,6 +70,7 @@ export type Database = {
           ingestion_error: string | null
           ingestion_status: string | null
           page_count: number | null
+          project_id: string | null
           site: string | null
           total_chunks: number | null
           upload_date: string | null
@@ -86,6 +87,7 @@ export type Database = {
           ingestion_error?: string | null
           ingestion_status?: string | null
           page_count?: number | null
+          project_id?: string | null
           site?: string | null
           total_chunks?: number | null
           upload_date?: string | null
@@ -102,12 +104,21 @@ export type Database = {
           ingestion_error?: string | null
           ingestion_status?: string | null
           page_count?: number | null
+          project_id?: string | null
           site?: string | null
           total_chunks?: number | null
           upload_date?: string | null
           uploaded_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "documents_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       dropdown_options: {
         Row: {
@@ -199,6 +210,59 @@ export type Database = {
           mrr?: number
           notes?: string | null
           total_queries?: number
+        }
+        Relationships: []
+      }
+      project_metadata_fields: {
+        Row: {
+          created_at: string
+          field_name: string
+          id: string
+          project_id: string
+        }
+        Insert: {
+          created_at?: string
+          field_name: string
+          id?: string
+          project_id: string
+        }
+        Update: {
+          created_at?: string
+          field_name?: string
+          id?: string
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_metadata_fields_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          allowed_roles: string[]
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+        }
+        Insert: {
+          allowed_roles?: string[]
+          created_at?: string
+          created_by: string
+          id?: string
+          name: string
+        }
+        Update: {
+          allowed_roles?: string[]
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
         }
         Relationships: []
       }
