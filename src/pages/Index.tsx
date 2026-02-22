@@ -8,7 +8,6 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { Loader2 } from "lucide-react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { ProjectSidebar } from "@/components/ProjectSidebar";
 
 interface Project {
   id: string;
@@ -49,23 +48,30 @@ const Index = () => {
   const fetchStats = async () => {
     let docsQuery = supabase.from('documents').select('*', { count: 'exact', head: true });
     let chunksQuery = supabase.from('chunks').select('*', { count: 'exact', head: true });
+
     if (projectId) {
       docsQuery = docsQuery.eq('project_id', projectId);
     }
+
     const { count: docsCount } = await docsQuery;
     const { count: chunksC } = await chunksQuery;
+
     setHasDocuments((docsCount || 0) > 0);
     setChunksCount(chunksC || 0);
   };
 
   useEffect(() => {
     fetchStats();
+
     const docsChannel = supabase
       .channel('docs-stats')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchStats)
       .subscribe();
-    return () => { supabase.removeChannel(docsChannel); };
+
+    return () => {
+      supabase.removeChannel(docsChannel);
+    };
   }, [projectId]);
 
   const handleProjectSwitch = (project: Project) => {
@@ -132,13 +138,13 @@ const Index = () => {
     );
   }
 
-  // Build tab switcher element — full width to fill sidebar
+  // Build tab switcher element to pass into children
   const tabSwitcher = canSeeRepository && canSeeAssistant ? (
-    <div className="inline-flex items-center gap-1 bg-border/60 p-1 rounded-xl w-full">
+    <div className="inline-flex items-center gap-1 bg-border/60 p-1 rounded-xl">
       <button
         onClick={() => setActiveTab("repository")}
         className={cn(
-          "flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
+          "rounded-lg px-5 py-1.5 text-sm font-medium transition-all duration-200",
           currentTab === "repository"
             ? "bg-card shadow-sm text-foreground"
             : "text-muted-foreground hover:text-foreground"
@@ -149,7 +155,7 @@ const Index = () => {
       <button
         onClick={() => setActiveTab("assistant")}
         className={cn(
-          "flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-all duration-200",
+          "rounded-lg px-5 py-1.5 text-sm font-medium transition-all duration-200",
           currentTab === "assistant"
             ? "bg-card shadow-sm text-foreground"
             : "text-muted-foreground hover:text-foreground"
@@ -165,27 +171,23 @@ const Index = () => {
       <Header />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
-        <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex min-w-0" style={{ minHeight: 0 }}>
+        <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0" style={{ minHeight: 0 }}>
           {canSeeRepository && (
             <TabsContent
               value="repository"
-              className="flex-1 mt-0 flex data-[state=inactive]:hidden"
+              className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
               style={{ minHeight: 0, overflow: 'hidden' }}
             >
-              {/* Sidebar for Repository view */}
-              <ProjectSidebar
-                projects={projects}
-                currentProject={currentProject}
-                onProjectSwitch={handleProjectSwitch}
-                tabSwitcher={tabSwitcher}
-              />
-
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
                 <main className="px-4 py-6 bg-popover">
                   <RepositoryCard
                     onDocumentSelect={setSelectedDocumentId}
                     permissions={permissions.repository}
                     projectId={projectId}
+                    projects={projects}
+                    currentProject={currentProject}
+                    onProjectSwitch={handleProjectSwitch}
+                    tabSwitcher={tabSwitcher}
                   />
                 </main>
               </div>
@@ -195,7 +197,7 @@ const Index = () => {
           {canSeeAssistant && (
             <TabsContent
               value="assistant"
-              className="flex-1 mt-0 flex data-[state=inactive]:hidden"
+              className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
               style={{ overflow: 'hidden', minHeight: 0 }}
             >
               <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
