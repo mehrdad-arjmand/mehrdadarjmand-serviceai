@@ -24,11 +24,12 @@ interface TechnicianChatProps {
   showTabBar?: boolean;
   currentTab?: string;
   onTabChange?: (tab: string) => void;
+  projectId?: string;
 }
 
 // Source type now imported as ChatSource from useChatHistory
 
-export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTabBar, currentTab, onTabChange }: TechnicianChatProps) => {
+export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTabBar, currentTab, onTabChange, projectId }: TechnicianChatProps) => {
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
   const [question, setQuestion] = useState("");
@@ -254,7 +255,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
       const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true }
+        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true, projectId: projectId || undefined }
       });
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, inputMode: "voice", timestamp: new Date(), sources: data.sources || [] };
@@ -288,7 +289,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
       const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false }
+        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false, projectId: projectId || undefined }
       });
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, timestamp: new Date(), sources: data.sources || [] };
