@@ -36,9 +36,11 @@ export interface Conversation {
   updatedAt: Date;
 }
 
-// Storage keys are now user-specific
-const getStorageKey = (userId: string) => `service-ai-conversations-${userId}`;
-const getActiveConversationKey = (userId: string) => `service-ai-active-conversation-${userId}`;
+// Storage keys are now user+project specific
+const getStorageKey = (userId: string, projectId?: string) => 
+  projectId ? `service-ai-conversations-${userId}-${projectId}` : `service-ai-conversations-${userId}`;
+const getActiveConversationKey = (userId: string, projectId?: string) => 
+  projectId ? `service-ai-active-conversation-${userId}-${projectId}` : `service-ai-active-conversation-${userId}`;
 
 // Default empty filters
 export function getDefaultFilters(): ConversationFilters {
@@ -73,10 +75,10 @@ function createNewConversation(): Conversation {
 }
 
 // Load conversations from localStorage for a specific user
-function loadConversations(userId: string | null): Conversation[] {
+function loadConversations(userId: string | null, projectId?: string): Conversation[] {
   if (!userId) return [];
   try {
-    const stored = localStorage.getItem(getStorageKey(userId));
+    const stored = localStorage.getItem(getStorageKey(userId, projectId));
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     return parsed.map((conv: any) => ({
@@ -95,47 +97,46 @@ function loadConversations(userId: string | null): Conversation[] {
 }
 
 // Save conversations to localStorage for a specific user
-function saveConversations(userId: string | null, conversations: Conversation[]) {
+function saveConversations(userId: string | null, conversations: Conversation[], projectId?: string) {
   if (!userId) return;
   try {
-    localStorage.setItem(getStorageKey(userId), JSON.stringify(conversations));
+    localStorage.setItem(getStorageKey(userId, projectId), JSON.stringify(conversations));
   } catch (e) {
     console.error("Failed to save conversations:", e);
   }
 }
 
 // Load active conversation ID for a specific user
-function loadActiveConversationId(userId: string | null): string | null {
+function loadActiveConversationId(userId: string | null, projectId?: string): string | null {
   if (!userId) return null;
   try {
-    return localStorage.getItem(getActiveConversationKey(userId));
+    return localStorage.getItem(getActiveConversationKey(userId, projectId));
   } catch {
     return null;
   }
 }
 
 // Save active conversation ID for a specific user
-function saveActiveConversationId(userId: string | null, id: string) {
+function saveActiveConversationId(userId: string | null, id: string, projectId?: string) {
   if (!userId) return;
   try {
-    localStorage.setItem(getActiveConversationKey(userId), id);
+    localStorage.setItem(getActiveConversationKey(userId, projectId), id);
   } catch (e) {
     console.error("Failed to save active conversation ID:", e);
   }
 }
 
-export function useChatHistory() {
+export function useChatHistory(projectId?: string) {
   const { user } = useAuth();
   const userId = user?.id || null;
   
-  // Track previous user to detect user changes
-  const prevUserIdRef = useRef<string | null>(null);
+  // Track previous user+project to detect changes
+  const prevKeyRef = useRef<string | null>(null);
   
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations(userId));
+  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations(userId, projectId));
   const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
-    const storedId = loadActiveConversationId(userId);
-    const convs = loadConversations(userId);
-    // Validate that stored ID exists, otherwise use first or create new
+    const storedId = loadActiveConversationId(userId, projectId);
+    const convs = loadConversations(userId, projectId);
     if (storedId && convs.find(c => c.id === storedId)) {
       return storedId;
     }
@@ -145,18 +146,17 @@ export function useChatHistory() {
     return null;
   });
 
-  // Reload conversations when user changes
+  // Reload conversations when user or project changes
   useEffect(() => {
-    if (prevUserIdRef.current !== userId) {
-      prevUserIdRef.current = userId;
+    const currentKey = `${userId}-${projectId}`;
+    if (prevKeyRef.current !== currentKey) {
+      prevKeyRef.current = currentKey;
       
       if (userId) {
-        // Load this user's conversations
-        const userConvs = loadConversations(userId);
+        const userConvs = loadConversations(userId, projectId);
         setConversations(userConvs);
         
-        // Load this user's active conversation
-        const storedId = loadActiveConversationId(userId);
+        const storedId = loadActiveConversationId(userId, projectId);
         if (storedId && userConvs.find(c => c.id === storedId)) {
           setActiveConversationId(storedId);
         } else if (userConvs.length > 0) {
@@ -165,12 +165,11 @@ export function useChatHistory() {
           setActiveConversationId(null);
         }
       } else {
-        // No user - clear state
         setConversations([]);
         setActiveConversationId(null);
       }
     }
-  }, [userId]);
+  }, [userId, projectId]);
 
   // USE A REF to always have the latest activeConversationId
   // This prevents stale closure issues in addMessage
@@ -192,15 +191,15 @@ export function useChatHistory() {
 
   // Persist conversations whenever they change
   useEffect(() => {
-    saveConversations(userId, conversations);
-  }, [conversations, userId]);
+    saveConversations(userId, conversations, projectId);
+  }, [conversations, userId, projectId]);
 
   // Persist active conversation ID
   useEffect(() => {
     if (activeConversationId && userId) {
-      saveActiveConversationId(userId, activeConversationId);
+      saveActiveConversationId(userId, activeConversationId, projectId);
     }
-  }, [activeConversationId, userId]);
+  }, [activeConversationId, userId, projectId]);
 
   // Ensure there's always an active conversation - returns the ID synchronously
   const ensureActiveConversation = useCallback((): string => {
