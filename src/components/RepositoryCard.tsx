@@ -547,16 +547,16 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8 pb-12">
+    <div className="space-y-0 pb-12">
 
-      {/* Project dropdown + tab switcher row */}
+      {/* Project dropdown + tab switcher row — full width, aligned with header */}
       {(projects || tabSwitcher) && (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between px-4 py-3">
           {projects && currentProject && onProjectSwitch ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
-                  <span className="max-w-[200px] truncate">{currentProject.name}</span>
+                <button className="flex items-center gap-2 w-[228px] px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
+                  <span className="flex-1 text-left truncate">{currentProject.name}</span>
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                 </button>
               </DropdownMenuTrigger>
@@ -579,6 +579,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           {tabSwitcher}
         </div>
       )}
+
+      <div className="max-w-3xl mx-auto space-y-8 px-4">
 
       {/* ── Upload Box ── */}
       {canWrite && (
@@ -787,7 +789,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         )}
       </div>
 
-      {/* ── View Modal (uses same style as DocumentViewerModal) ── */}
+      </div>
+
+      {/* ── View Modal ── */}
       {viewDoc && (
         <DocumentViewerModal
           open={!!viewDoc}
