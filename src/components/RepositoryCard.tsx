@@ -551,7 +551,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       {/* Project dropdown + tab switcher row — full width, aligned with header */}
       {(projects || tabSwitcher) && (
-        <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center justify-between px-4 py-2">
           {projects && currentProject && onProjectSwitch ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -580,7 +580,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         </div>
       )}
 
-      <div className="max-w-3xl mx-auto space-y-8 px-4">
+      <div className="max-w-3xl mx-auto space-y-8 px-4 py-6">
 
       {/* ── Upload Box ── */}
       {canWrite && (

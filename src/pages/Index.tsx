@@ -179,7 +179,7 @@ const Index = () => {
               style={{ minHeight: 0, overflow: 'hidden' }}
             >
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-                <main className="px-4 py-6 bg-popover">
+                <main className="bg-popover">
                   <RepositoryCard
                     onDocumentSelect={setSelectedDocumentId}
                     permissions={permissions.repository}
