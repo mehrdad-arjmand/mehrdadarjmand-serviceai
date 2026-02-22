@@ -48,6 +48,7 @@ interface Role {
 interface RepositoryCardProps {
   onDocumentSelect?: (id: string | null) => void;
   permissions: TabPermissions;
+  projectId?: string;
 }
 
 // ─── Inline Select with Add New ─────────────────────────────────────────────
@@ -212,7 +213,7 @@ const RoleSelect = ({ label, selectedRoles, availableRoles, onChange }: RoleSele
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCardProps) => {
+export const RepositoryCard = ({ onDocumentSelect, permissions, projectId }: RepositoryCardProps) => {
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
 
@@ -288,7 +289,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
 
   // ── Fetch documents ──
   const fetchDocuments = async () => {
-    const { data: docs, error } = await supabase.from('documents').select('*').order('uploaded_at', { ascending: false });
+    let query = supabase.from('documents').select('*').order('uploaded_at', { ascending: false });
+    if (projectId) query = query.eq('project_id', projectId);
+    const { data: docs, error } = await query;
     if (error || !docs) return;
 
     const documentsWithText = await Promise.all(docs.map(async (doc) => {
@@ -355,6 +358,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions }: RepositoryCard
       if (equipmentMake) formData.append('equipmentMake', equipmentMake);
       if (equipmentModel) formData.append('equipmentModel', equipmentModel);
       formData.append('allowedRoles', JSON.stringify(selectedRoles));
+      if (projectId) formData.append('projectId', projectId);
       const { data, error } = await supabase.functions.invoke('ingest', { body: formData });
       if (error) throw error;
       if (data.success) {
