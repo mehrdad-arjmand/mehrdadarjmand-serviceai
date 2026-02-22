@@ -17,7 +17,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TabPermissions } from "@/hooks/usePermissions";
-import { ProjectSidebar } from "@/components/ProjectSidebar";
 
 interface Project {
   id: string;
@@ -384,25 +383,60 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }}>
 
       {/* ── SIDEBAR ─────────────────────────────────────────────────── */}
-      {sidebarOpen && projects && currentProject && onProjectSwitch && (
-        <ProjectSidebar
-          projects={projects}
-          currentProject={currentProject}
-          onProjectSwitch={onProjectSwitch}
-          tabSwitcher={tabSwitcher}
-        >
+      {sidebarOpen &&
+      <div
+        style={{
+          width: '260px',
+          flexShrink: 0,
+          height: '100%',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: 'hsl(var(--sidebar-background))',
+          borderRight: '1px solid hsl(var(--sidebar-border))'
+        }}>
+
+          {/* Project selector dropdown */}
+          {projects && currentProject && onProjectSwitch && (
+            <div className="flex-shrink-0 px-4 pt-3 pb-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground bg-sidebar-accent/40 border border-sidebar-border/50">
+                    <span className="flex-1 text-left truncate">{currentProject.name}</span>
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56 bg-popover border border-border shadow-lg z-50">
+                  {projects.map((project) => (
+                    <DropdownMenuItem
+                      key={project.id}
+                      onClick={() => onProjectSwitch(project)}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="truncate">{project.name}</span>
+                      {project.id === currentProject.id && (
+                        <Check className="h-4 w-4 text-foreground flex-shrink-0" />
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+
+          {/* Conversation list — self-contained scroll, never scrolls the page */}
           <ConversationSidebar
-            conversations={conversations}
-            activeConversationId={activeConversationId}
-            onNewConversation={startNewConversation}
-            onSelectConversation={switchConversation}
-            onDeleteConversation={deleteConversation}
-            onRenameConversation={renameConversation}
-            onReorderConversations={reorderConversations}
-            canDelete={canDelete}
-          />
-        </ProjectSidebar>
-      )}
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onNewConversation={startNewConversation}
+          onSelectConversation={switchConversation}
+          onDeleteConversation={deleteConversation}
+          onRenameConversation={renameConversation}
+          onReorderConversations={reorderConversations}
+          canDelete={canDelete} />
+
+        </div>
+      }
 
       {/* Sidebar toggle — always floats outside the sidebar */}
       <div
@@ -437,6 +471,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           position: 'relative'
         }}>
 
+        {/* Floating tab switcher — top right */}
+        {tabSwitcher && (
+          <div style={{ position: 'absolute', top: '12px', right: '16px', zIndex: 10 }}>
+            {tabSwitcher}
+          </div>
+        )}
 
         {/* Messages wrapper with scroll-to-bottom */}
         <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
