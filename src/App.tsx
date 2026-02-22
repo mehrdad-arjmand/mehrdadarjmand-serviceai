@@ -13,6 +13,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Settings from "./pages/Settings";
 import AdminRoles from "./pages/AdminRoles";
 import QueryAnalytics from "./pages/QueryAnalytics";
+import Projects from "./pages/Projects";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -29,6 +30,14 @@ const App = () => (
             <Route path="/signup" element={<Signup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route
+              path="/projects"
+              element={
+                <ProtectedRoute>
+                  <Projects />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/"
               element={
