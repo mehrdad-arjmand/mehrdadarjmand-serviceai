@@ -5,10 +5,9 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
-import { Loader2, ChevronDown, Check } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 interface Project {
   id: string;
@@ -167,123 +166,58 @@ const Index = () => {
     </div>
   ) : null;
 
-  // Project dropdown element (shared)
-  const projectDropdown = projects.length > 0 && currentProject ? (
-    <div className="flex-shrink-0 px-4 pt-3 pb-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
-            <span className="flex-1 text-left truncate">{currentProject.name}</span>
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-56 bg-popover border border-border shadow-lg z-50">
-          {projects.map((project) => (
-            <DropdownMenuItem
-              key={project.id}
-              onClick={() => handleProjectSwitch(project)}
-              className="flex items-center justify-between"
-            >
-              <span className="truncate">{project.name}</span>
-              {project.id === currentProject.id && (
-                <Check className="h-4 w-4 text-foreground flex-shrink-0" />
-              )}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  ) : null;
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }} className="bg-popover">
       <Header />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
-        {/* Left sidebar column — project dropdown, consistent across tabs */}
-        <div
-          style={{
-            width: '260px',
-            flexShrink: 0,
-            height: '100%',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            borderRight: '1px solid hsl(var(--sidebar-border))'
-          }}
-          className="bg-sidebar"
-        >
-          {projectDropdown}
-
-          {/* Sidebar content per tab */}
-          <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-            {canSeeAssistant && currentTab === "assistant" && (
-              <ConversationSidebarSlot
-                projectId={projectId}
-                permissions={permissions}
-              />
-            )}
-          </Tabs>
-        </div>
-
-        {/* Main content area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%', overflow: 'hidden', position: 'relative' }}>
-          {/* Floating tab switcher — top right, same position for both tabs */}
-          {tabSwitcher && (
-            <div style={{ position: 'absolute', top: '12px', right: '16px', zIndex: 10 }}>
-              {tabSwitcher}
-            </div>
-          )}
-
-          <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0" style={{ minHeight: 0 }}>
-            {canSeeRepository && (
-              <TabsContent
-                value="repository"
-                className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
-                style={{ minHeight: 0, overflow: 'hidden' }}
-              >
-                <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-                  <main className="px-4 py-6 bg-popover">
-                    <RepositoryCard
-                      onDocumentSelect={setSelectedDocumentId}
-                      permissions={permissions.repository}
-                      projectId={projectId}
-                      projects={projects}
-                      currentProject={currentProject}
-                      onProjectSwitch={handleProjectSwitch}
-                      tabSwitcher={null}
-                    />
-                  </main>
-                </div>
-              </TabsContent>
-            )}
-
-            {canSeeAssistant && (
-              <TabsContent
-                value="assistant"
-                className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
-                style={{ overflow: 'hidden', minHeight: 0 }}
-              >
-                <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
-                  <TechnicianChat
-                    hasDocuments={hasDocuments}
-                    chunksCount={chunksCount}
-                    permissions={permissions.assistant}
-                    showTabBar={false}
-                    currentTab={currentTab}
-                    onTabChange={setActiveTab}
+        <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0" style={{ minHeight: 0 }}>
+          {canSeeRepository && (
+            <TabsContent
+              value="repository"
+              className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
+              style={{ minHeight: 0, overflow: 'hidden' }}
+            >
+              <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+                <main className="px-4 py-6 bg-popover">
+                  <RepositoryCard
+                    onDocumentSelect={setSelectedDocumentId}
+                    permissions={permissions.repository}
                     projectId={projectId}
                     projects={projects}
                     currentProject={currentProject}
                     onProjectSwitch={handleProjectSwitch}
-                    tabSwitcher={null}
-                    hideSidebar={true}
+                    tabSwitcher={tabSwitcher}
                   />
-                </div>
-              </TabsContent>
-            )}
-          </Tabs>
-        </div>
+                </main>
+              </div>
+            </TabsContent>
+          )}
+
+          {canSeeAssistant && (
+            <TabsContent
+              value="assistant"
+              className="flex-1 mt-0 flex flex-col data-[state=inactive]:hidden"
+              style={{ overflow: 'hidden', minHeight: 0 }}
+            >
+              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
+                <TechnicianChat
+                  hasDocuments={hasDocuments}
+                  chunksCount={chunksCount}
+                  permissions={permissions.assistant}
+                  showTabBar={false}
+                  currentTab={currentTab}
+                  onTabChange={setActiveTab}
+                  projectId={projectId}
+                  projects={projects}
+                  currentProject={currentProject}
+                  onProjectSwitch={handleProjectSwitch}
+                  tabSwitcher={tabSwitcher}
+                />
+              </div>
+            </TabsContent>
+          )}
+        </Tabs>
       </div>
     </div>
   );
