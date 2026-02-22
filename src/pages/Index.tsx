@@ -5,15 +5,9 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
-import { Loader2, ChevronDown, Check } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
 interface Project {
   id: string;
@@ -144,64 +138,37 @@ const Index = () => {
     );
   }
 
+  // Build tab switcher element to pass into children
+  const tabSwitcher = canSeeRepository && canSeeAssistant ? (
+    <div className="inline-flex items-center gap-1 bg-border/60 p-1 rounded-xl">
+      <button
+        onClick={() => setActiveTab("repository")}
+        className={cn(
+          "rounded-lg px-5 py-1.5 text-sm font-medium transition-all duration-200",
+          currentTab === "repository"
+            ? "bg-card shadow-sm text-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        Repository
+      </button>
+      <button
+        onClick={() => setActiveTab("assistant")}
+        className={cn(
+          "rounded-lg px-5 py-1.5 text-sm font-medium transition-all duration-200",
+          currentTab === "assistant"
+            ? "bg-card shadow-sm text-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        Assistant
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }} className="bg-popover">
       <Header />
-
-      {/* Sub-header bar: project dropdown left, tabs right */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-background flex-shrink-0">
-        {/* Project selector */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
-              <span className="max-w-[200px] truncate">{currentProject.name}</span>
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-64 bg-popover border border-border shadow-lg z-50">
-            {projects.map((project) => (
-              <DropdownMenuItem
-                key={project.id}
-                onClick={() => handleProjectSwitch(project)}
-                className="flex items-center justify-between"
-              >
-                <span className="truncate">{project.name}</span>
-                {project.id === currentProject.id && (
-                  <Check className="h-4 w-4 text-foreground flex-shrink-0" />
-                )}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Repository / Assistant tabs */}
-        {canSeeRepository && canSeeAssistant && (
-          <div className="inline-flex items-center gap-1 bg-border/60 p-1 rounded-xl">
-            <button
-              onClick={() => setActiveTab("repository")}
-              className={cn(
-                "rounded-lg px-5 py-1.5 text-sm font-medium transition-all duration-200",
-                currentTab === "repository"
-                  ? "bg-card shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Repository
-            </button>
-            <button
-              onClick={() => setActiveTab("assistant")}
-              className={cn(
-                "rounded-lg px-5 py-1.5 text-sm font-medium transition-all duration-200",
-                currentTab === "assistant"
-                  ? "bg-card shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Assistant
-            </button>
-          </div>
-        )}
-      </div>
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
         <Tabs value={currentTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-w-0" style={{ minHeight: 0 }}>
@@ -217,6 +184,10 @@ const Index = () => {
                     onDocumentSelect={setSelectedDocumentId}
                     permissions={permissions.repository}
                     projectId={projectId}
+                    projects={projects}
+                    currentProject={currentProject}
+                    onProjectSwitch={handleProjectSwitch}
+                    tabSwitcher={tabSwitcher}
                   />
                 </main>
               </div>
@@ -238,6 +209,10 @@ const Index = () => {
                   currentTab={currentTab}
                   onTabChange={setActiveTab}
                   projectId={projectId}
+                  projects={projects}
+                  currentProject={currentProject}
+                  onProjectSwitch={handleProjectSwitch}
+                  tabSwitcher={tabSwitcher}
                 />
               </div>
             </TabsContent>
