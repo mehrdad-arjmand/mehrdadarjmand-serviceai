@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Search, X, Loader2, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Search, X, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -172,10 +173,12 @@ const Projects = () => {
     setNewFieldName("");
   };
 
-  const toggleRole = (role: string) => {
-    setSelectedRoles((prev) =>
-      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
-    );
+  const handleRoleChange = (value: string) => {
+    if (value === "all") {
+      setSelectedRoles(availableRoles);
+    } else {
+      setSelectedRoles([value]);
+    }
   };
 
   const filteredProjects = projects.filter((p) =>
@@ -311,22 +314,23 @@ const Projects = () => {
 
             {/* Role access */}
             <div className="space-y-2">
-              <Label>Roles with Access</Label>
-              <div className="flex flex-wrap gap-2">
-                {availableRoles.map((role) => (
-                  <button
-                    key={role}
-                    onClick={() => toggleRole(role)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors capitalize ${
-                      selectedRoles.includes(role)
-                        ? "bg-foreground text-background border-foreground"
-                        : "bg-card text-muted-foreground border-border hover:border-foreground/30"
-                    }`}
-                  >
-                    {role}
-                  </button>
-                ))}
-              </div>
+              <Label>Access Role</Label>
+              <Select
+                value={selectedRoles.length === availableRoles.length && availableRoles.length > 0 ? "all" : selectedRoles[0] || "admin"}
+                onValueChange={handleRoleChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border border-border shadow-lg z-50">
+                  <SelectItem value="all">All</SelectItem>
+                  {availableRoles.map((role) => (
+                    <SelectItem key={role} value={role} className="capitalize">
+                      {role}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Metadata fields */}

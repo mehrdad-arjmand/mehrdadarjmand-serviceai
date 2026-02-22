@@ -50,7 +50,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     ensureActiveConversation,
     renameConversation,
     reorderConversations
-  } = useChatHistory();
+  } = useChatHistory(projectId);
 
   const [currentFilters, setCurrentFilters] = useState<ConversationFilters>({
     docType: "",
