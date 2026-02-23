@@ -1,7 +1,9 @@
 import {
   Trash2, Loader2, CheckCircle, AlertCircle, Clock, Check,
-  SlidersHorizontal, ChevronRight, ChevronDown, X, Search, Plus
+  SlidersHorizontal, ChevronRight, ChevronDown, X, Search, Plus,
+  Upload, ClipboardPaste, Mic, Square
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -12,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { TabPermissions } from "@/hooks/usePermissions";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -275,6 +277,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const [isSaving, setIsSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; fileName: string } | null>(null);
 
+  // Copied text modal state
+  const [copiedTextOpen, setCopiedTextOpen] = useState(false);
+  const [copiedTextName, setCopiedTextName] = useState("");
+  const [copiedTextContent, setCopiedTextContent] = useState("");
+  const [isInsertingText, setIsInsertingText] = useState(false);
+
+  // Dictate modal state
+  const [dictateOpen, setDictateOpen] = useState(false);
+  const [dictateName, setDictateName] = useState("");
+  const [dictateContent, setDictateContent] = useState("");
+  const [isDictating, setIsDictating] = useState(false);
+  const [isInsertingDictation, setIsInsertingDictation] = useState(false);
+  const dictateRecognitionRef = useRef<any>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // ── Fetch dropdown options ──
   const fetchDropdownOptions = async () => {
     const { data } = await supabase.from('dropdown_options').select('category, value').order('value');
@@ -354,13 +372,13 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   };
 
   // ── Upload ──
-  const handleUpload = async () => {
-    if (selectedFiles.length === 0) { toast({ title: "No files selected", variant: "destructive" }); return; }
+  const handleUpload = async (filesToUpload: File[]) => {
+    if (filesToUpload.length === 0) return;
     if (selectedRoles.length === 0) { toast({ title: "Select an access role", variant: "destructive" }); return; }
     setIsUploading(true);
     try {
       const formData = new FormData();
-      selectedFiles.forEach(f => formData.append('files', f));
+      filesToUpload.forEach(f => formData.append('files', f));
       if (docType) formData.append('docType', docType);
       formData.append('uploadDate', new Date().toISOString().split('T')[0]);
       if (site) formData.append('site', site);
@@ -376,12 +394,131 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         setSelectedFiles([]);
         setDocType(""); setSite(""); setEquipmentType(""); setEquipmentMake(""); setEquipmentModel("");
         setSelectedRoles(["all"]); setMetadataOpen(false);
-        const fi = document.getElementById('file-upload') as HTMLInputElement;
-        if (fi) fi.value = '';
+        if (fileInputRef.current) fileInputRef.current.value = '';
         await fetchDocuments();
       } else throw new Error(data.error || 'Upload failed');
     } catch (e: any) { toast({ title: "Upload failed", description: e.message, variant: "destructive" }); }
     finally { setIsUploading(false); }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      setSelectedFiles(files);
+      handleUpload(files);
+    }
+  };
+
+  // ── Insert copied text ──
+  const handleInsertText = async () => {
+    if (!copiedTextName.trim() || !copiedTextContent.trim()) {
+      toast({ title: "Name and content required", variant: "destructive" });
+      return;
+    }
+    setIsInsertingText(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('ingest-text', {
+        body: {
+          documentName: copiedTextName.trim(),
+          content: copiedTextContent.trim(),
+          docType: docType || undefined,
+          site: site || undefined,
+          equipmentType: equipmentType || undefined,
+          equipmentMake: equipmentMake || undefined,
+          equipmentModel: equipmentModel || undefined,
+          allowedRoles: selectedRoles,
+          projectId: projectId || undefined,
+        }
+      });
+      if (error) throw error;
+      if (data.success) {
+        toast({ title: "Text inserted", description: `"${data.document.fileName}" queued for indexing.` });
+        setCopiedTextOpen(false);
+        setCopiedTextName("");
+        setCopiedTextContent("");
+        await fetchDocuments();
+      }
+    } catch (e: any) { toast({ title: "Insert failed", description: e.message, variant: "destructive" }); }
+    finally { setIsInsertingText(false); }
+  };
+
+  // ── Dictation ──
+  const startDictation = useCallback(() => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast({ title: "Speech recognition not supported", variant: "destructive" });
+      return;
+    }
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    dictateRecognitionRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    let finalTranscript = '';
+    recognition.onstart = () => setIsDictating(true);
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalTranscript += transcript + ' ';
+        else interimTranscript += transcript;
+      }
+      setDictateContent(finalTranscript + interimTranscript);
+    };
+    recognition.onerror = (event: any) => {
+      if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
+      setIsDictating(false);
+      dictateRecognitionRef.current = null;
+    };
+    recognition.onend = () => { setIsDictating(false); dictateRecognitionRef.current = null; };
+    recognition.start();
+  }, [toast]);
+
+  const stopDictation = useCallback(() => {
+    if (dictateRecognitionRef.current) {
+      try { dictateRecognitionRef.current.stop(); } catch (e) {}
+      dictateRecognitionRef.current = null;
+    }
+    setIsDictating(false);
+  }, []);
+
+  const restartDictation = useCallback(() => {
+    stopDictation();
+    setDictateContent("");
+    setTimeout(() => startDictation(), 200);
+  }, [stopDictation, startDictation]);
+
+  const handleInsertDictation = async () => {
+    if (!dictateName.trim() || !dictateContent.trim()) {
+      toast({ title: "Name and content required", variant: "destructive" });
+      return;
+    }
+    stopDictation();
+    setIsInsertingDictation(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('ingest-text', {
+        body: {
+          documentName: dictateName.trim(),
+          content: dictateContent.trim(),
+          docType: docType || undefined,
+          site: site || undefined,
+          equipmentType: equipmentType || undefined,
+          equipmentMake: equipmentMake || undefined,
+          equipmentModel: equipmentModel || undefined,
+          allowedRoles: selectedRoles,
+          projectId: projectId || undefined,
+        }
+      });
+      if (error) throw error;
+      if (data.success) {
+        toast({ title: "Dictation inserted", description: `"${data.document.fileName}" queued for indexing.` });
+        setDictateOpen(false);
+        setDictateName("");
+        setDictateContent("");
+        await fetchDocuments();
+      }
+    } catch (e: any) { toast({ title: "Insert failed", description: e.message, variant: "destructive" }); }
+    finally { setIsInsertingDictation(false); }
   };
 
   // ── Delete ──
@@ -582,21 +719,34 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       <div className="max-w-3xl mx-auto space-y-8 px-4 py-6">
 
-      {/* ── Upload Box ── */}
+      {/* ── Upload Actions ── */}
       {canWrite && (
         <div className="border-2 border-dashed border-border rounded-2xl bg-background">
-          {/* Drop zone */}
-          <div className="py-12 px-8 text-center">
-            <input type="file" id="file-upload" multiple accept=".pdf,.docx,.txt" className="hidden" onChange={e => setSelectedFiles(Array.from(e.target.files || []))} />
-            <label htmlFor="file-upload" className="cursor-pointer">
-              <p className="text-base font-semibold text-foreground">Upload documents</p>
-              <p className="text-sm mt-2">
-                <span className="text-primary cursor-pointer">Drag &amp; drop files here or <span className="underline">click to browse</span></span>
-              </p>
-              {selectedFiles.length > 0 && (
-                <p className="text-xs text-muted-foreground mt-3">{selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected</p>
-              )}
-            </label>
+          {/* Action buttons row */}
+          <div className="py-8 px-8 flex items-center justify-center gap-3 flex-wrap">
+            <input ref={fileInputRef} type="file" id="file-upload" multiple accept=".pdf,.docx,.txt" className="hidden" onChange={handleFileSelect} />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
+            >
+              <Upload className="h-4 w-4" />
+              {isUploading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading...</> : "Upload files"}
+            </button>
+            <button
+              onClick={() => setCopiedTextOpen(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <ClipboardPaste className="h-4 w-4" />
+              Copied text
+            </button>
+            <button
+              onClick={() => { setDictateOpen(true); setTimeout(() => startDictation(), 300); }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <Mic className="h-4 w-4" />
+              Dictate
+            </button>
           </div>
 
           {/* Metadata panel */}
@@ -620,8 +770,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             </>
           )}
 
-          {/* Actions row */}
-          <div className="px-8 pb-6 flex items-center gap-3 justify-center">
+          {/* Metadata toggle */}
+          <div className="px-8 pb-6 flex items-center justify-center">
             <button
               onClick={() => setMetadataOpen(!metadataOpen)}
               className={cn(
@@ -632,13 +782,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
               <SlidersHorizontal className="h-3.5 w-3.5" />
               Metadata
             </button>
-            <Button
-              onClick={handleUpload}
-              disabled={selectedFiles.length === 0 || isUploading}
-              className="rounded-full px-6 bg-foreground text-background hover:bg-foreground/90"
-            >
-              {isUploading ? <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Uploading...</> : "Upload"}
-            </Button>
           </div>
         </div>
       )}
@@ -841,6 +984,107 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Copied Text Modal ── */}
+      <Dialog open={copiedTextOpen} onOpenChange={open => { if (!open) { setCopiedTextOpen(false); setCopiedTextName(""); setCopiedTextContent(""); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Copied text</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-sm font-medium">Document name</Label>
+              <Input
+                value={copiedTextName}
+                onChange={e => setCopiedTextName(e.target.value)}
+                placeholder="Enter document name"
+                className="mt-1.5"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Content</Label>
+              <Textarea
+                value={copiedTextContent}
+                onChange={e => setCopiedTextContent(e.target.value)}
+                placeholder="Paste or type your text here..."
+                className="mt-1.5 min-h-[200px]"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button onClick={() => { setCopiedTextOpen(false); setCopiedTextName(""); setCopiedTextContent(""); }} className="px-5 py-2 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Cancel</button>
+            <button onClick={handleInsertText} disabled={isInsertingText || !copiedTextName.trim() || !copiedTextContent.trim()} className="px-5 py-2 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50">
+              {isInsertingText ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin inline" /> Inserting...</> : "Insert"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dictate Modal ── */}
+      <Dialog open={dictateOpen} onOpenChange={open => { if (!open) { stopDictation(); setDictateOpen(false); setDictateName(""); setDictateContent(""); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Dictate</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-sm font-medium">Document name</Label>
+              <Input
+                value={dictateName}
+                onChange={e => setDictateName(e.target.value)}
+                placeholder="Enter document name"
+                className="mt-1.5"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Dictated text</Label>
+              <Textarea
+                value={dictateContent}
+                onChange={e => setDictateContent(e.target.value)}
+                placeholder="Your dictation will appear here..."
+                className="mt-1.5 min-h-[200px]"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              {isDictating ? (
+                <button
+                  onClick={stopDictation}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                  Stop recording
+                </button>
+              ) : (
+                <button
+                  onClick={startDictation}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
+                >
+                  <Mic className="h-3.5 w-3.5" />
+                  Start recording
+                </button>
+              )}
+              <button
+                onClick={restartDictation}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border border-border bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+              >
+                Restart
+              </button>
+              {isDictating && (
+                <span className="flex items-center gap-1.5 text-xs text-destructive">
+                  <span className="h-2 w-2 rounded-full bg-destructive animate-pulse" />
+                  Recording...
+                </span>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <button onClick={() => { stopDictation(); setDictateOpen(false); setDictateName(""); setDictateContent(""); }} className="px-5 py-2 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Cancel</button>
+            <button onClick={handleInsertDictation} disabled={isInsertingDictation || !dictateName.trim() || !dictateContent.trim()} className="px-5 py-2 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50">
+              {isInsertingDictation ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin inline" /> Inserting...</> : "Insert"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
