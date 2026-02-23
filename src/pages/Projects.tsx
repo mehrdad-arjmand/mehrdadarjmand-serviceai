@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, X, Loader2, ChevronRight, ChevronDown, SlidersHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Plus, Search, X, Loader2, ChevronRight, ChevronDown } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
 import { format } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -47,7 +48,6 @@ const Projects = () => {
   const [editName, setEditName] = useState("");
   const [editRoles, setEditRoles] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterRole, setFilterRole] = useState("");
   const [metrics, setMetrics] = useState<MetricCard[]>([
   { label: "ACCURACY", sublabel: "Hit rate", value: "—" },
@@ -266,68 +266,38 @@ const Projects = () => {
           )}
         </div>
 
-        {/* Upload-style buttons row */}
+        {/* Search + Create */}
         <div className="flex items-center gap-3">
-          <Button
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search projects..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10 pr-10 h-11 rounded-full border-border bg-background" />
+            {search &&
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                <X className="h-4 w-4" />
+              </button>
+            }
+          </div>
+          <button
             onClick={() => setShowCreate(true)}
-            className="rounded-full bg-foreground text-background hover:bg-foreground/90 gap-2">
+            className="inline-flex items-center gap-2 px-5 h-11 rounded-full text-sm font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors whitespace-nowrap">
             <Plus className="h-4 w-4" />
             Create project
-          </Button>
-        </div>
-
-        {/* Search + Filters */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search projects..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 rounded-xl border-border" />
-              {search &&
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <X className="h-4 w-4 text-muted-foreground" />
-                </button>
-              }
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setFiltersOpen(!filtersOpen)}
-              className="rounded-xl gap-1.5 h-10 px-3">
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Filters
-            </Button>
-          </div>
-
-          {filtersOpen && (
-            <div className="grid grid-cols-3 gap-4 p-4 rounded-xl border border-border bg-card">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Role</p>
-                <Select value={filterRole || "all"} onValueChange={(v) => setFilterRole(v === "all" ? "" : v)}>
-                  <SelectTrigger className="h-10 rounded-lg">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-popover border border-border shadow-lg z-50">
-                    <SelectItem value="all">All</SelectItem>
-                    {availableRoles.map((role) =>
-                      <SelectItem key={role} value={role} className="capitalize">{role}</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          )}
+          </button>
         </div>
 
         {/* Table header */}
-        <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-          <span className="font-semibold text-sm text-foreground">Projects</span>
-          <span className="text-primary font-medium">{filteredProjects.length} result{filteredProjects.length !== 1 ? "s" : ""}</span>
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-foreground">Projects</h2>
+            <span className="text-sm text-muted-foreground">{filteredProjects.length} result{filteredProjects.length !== 1 ? "s" : ""}</span>
+          </div>
+          <Separator className="mb-4" />
         </div>
 
         {/* Project rows */}
@@ -341,33 +311,34 @@ const Projects = () => {
               {search ? "No projects match your search." : "No projects yet. Create one to get started."}
             </div> :
 
-          filteredProjects.map((project) => (
+          filteredProjects.map((project) => {
+            const isExpanded = expandedProjectId === project.id;
+            return (
             <div key={project.id}>
               {/* Main row */}
               <div
-                className="flex items-center justify-between px-1 py-4 cursor-pointer transition-colors min-h-[72px]"
-                onClick={() => setExpandedProjectId(expandedProjectId === project.id ? null : project.id)}
+                className="py-5 flex items-start justify-between cursor-pointer hover:bg-muted/30 px-2 -mx-2 rounded-lg transition-colors min-h-[72px]"
+                onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
                 onDoubleClick={() => navigate(`/?project=${project.id}`)}>
-                  <div className="space-y-1.5 flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-sm font-semibold text-foreground">
                       {project.name}
                     </p>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
                       {project.allowed_roles.map((role) =>
-                        <Badge
+                        <span
                           key={role}
-                          variant="outline"
-                          className="rounded-full text-xs font-normal capitalize">
+                          className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background capitalize">
                             {role}
-                        </Badge>
+                        </span>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-3 flex-shrink-0">
                     <span className="text-xs text-muted-foreground">
                       {format(new Date(project.created_at), "MMM d, yyyy")}
                     </span>
-                    {expandedProjectId === project.id ?
+                    {isExpanded ?
                       <ChevronDown className="h-4 w-4 text-muted-foreground" /> :
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     }
@@ -375,30 +346,28 @@ const Projects = () => {
                 </div>
 
               {/* Expanded detail */}
-              {expandedProjectId === project.id && (
-                <div className="px-4 pb-4 pt-1 ml-1 border-l-2 border-border">
-                  <div className="grid grid-cols-3 gap-4 mb-4">
+              {isExpanded && (
+                <div className="mx-2 mb-4 border border-border rounded-xl p-5 bg-muted/20">
+                  <div className="grid grid-cols-3 gap-6 mb-5">
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">Created</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Created</p>
                       <p className="text-sm text-foreground">{format(new Date(project.created_at), "MMM d, yyyy")}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">Access Roles</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Access Roles</p>
                       <p className="text-sm text-foreground capitalize">{project.allowed_roles.includes("all") ? "All Roles" : project.allowed_roles.join(", ")}</p>
                     </div>
                   </div>
                   <div className="flex items-center justify-end gap-2">
-                    <Button variant="outline" size="sm" className="rounded-lg" onClick={(e) => { e.stopPropagation(); openEdit(project); }}>
-                      Edit
-                    </Button>
-                    <Button variant="outline" size="sm" className="rounded-lg" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.name }); }}>
-                      Delete
-                    </Button>
+                    <button onClick={(e) => { e.stopPropagation(); navigate(`/?project=${project.id}`); }} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Select</button>
+                    <button onClick={(e) => { e.stopPropagation(); openEdit(project); }} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Edit</button>
+                    <button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.name }); }} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Delete</button>
                   </div>
                 </div>
               )}
             </div>
-          ))
+            );
+          })
           }
         </div>
       </main>
