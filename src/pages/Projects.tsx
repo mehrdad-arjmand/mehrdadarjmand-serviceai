@@ -41,76 +41,76 @@ const Projects = () => {
   const [selectedRoles, setSelectedRoles] = useState<string[]>(["admin"]);
   const [availableRoles, setAvailableRoles] = useState<string[]>([]);
   const [metrics, setMetrics] = useState<MetricCard[]>([
-    { label: "ACCURACY", sublabel: "Hit rate", value: "—" },
-    { label: "TIME", sublabel: "Median latency", value: "—" },
-    { label: "COST", sublabel: "Average cost per query", value: "—" },
-  ]);
+  { label: "ACCURACY", sublabel: "Hit rate", value: "—" },
+  { label: "TIME", sublabel: "Median latency", value: "—" },
+  { label: "COST", sublabel: "Average cost per query", value: "—" }]
+  );
 
   const fetchProjects = async () => {
-    const { data, error } = await supabase
-      .from("projects")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data, error } = await supabase.
+    from("projects").
+    select("*").
+    order("created_at", { ascending: false });
 
     if (!error && data) setProjects(data);
     setLoading(false);
   };
 
   const fetchMetrics = async () => {
-    const { data, error } = await supabase
-      .from("query_logs")
-      .select("hit_rate_at_k, execution_time_ms, upstream_inference_cost")
-      .not("execution_time_ms", "is", null);
+    const { data, error } = await supabase.
+    from("query_logs").
+    select("hit_rate_at_k, execution_time_ms, upstream_inference_cost").
+    not("execution_time_ms", "is", null);
 
     if (error || !data || data.length === 0) return;
 
     // Hit rate
     const hitRates = data.filter((d) => d.hit_rate_at_k !== null);
-    const avgHitRate = hitRates.length > 0
-      ? hitRates.reduce((sum, d) => sum + (d.hit_rate_at_k || 0), 0) / hitRates.length
-      : 0;
+    const avgHitRate = hitRates.length > 0 ?
+    hitRates.reduce((sum, d) => sum + (d.hit_rate_at_k || 0), 0) / hitRates.length :
+    0;
 
     // Median latency
-    const latencies = data
-      .map((d) => d.execution_time_ms)
-      .filter((v): v is number => v !== null)
-      .sort((a, b) => a - b);
-    const medianLatency = latencies.length > 0
-      ? latencies[Math.floor(latencies.length / 2)]
-      : 0;
+    const latencies = data.
+    map((d) => d.execution_time_ms).
+    filter((v): v is number => v !== null).
+    sort((a, b) => a - b);
+    const medianLatency = latencies.length > 0 ?
+    latencies[Math.floor(latencies.length / 2)] :
+    0;
 
     // Avg cost
     const costs = data.filter((d) => d.upstream_inference_cost !== null);
-    const avgCost = costs.length > 0
-      ? costs.reduce((sum, d) => sum + (d.upstream_inference_cost || 0), 0) / costs.length
-      : 0;
+    const avgCost = costs.length > 0 ?
+    costs.reduce((sum, d) => sum + (d.upstream_inference_cost || 0), 0) / costs.length :
+    0;
 
     setMetrics([
-      {
-        label: "ACCURACY",
-        sublabel: "Hit rate",
-        value: `${(avgHitRate * 100).toFixed(1)}%`,
-      },
-      {
-        label: "TIME",
-        sublabel: "Median latency",
-        value: medianLatency >= 1000
-          ? `${(medianLatency / 1000).toFixed(1)} seconds`
-          : `${medianLatency} ms`,
-      },
-      {
-        label: "COST",
-        sublabel: "Average cost per query",
-        value: `$${avgCost.toFixed(6)}`,
-      },
-    ]);
+    {
+      label: "ACCURACY",
+      sublabel: "Hit rate",
+      value: `${(avgHitRate * 100).toFixed(1)}%`
+    },
+    {
+      label: "TIME",
+      sublabel: "Median latency",
+      value: medianLatency >= 1000 ?
+      `${(medianLatency / 1000).toFixed(1)} seconds` :
+      `${medianLatency} ms`
+    },
+    {
+      label: "COST",
+      sublabel: "Average cost per query",
+      value: `$${avgCost.toFixed(6)}`
+    }]
+    );
   };
 
   const fetchRoles = async () => {
-    const { data } = await supabase
-      .from("role_permissions")
-      .select("role")
-      .order("role");
+    const { data } = await supabase.
+    from("role_permissions").
+    select("role").
+    order("role");
     if (data) setAvailableRoles(data.map((r) => r.role));
   };
 
@@ -125,28 +125,28 @@ const Projects = () => {
     setCreating(true);
 
     try {
-      const { data: project, error } = await supabase
-        .from("projects")
-        .insert({
-          name: newProjectName.trim(),
-          created_by: user.id,
-          allowed_roles: selectedRoles.length > 0 ? selectedRoles : ["admin"],
-        })
-        .select()
-        .single();
+      const { data: project, error } = await supabase.
+      from("projects").
+      insert({
+        name: newProjectName.trim(),
+        created_by: user.id,
+        allowed_roles: selectedRoles.length > 0 ? selectedRoles : ["admin"]
+      }).
+      select().
+      single();
 
       if (error) throw error;
 
       // Insert metadata fields
       if (metadataFields.length > 0 && project) {
-        const { error: fieldsError } = await supabase
-          .from("project_metadata_fields")
-          .insert(
-            metadataFields.map((field_name) => ({
-              project_id: project.id,
-              field_name,
-            }))
-          );
+        const { error: fieldsError } = await supabase.
+        from("project_metadata_fields").
+        insert(
+          metadataFields.map((field_name) => ({
+            project_id: project.id,
+            field_name
+          }))
+        );
         if (fieldsError) console.error("Error creating metadata fields:", fieldsError);
       }
 
@@ -182,7 +182,7 @@ const Projects = () => {
   };
 
   const filteredProjects = projects.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
+  p.name.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -192,12 +192,12 @@ const Projects = () => {
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-10">
         {/* Metrics */}
         <div className="grid grid-cols-3 gap-4">
-          {metrics.map((m) => (
-            <div
-              key={m.label}
-              className="rounded-2xl border border-border bg-card p-6 space-y-2"
-            >
-              <p className="text-xs font-medium text-brand tracking-wider uppercase">
+          {metrics.map((m) =>
+          <div
+            key={m.label}
+            className="rounded-2xl border border-border bg-card p-6 space-y-2">
+
+              <p className="text-xs font-medium tracking-wider uppercase text-primary">
                 {m.label}
               </p>
               <p className="text-2xl font-semibold text-foreground tracking-tight">
@@ -205,7 +205,7 @@ const Projects = () => {
               </p>
               <p className="text-xs text-muted-foreground">{m.sublabel}</p>
             </div>
-          ))}
+          )}
         </div>
 
         {/* Projects section */}
@@ -219,8 +219,8 @@ const Projects = () => {
             </div>
             <Button
               onClick={() => setShowCreate(true)}
-              className="rounded-full bg-foreground text-background hover:bg-foreground/90 gap-2"
-            >
+              className="rounded-full bg-foreground text-background hover:bg-foreground/90 gap-2">
+
               <Plus className="h-4 w-4" />
               Create project
             </Button>
@@ -233,16 +233,16 @@ const Projects = () => {
               placeholder="Search projects..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 rounded-xl border-border"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
-              >
+              className="pl-10 rounded-xl border-border" />
+
+            {search &&
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2">
+
                 <X className="h-4 w-4 text-muted-foreground" />
               </button>
-            )}
+            }
           </div>
 
           {/* Table header */}
@@ -253,21 +253,21 @@ const Projects = () => {
 
           {/* Project rows */}
           <div className="border border-border rounded-2xl overflow-hidden bg-card divide-y divide-border">
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
+            {loading ?
+            <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : filteredProjects.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground text-sm">
+              </div> :
+            filteredProjects.length === 0 ?
+            <div className="text-center py-12 text-muted-foreground text-sm">
                 {search ? "No projects match your search." : "No projects yet. Create one to get started."}
-              </div>
-            ) : (
-              filteredProjects.map((project) => (
-                <div
-                  key={project.id}
-                  className="flex items-center justify-between px-5 py-4 hover:bg-muted/30 cursor-pointer transition-colors"
-                  onDoubleClick={() => navigate(`/?project=${project.id}`)}
-                >
+              </div> :
+
+            filteredProjects.map((project) =>
+            <div
+              key={project.id}
+              className="flex items-center justify-between px-5 py-4 hover:bg-muted/30 cursor-pointer transition-colors"
+              onDoubleClick={() => navigate(`/?project=${project.id}`)}>
+
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-foreground">
                       {project.name}
@@ -277,19 +277,19 @@ const Projects = () => {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {project.allowed_roles.map((role) => (
-                      <Badge
-                        key={role}
-                        variant="outline"
-                        className="rounded-full text-xs font-normal capitalize"
-                      >
+                    {project.allowed_roles.map((role) =>
+                <Badge
+                  key={role}
+                  variant="outline"
+                  className="rounded-full text-xs font-normal capitalize">
+
                         {role}
                       </Badge>
-                    ))}
+                )}
                   </div>
                 </div>
-              ))
-            )}
+            )
+            }
           </div>
         </div>
       </main>
@@ -308,8 +308,8 @@ const Projects = () => {
               <Input
                 placeholder="e.g. Industrial Batteries"
                 value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-              />
+                onChange={(e) => setNewProjectName(e.target.value)} />
+
             </div>
 
             {/* Role access */}
@@ -317,18 +317,18 @@ const Projects = () => {
               <Label>Access Role</Label>
               <Select
                 value={selectedRoles.length === availableRoles.length && availableRoles.length > 0 ? "all" : selectedRoles[0] || "admin"}
-                onValueChange={handleRoleChange}
-              >
+                onValueChange={handleRoleChange}>
+
                 <SelectTrigger>
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent className="bg-popover border border-border shadow-lg z-50">
                   <SelectItem value="all">All</SelectItem>
-                  {availableRoles.map((role) => (
-                    <SelectItem key={role} value={role} className="capitalize">
+                  {availableRoles.map((role) =>
+                  <SelectItem key={role} value={role} className="capitalize">
                       {role}
                     </SelectItem>
-                  ))}
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -340,22 +340,22 @@ const Projects = () => {
                 Define the metadata structure for documents in this project.
               </p>
               <div className="flex flex-wrap gap-2">
-                {metadataFields.map((field) => (
-                  <Badge
-                    key={field}
-                    variant="secondary"
-                    className="rounded-full gap-1.5 pr-1.5"
-                  >
+                {metadataFields.map((field) =>
+                <Badge
+                  key={field}
+                  variant="secondary"
+                  className="rounded-full gap-1.5 pr-1.5">
+
                     {field}
                     <button
-                      onClick={() =>
-                        setMetadataFields(metadataFields.filter((f) => f !== field))
-                      }
-                    >
+                    onClick={() =>
+                    setMetadataFields(metadataFields.filter((f) => f !== field))
+                    }>
+
                       <X className="h-3 w-3" />
                     </button>
                   </Badge>
-                ))}
+                )}
               </div>
               <div className="flex gap-2">
                 <Input
@@ -363,15 +363,15 @@ const Projects = () => {
                   value={newFieldName}
                   onChange={(e) => setNewFieldName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addMetadataField())}
-                  className="flex-1"
-                />
+                  className="flex-1" />
+
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={addMetadataField}
-                  className="shrink-0"
-                >
+                  className="shrink-0">
+
                   <Plus className="h-4 w-4" />
                   Add
                 </Button>
@@ -386,16 +386,16 @@ const Projects = () => {
             <Button
               onClick={handleCreateProject}
               disabled={!newProjectName.trim() || creating}
-              className="bg-foreground text-background hover:bg-foreground/90"
-            >
+              className="bg-foreground text-background hover:bg-foreground/90">
+
               {creating && <Loader2 className="h-4 w-4 animate-spin" />}
               Create Project
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
+    </div>);
+
 };
 
 export default Projects;
