@@ -690,7 +690,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       {/* Project dropdown + tab switcher row — full width, aligned with header */}
       {(projects || tabSwitcher) && (
-        <div className="flex items-center justify-between px-4 py-2">
+        <div className="flex items-center justify-between px-4 py-3">
           {projects && currentProject && onProjectSwitch ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
