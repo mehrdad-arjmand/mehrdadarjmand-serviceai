@@ -250,7 +250,7 @@ const Projects = () => {
 
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         {/* Metrics */}
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-3 gap-4 mb-16">
           {metrics.map((m) =>
           <div
             key={m.label}
@@ -298,10 +298,9 @@ const Projects = () => {
             <span className="text-sm text-muted-foreground">{filteredProjects.length} result{filteredProjects.length !== 1 ? "s" : ""}</span>
           </div>
           <Separator />
-        </div>
 
-        {/* Project rows */}
-        <div className="divide-y divide-border">
+          {/* Project rows */}
+          <div className="divide-y divide-border mt-4">
           {loading ?
           <div className="flex items-center justify-center py-12">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -369,6 +368,7 @@ const Projects = () => {
             );
           })
           }
+          </div>
         </div>
       </main>
 
