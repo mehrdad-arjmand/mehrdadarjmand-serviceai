@@ -74,6 +74,13 @@ const Index = () => {
     };
   }, [projectId]);
 
+  // Redirect to /projects if no project selected
+  useEffect(() => {
+    if (!projectId && projects.length > 0) {
+      navigate("/projects", { replace: true });
+    }
+  }, [projectId, projects, navigate]);
+
   const handleProjectSwitch = (project: Project) => {
     setCurrentProject(project);
     navigate(`/?project=${project.id}`);
@@ -97,15 +104,10 @@ const Index = () => {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="px-6 lg:px-10 py-10">
-          <div className="text-center py-16">
-            <h2 className="text-xl font-semibold text-foreground mb-2">No Project Selected</h2>
-            <p className="text-muted-foreground">
-              Please select a project from the{" "}
-              <button onClick={() => navigate("/projects")} className="text-foreground underline underline-offset-4 hover:opacity-80">
-                Projects page
-              </button>.
-            </p>
+        <main className="px-6 lg:px-10 py-10 flex items-center justify-center">
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span>Loading...</span>
           </div>
         </main>
       </div>
