@@ -248,9 +248,9 @@ const Projects = () => {
     <div className="min-h-screen bg-popover">
       <Header />
 
-      <main className="max-w-3xl mx-auto px-4 py-8 space-y-10">
+      <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         {/* Metrics */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-4 mb-4">
           {metrics.map((m) =>
           <div
             key={m.label}
@@ -297,7 +297,7 @@ const Projects = () => {
             <h2 className="text-lg font-semibold text-foreground">Projects</h2>
             <span className="text-sm text-muted-foreground">{filteredProjects.length} result{filteredProjects.length !== 1 ? "s" : ""}</span>
           </div>
-          <Separator className="mb-4" />
+          <Separator />
         </div>
 
         {/* Project rows */}
@@ -359,9 +359,9 @@ const Projects = () => {
                     </div>
                   </div>
                   <div className="flex items-center justify-end gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); navigate(`/?project=${project.id}`); }} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Select</button>
                     <button onClick={(e) => { e.stopPropagation(); openEdit(project); }} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Edit</button>
                     <button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.name }); }} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Delete</button>
+                    <button onClick={(e) => { e.stopPropagation(); navigate(`/?project=${project.id}`); }} className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium">Select</button>
                   </div>
                 </div>
               )}
@@ -444,16 +444,16 @@ const Projects = () => {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreate(false)}>
+            <button onClick={() => setShowCreate(false)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
               Cancel
-            </Button>
-            <Button
+            </button>
+            <button
               onClick={handleCreateProject}
               disabled={!newProjectName.trim() || creating}
-              className="bg-foreground text-background hover:bg-foreground/90">
-              {creating && <Loader2 className="h-4 w-4 animate-spin" />}
+              className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50">
+              {creating && <Loader2 className="h-4 w-4 animate-spin inline mr-1" />}
               Create Project
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -490,11 +490,11 @@ const Projects = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
-            <Button onClick={handleEditSave} disabled={!editName.trim() || isSaving} className="bg-foreground text-background hover:bg-foreground/90">
-              {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+            <button onClick={() => setEditTarget(null)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Cancel</button>
+            <button onClick={handleEditSave} disabled={!editName.trim() || isSaving} className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50">
+              {isSaving && <Loader2 className="h-4 w-4 animate-spin inline mr-1" />}
               Save
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
