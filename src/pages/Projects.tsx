@@ -250,7 +250,7 @@ const Projects = () => {
 
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         {/* Metrics */}
-        <div className="grid grid-cols-3 gap-4 mb-16">
+        <div className="grid grid-cols-3 gap-4 mb-32">
           {metrics.map((m) =>
           <div
             key={m.label}
