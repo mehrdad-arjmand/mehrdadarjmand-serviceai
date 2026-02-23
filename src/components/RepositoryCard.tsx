@@ -677,7 +677,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   };
 
   const StatusBadge = ({ doc }: { doc: Document }) => {
-    if (doc.ingestionStatus === 'complete') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
+    // If all chunks have embeddings, treat as complete regardless of ingestion_status lag
+    const effectivelyComplete = doc.ingestionStatus === 'complete' || (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks);
+    if (effectivelyComplete) return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
     if (doc.ingestionStatus === 'failed') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(0 86% 97%)', color: 'hsl(0 72% 51%)', borderColor: 'hsl(0 72% 80%)' }}><AlertCircle className="h-3 w-3" />Failed</span>;
     if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(38 92% 96%)', color: 'hsl(32 95% 44%)', borderColor: 'hsl(38 80% 75%)' }}><Loader2 className="h-3 w-3 animate-spin" />Processing</span>;
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
@@ -722,9 +724,28 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       {/* ── Upload Actions ── */}
       {canWrite && (
         <div className="border-2 border-dashed border-border rounded-2xl bg-background">
-          {/* Action buttons row */}
-          <div className="py-8 px-8 flex items-center justify-center gap-3 flex-wrap">
+          {/* Header text */}
+          <div className="pt-6 px-8 text-center space-y-1">
+            <p className="text-sm font-medium text-foreground">Upload metadata and drag & drop files</p>
+            <p className="text-sm text-muted-foreground">or select an option below</p>
+          </div>
+
+          {/* Buttons row: Metadata | + | Upload files, Copied text, Dictate */}
+          <div className="py-6 px-8 flex items-center justify-center gap-3">
             <input ref={fileInputRef} type="file" id="file-upload" multiple accept=".pdf,.docx,.txt" className="hidden" onChange={handleFileSelect} />
+            <button
+              onClick={() => setMetadataOpen(!metadataOpen)}
+              className={cn(
+                "inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border transition-colors",
+                metadataOpen ? "bg-muted border-border text-foreground" : "bg-background border-border text-foreground hover:bg-muted/50"
+              )}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Metadata
+            </button>
+
+            <div className="h-6 w-px bg-border mx-1" />
+
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading}
@@ -769,20 +790,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
               </div>
             </>
           )}
-
-          {/* Metadata toggle */}
-          <div className="px-8 pb-6 flex items-center justify-center">
-            <button
-              onClick={() => setMetadataOpen(!metadataOpen)}
-              className={cn(
-                "inline-flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium border transition-colors",
-                metadataOpen ? "bg-muted border-border text-foreground" : "bg-background border-border text-foreground hover:bg-muted/50"
-              )}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Metadata
-            </button>
-          </div>
         </div>
       )}
 
