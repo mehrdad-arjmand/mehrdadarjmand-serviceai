@@ -8,10 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, X, Loader2 } from "lucide-react";
+import { Plus, Search, X, Loader2, ChevronRight, ChevronDown, SlidersHorizontal, Pencil, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 interface Project {
   id: string;
@@ -40,10 +41,18 @@ const Projects = () => {
   const [newFieldName, setNewFieldName] = useState("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>(["admin"]);
   const [availableRoles, setAvailableRoles] = useState<string[]>([]);
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [editTarget, setEditTarget] = useState<Project | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editRoles, setEditRoles] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filterRole, setFilterRole] = useState("");
   const [metrics, setMetrics] = useState<MetricCard[]>([
   { label: "ACCURACY", sublabel: "Hit rate", value: "—" },
   { label: "TIME", sublabel: "Median latency", value: "—" },
-  { label: "COST", sublabel: "Average cost per query", value: "—" }]
+  { label: "COST", sublabel: "Average cost per thousand queries", value: "—" }]
   );
 
   const fetchProjects = async () => {
@@ -100,8 +109,8 @@ const Projects = () => {
     },
     {
       label: "COST",
-      sublabel: "Average cost per query",
-      value: `$${avgCost.toFixed(6)}`
+      sublabel: "Average cost per thousand queries",
+      value: `$${(avgCost * 1000).toFixed(2)}`
     }]
     );
   };
@@ -181,12 +190,62 @@ const Projects = () => {
     }
   };
 
-  const filteredProjects = projects.filter((p) =>
-  p.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredProjects = projects.filter((p) => {
+    const q = search.toLowerCase();
+    if (q && !p.name.toLowerCase().includes(q)) return false;
+    if (filterRole && !p.allowed_roles.includes(filterRole) && !p.allowed_roles.includes("all")) return false;
+    return true;
+  });
+
+  const handleDeleteProject = async () => {
+    if (!deleteTarget) return;
+    try {
+      // Delete metadata fields first
+      await supabase.from("project_metadata_fields").delete().eq("project_id", deleteTarget.id);
+      // Delete project documents' chunks
+      const { data: docs } = await supabase.from("documents").select("id").eq("project_id", deleteTarget.id);
+      if (docs) {
+        for (const doc of docs) {
+          await supabase.from("chunks").delete().eq("document_id", doc.id);
+        }
+        await supabase.from("documents").delete().eq("project_id", deleteTarget.id);
+      }
+      await supabase.from("projects").delete().eq("id", deleteTarget.id);
+      toast({ title: "Project deleted", description: `"${deleteTarget.name}" removed.` });
+      setDeleteTarget(null);
+      if (expandedProjectId === deleteTarget.id) setExpandedProjectId(null);
+      fetchProjects();
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const openEdit = (project: Project) => {
+    setEditTarget(project);
+    setEditName(project.name);
+    setEditRoles(project.allowed_roles);
+  };
+
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    setIsSaving(true);
+    try {
+      await supabase.from("projects").update({
+        name: editName.trim(),
+        allowed_roles: editRoles.length > 0 ? editRoles : ["admin"],
+      }).eq("id", editTarget.id);
+      toast({ title: "Project updated" });
+      setEditTarget(null);
+      fetchProjects();
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-popover">
       <Header />
 
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-10">
@@ -196,7 +255,6 @@ const Projects = () => {
           <div
             key={m.label}
             className="rounded-2xl border border-border bg-card p-6 space-y-2">
-
               <p className="text-xs font-medium tracking-wider uppercase text-primary">
                 {m.label}
               </p>
@@ -208,89 +266,140 @@ const Projects = () => {
           )}
         </div>
 
-        {/* Projects section */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">Projects</h2>
-              <p className="text-sm text-muted-foreground">
-                Isolated workspaces, independent repositories.
-              </p>
+        {/* Upload-style buttons row */}
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={() => setShowCreate(true)}
+            className="rounded-full bg-foreground text-background hover:bg-foreground/90 gap-2">
+            <Plus className="h-4 w-4" />
+            Create project
+          </Button>
+        </div>
+
+        {/* Search + Filters */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search projects..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-10 rounded-xl border-border" />
+              {search &&
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <X className="h-4 w-4 text-muted-foreground" />
+                </button>
+              }
             </div>
             <Button
-              onClick={() => setShowCreate(true)}
-              className="rounded-full bg-foreground text-background hover:bg-foreground/90 gap-2">
-
-              <Plus className="h-4 w-4" />
-              Create project
+              variant="outline"
+              size="sm"
+              onClick={() => setFiltersOpen(!filtersOpen)}
+              className="rounded-xl gap-1.5 h-10 px-3">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Filters
             </Button>
           </div>
 
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search projects..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 rounded-xl border-border" />
+          {filtersOpen && (
+            <div className="grid grid-cols-3 gap-4 p-4 rounded-xl border border-border bg-card">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Role</p>
+                <Select value={filterRole || "all"} onValueChange={(v) => setFilterRole(v === "all" ? "" : v)}>
+                  <SelectTrigger className="h-10 rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border border-border shadow-lg z-50">
+                    <SelectItem value="all">All</SelectItem>
+                    {availableRoles.map((role) =>
+                      <SelectItem key={role} value={role} className="capitalize">{role}</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+        </div>
 
-            {search &&
-            <button
-              onClick={() => setSearch("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2">
+        {/* Table header */}
+        <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+          <span className="font-semibold text-sm text-foreground">Projects</span>
+          <span className="text-primary font-medium">{filteredProjects.length} result{filteredProjects.length !== 1 ? "s" : ""}</span>
+        </div>
 
-                <X className="h-4 w-4 text-muted-foreground" />
-              </button>
-            }
-          </div>
+        {/* Project rows */}
+        <div className="divide-y divide-border">
+          {loading ?
+          <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div> :
+          filteredProjects.length === 0 ?
+          <div className="text-center py-12 text-muted-foreground text-sm">
+              {search ? "No projects match your search." : "No projects yet. Create one to get started."}
+            </div> :
 
-          {/* Table header */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-            <span className="font-medium">All projects</span>
-            <span>Double-click a row to open</span>
-          </div>
-
-          {/* Project rows */}
-          <div className="border border-border rounded-2xl overflow-hidden bg-card divide-y divide-border">
-            {loading ?
-            <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div> :
-            filteredProjects.length === 0 ?
-            <div className="text-center py-12 text-muted-foreground text-sm">
-                {search ? "No projects match your search." : "No projects yet. Create one to get started."}
-              </div> :
-
-            filteredProjects.map((project) =>
-            <div
-              key={project.id}
-              className="flex items-center justify-between px-5 py-4 hover:bg-muted/30 cursor-pointer transition-colors"
-              onDoubleClick={() => navigate(`/?project=${project.id}`)}>
-
-                  <div className="space-y-1">
+          filteredProjects.map((project) => (
+            <div key={project.id}>
+              {/* Main row */}
+              <div
+                className="flex items-center justify-between px-1 py-4 cursor-pointer transition-colors min-h-[72px]"
+                onClick={() => setExpandedProjectId(expandedProjectId === project.id ? null : project.id)}
+                onDoubleClick={() => navigate(`/?project=${project.id}`)}>
+                  <div className="space-y-1.5 flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground">
                       {project.name}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      Created {format(new Date(project.created_at), "MMM d, yyyy")}
-                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {project.allowed_roles.map((role) =>
+                        <Badge
+                          key={role}
+                          variant="outline"
+                          className="rounded-full text-xs font-normal capitalize">
+                            {role}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {project.allowed_roles.map((role) =>
-                <Badge
-                  key={role}
-                  variant="outline"
-                  className="rounded-full text-xs font-normal capitalize">
-
-                        {role}
-                      </Badge>
-                )}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-xs text-muted-foreground">
+                      {format(new Date(project.created_at), "MMM d, yyyy")}
+                    </span>
+                    {expandedProjectId === project.id ?
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" /> :
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    }
                   </div>
                 </div>
-            )
-            }
-          </div>
+
+              {/* Expanded detail */}
+              {expandedProjectId === project.id && (
+                <div className="px-4 pb-4 pt-1 ml-1 border-l-2 border-border">
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">Created</p>
+                      <p className="text-sm text-foreground">{format(new Date(project.created_at), "MMM d, yyyy")}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">Access Roles</p>
+                      <p className="text-sm text-foreground capitalize">{project.allowed_roles.includes("all") ? "All Roles" : project.allowed_roles.join(", ")}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" className="rounded-lg" onClick={(e) => { e.stopPropagation(); openEdit(project); }}>
+                      Edit
+                    </Button>
+                    <Button variant="outline" size="sm" className="rounded-lg" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.name }); }}>
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
+          }
         </div>
       </main>
 
@@ -302,58 +411,46 @@ const Projects = () => {
           </DialogHeader>
 
           <div className="space-y-5 py-2">
-            {/* Project name */}
             <div className="space-y-2">
               <Label>Project Name</Label>
               <Input
                 placeholder="e.g. Industrial Batteries"
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)} />
-
             </div>
 
-            {/* Role access */}
             <div className="space-y-2">
               <Label>Access Role</Label>
               <Select
                 value={selectedRoles.length === availableRoles.length && availableRoles.length > 0 ? "all" : selectedRoles[0] || "admin"}
                 onValueChange={handleRoleChange}>
-
                 <SelectTrigger>
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent className="bg-popover border border-border shadow-lg z-50">
                   <SelectItem value="all">All</SelectItem>
                   {availableRoles.map((role) =>
-                  <SelectItem key={role} value={role} className="capitalize">
-                      {role}
-                    </SelectItem>
+                    <SelectItem key={role} value={role} className="capitalize">{role}</SelectItem>
                   )}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Metadata fields */}
             <div className="space-y-2">
               <Label>Metadata Fields</Label>
               <p className="text-xs text-muted-foreground">
-                Define the metadata structure for documents in this project.
+                Define the metadata fields that will appear on the Repository upload form for this project.
               </p>
               <div className="flex flex-wrap gap-2">
                 {metadataFields.map((field) =>
-                <Badge
-                  key={field}
-                  variant="secondary"
-                  className="rounded-full gap-1.5 pr-1.5">
-
-                    {field}
-                    <button
-                    onClick={() =>
-                    setMetadataFields(metadataFields.filter((f) => f !== field))
-                    }>
-
-                      <X className="h-3 w-3" />
-                    </button>
+                  <Badge
+                    key={field}
+                    variant="secondary"
+                    className="rounded-full gap-1.5 pr-1.5">
+                      {field}
+                      <button onClick={() => setMetadataFields(metadataFields.filter((f) => f !== field))}>
+                        <X className="h-3 w-3" />
+                      </button>
                   </Badge>
                 )}
               </div>
@@ -364,14 +461,12 @@ const Projects = () => {
                   onChange={(e) => setNewFieldName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addMetadataField())}
                   className="flex-1" />
-
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={addMetadataField}
                   className="shrink-0">
-
                   <Plus className="h-4 w-4" />
                   Add
                 </Button>
@@ -387,13 +482,71 @@ const Projects = () => {
               onClick={handleCreateProject}
               disabled={!newProjectName.trim() || creating}
               className="bg-foreground text-background hover:bg-foreground/90">
-
               {creating && <Loader2 className="h-4 w-4 animate-spin" />}
               Create Project
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Edit Project Modal */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Project</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            <div className="space-y-2">
+              <Label>Project Name</Label>
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Access Role</Label>
+              <Select
+                value={editRoles.length === availableRoles.length && availableRoles.length > 0 ? "all" : editRoles[0] || "admin"}
+                onValueChange={(value) => {
+                  if (value === "all") setEditRoles(availableRoles);
+                  else setEditRoles([value]);
+                }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border border-border shadow-lg z-50">
+                  <SelectItem value="all">All</SelectItem>
+                  {availableRoles.map((role) =>
+                    <SelectItem key={role} value={role} className="capitalize">{role}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={!editName.trim() || isSaving} className="bg-foreground text-background hover:bg-foreground/90">
+              {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete "{deleteTarget?.name}" and all its documents. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteProject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>);
 
 };
