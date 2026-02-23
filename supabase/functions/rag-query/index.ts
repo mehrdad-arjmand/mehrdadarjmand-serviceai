@@ -12,6 +12,8 @@ interface ConversationMessage {
 
 interface RAGQueryRequest {
   question: string
+  // Project scoping
+  projectId?: string
   // Optional document filters
   documentType?: string
   uploadDate?: string
@@ -234,9 +236,15 @@ Deno.serve(async (req) => {
       throw new Error('isConversationMode must be a boolean')
     }
 
+    // Validate projectId if provided
+    if (rawRequest.projectId !== undefined && !isValidOptionalString(rawRequest.projectId, 100)) {
+      throw new Error('projectId must be a valid string')
+    }
+
     // Build validated request
     const request: RAGQueryRequest = {
       question: (rawRequest.question as string).trim().slice(0, MAX_QUESTION_LENGTH),
+      projectId: rawRequest.projectId as string | undefined,
       documentType: sanitizeString(rawRequest.documentType as string | undefined),
       uploadDate: rawRequest.uploadDate as string | undefined,
       filterSite: sanitizeString(rawRequest.filterSite as string | undefined),
@@ -249,6 +257,7 @@ Deno.serve(async (req) => {
 
     const { 
       question, 
+      projectId: requestProjectId,
       documentType,
       uploadDate,
       filterSite,
@@ -261,6 +270,7 @@ Deno.serve(async (req) => {
     
     console.log('RAG Query:', { 
       question: question.slice(0, 100), 
+      projectId: requestProjectId,
       filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel },
       isConversationMode,
       historyLength: history?.length || 0
@@ -292,11 +302,33 @@ Deno.serve(async (req) => {
 
     console.log(`Found ${chunks?.length || 0} semantic chunks`)
 
+    // Build project-scoped document ID set
+    let projectDocIds: Set<string> | null = null
+    if (requestProjectId) {
+      const { data: projectDocs, error: projError } = await supabase
+        .from('documents')
+        .select('id')
+        .eq('project_id', requestProjectId)
+
+      if (projError) {
+        console.error('Error fetching project documents:', projError)
+      } else {
+        projectDocIds = new Set((projectDocs || []).map((d: any) => d.id))
+        console.log(`Project ${requestProjectId} has ${projectDocIds.size} documents`)
+      }
+    }
+
     // Filter chunks by user's accessible documents (RBAC enforcement)
     let accessFilteredChunks = chunks || []
     if (accessibleDocIds) {
       accessFilteredChunks = accessFilteredChunks.filter((chunk: any) => accessibleDocIds.has(chunk.document_id))
       console.log(`After access filter: ${accessFilteredChunks.length} chunks (from ${chunks?.length || 0})`)
+    }
+
+    // Filter chunks by project scope
+    if (projectDocIds) {
+      accessFilteredChunks = accessFilteredChunks.filter((chunk: any) => projectDocIds!.has(chunk.document_id))
+      console.log(`After project filter: ${accessFilteredChunks.length} chunks`)
     }
 
     // Apply document filters if provided
@@ -305,6 +337,7 @@ Deno.serve(async (req) => {
     if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel) {
       let docQuery = supabase.from('documents').select('id')
       
+      if (requestProjectId) docQuery = docQuery.eq('project_id', requestProjectId)
       if (documentType) docQuery = docQuery.eq('doc_type', documentType)
       if (uploadDate) docQuery = docQuery.eq('upload_date', uploadDate)
       if (filterSite) docQuery = docQuery.eq('site', filterSite)
@@ -351,6 +384,7 @@ Deno.serve(async (req) => {
     let matchingDocIds: Set<string> | null = null
     if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel) {
       let docQuery = supabase.from('documents').select('id')
+      if (requestProjectId) docQuery = docQuery.eq('project_id', requestProjectId)
       if (documentType) docQuery = docQuery.eq('doc_type', documentType)
       if (uploadDate) docQuery = docQuery.eq('upload_date', uploadDate)
       if (filterSite) docQuery = docQuery.eq('site', filterSite)
@@ -370,7 +404,8 @@ Deno.serve(async (req) => {
       filteredChunks, 
       matchingDocIds,
       equipmentType,
-      accessibleDocIds
+      accessibleDocIds,
+      projectDocIds
     )
     // Re-rank chunks: prioritize substantive content over TOC/index entries
     const rankedChunks = rerankChunks(combinedChunks, question)
@@ -618,7 +653,8 @@ async function enrichWithKeywordFallback(
   initialChunks: any[],
   matchingDocIds: Set<string> | null,
   equipmentType?: string,
-  accessibleDocIds?: Set<string> | null
+  accessibleDocIds?: Set<string> | null,
+  projectDocIds?: Set<string> | null
 ): Promise<any[]> {
   try {
     const tokens = (question.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
@@ -657,6 +693,9 @@ async function enrichWithKeywordFallback(
       
       // APPLY ACCESS CONTROL FILTER
       if (accessibleDocIds && !accessibleDocIds.has(row.document_id)) continue
+      
+      // APPLY PROJECT SCOPE FILTER
+      if (projectDocIds && !projectDocIds.has(row.document_id)) continue
       
       // APPLY DOCUMENT FILTERS to keyword results
       if (matchingDocIds && !matchingDocIds.has(row.document_id)) continue
