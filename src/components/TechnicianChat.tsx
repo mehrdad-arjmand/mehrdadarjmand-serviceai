@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen, ArrowDown, ChevronDown, Check } from "lucide-react";
+import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen, ArrowDown, ChevronDown, Check, FolderOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
@@ -402,6 +402,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
+                    <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                     <span className="flex-1 text-left truncate">{currentProject.name}</span>
                     <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                   </button>
@@ -413,6 +414,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                       onClick={() => onProjectSwitch(project)}
                       className="flex items-center justify-between"
                     >
+                      <FolderOpen className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                       <span className="truncate">{project.name}</span>
                       {project.id === currentProject.id && (
                         <Check className="h-4 w-4 text-foreground flex-shrink-0" />
