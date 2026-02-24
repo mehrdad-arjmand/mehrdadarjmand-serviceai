@@ -279,6 +279,16 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const [isInsertingDictation, setIsInsertingDictation] = useState(false);
   const dictateRecognitionRef = useRef<any>(null);
 
+  // Edit content modal state (for txt/docx)
+  const [editContentDoc, setEditContentDoc] = useState<Document | null>(null);
+  const [editContentName, setEditContentName] = useState("");
+  const [editContentText, setEditContentText] = useState("");
+  const [isEditContentDictating, setIsEditContentDictating] = useState(false);
+  const [isEditContentSaving, setIsEditContentSaving] = useState(false);
+  const [isEditContentLoading, setIsEditContentLoading] = useState(false);
+  const editContentRecognitionRef = useRef<any>(null);
+  const editContentTextareaRef = useRef<HTMLTextAreaElement>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Fetch project metadata fields ──
@@ -360,12 +370,15 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
   };
 
+  const documentsRef = useRef(documents);
+  documentsRef.current = documents;
+
   useEffect(() => {
     fetchDocuments();
     const docsChannel = supabase.channel('repository-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).subscribe();
     const chunksChannel = supabase.channel('repository-chunks').on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments).subscribe();
     const poll = setInterval(() => {
-      if (documents.some(d => d.ingestionStatus === 'in_progress' || d.ingestionStatus === 'processing_embeddings')) fetchDocuments();
+      if (documentsRef.current.some(d => d.ingestionStatus === 'in_progress' || d.ingestionStatus === 'processing_embeddings')) fetchDocuments();
     }, 3000);
     return () => { supabase.removeChannel(docsChannel); supabase.removeChannel(chunksChannel); clearInterval(poll); };
   }, [projectId]);
@@ -467,7 +480,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
-    let finalTranscript = '';
+    let finalTranscript = dictateContent;
     recognition.onstart = () => setIsDictating(true);
     recognition.onresult = (event: any) => {
       let interimTranscript = '';
@@ -485,7 +498,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     };
     recognition.onend = () => { setIsDictating(false); dictateRecognitionRef.current = null; };
     recognition.start();
-  }, [toast]);
+  }, [toast, dictateContent]);
 
   const stopDictation = useCallback(() => {
     if (dictateRecognitionRef.current) {
@@ -494,12 +507,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     }
     setIsDictating(false);
   }, []);
-
-  const restartDictation = useCallback(() => {
-    stopDictation();
-    setDictateContent("");
-    setTimeout(() => startDictation(), 200);
-  }, [stopDictation, startDictation]);
 
   const handleInsertDictation = async () => {
     if (!dictateName.trim() || !dictateContent.trim()) {
@@ -589,6 +596,95 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       await fetchDocuments();
     } catch (e: any) { toast({ title: "Update failed", description: e.message, variant: "destructive" }); }
     finally { setIsSaving(false); }
+  };
+
+  // ── Edit Content (for txt/docx) ──
+  const openEditContent = async (doc: Document) => {
+    setEditContentDoc(doc);
+    setEditContentName(doc.fileName);
+    setEditContentText("");
+    setIsEditContentLoading(true);
+    const { data: chunks } = await supabase.from('chunks').select('text, chunk_index').eq('document_id', doc.id).order('chunk_index');
+    setEditContentText(chunks?.map(c => c.text).join('') || '');
+    setIsEditContentLoading(false);
+  };
+
+  const startEditContentDictation = useCallback(() => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast({ title: "Speech recognition not supported", variant: "destructive" });
+      return;
+    }
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    editContentRecognitionRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    const textarea = editContentTextareaRef.current;
+    const cursorPos = textarea?.selectionStart ?? editContentText.length;
+    const textBefore = editContentText.slice(0, cursorPos);
+    const textAfter = editContentText.slice(cursorPos);
+    let newDictatedText = '';
+    recognition.onstart = () => setIsEditContentDictating(true);
+    recognition.onresult = (event: any) => {
+      let finalT = '';
+      let interimT = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalT += transcript + ' ';
+        else interimT += transcript;
+      }
+      newDictatedText += finalT;
+      setEditContentText(textBefore + newDictatedText + interimT + textAfter);
+    };
+    recognition.onerror = (event: any) => {
+      if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
+      setIsEditContentDictating(false);
+      editContentRecognitionRef.current = null;
+    };
+    recognition.onend = () => { setIsEditContentDictating(false); editContentRecognitionRef.current = null; };
+    recognition.start();
+  }, [toast, editContentText]);
+
+  const stopEditContentDictation = useCallback(() => {
+    if (editContentRecognitionRef.current) {
+      try { editContentRecognitionRef.current.stop(); } catch (e) {}
+      editContentRecognitionRef.current = null;
+    }
+    setIsEditContentDictating(false);
+  }, []);
+
+  const handleSaveEditContent = async () => {
+    if (!editContentDoc || !editContentText.trim()) return;
+    stopEditContentDictation();
+    setIsEditContentSaving(true);
+    try {
+      await supabase.from('chunks').delete().eq('document_id', editContentDoc.id);
+      await supabase.from('documents').update({
+        filename: editContentName.trim() || editContentDoc.fileName,
+        ingestion_status: 'in_progress',
+        ingestion_error: null,
+        total_chunks: 0,
+        ingested_chunks: 0,
+      }).eq('id', editContentDoc.id);
+
+      const { data, error } = await supabase.functions.invoke('ingest-text', {
+        body: {
+          documentId: editContentDoc.id,
+          documentName: editContentName.trim() || editContentDoc.fileName,
+          content: editContentText.trim(),
+          allowedRoles: editContentDoc.allowedRoles,
+          projectId: projectId || undefined,
+          dynamicMetadata: editContentDoc.metadata,
+          isUpdate: true,
+        }
+      });
+      if (error) throw error;
+      toast({ title: "Document updated", description: "Re-indexing in progress..." });
+      setEditContentDoc(null);
+      await fetchDocuments();
+    } catch (e: any) { toast({ title: "Update failed", description: e.message, variant: "destructive" }); }
+    finally { setIsEditContentSaving(false); }
   };
 
   // ── Reprocess ──
@@ -817,7 +913,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
               Copied text
             </button>
             <button
-              onClick={() => { setDictateOpen(true); setTimeout(() => startDictation(), 300); }}
+              onClick={() => setDictateOpen(true)}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
             >
               <Mic className="h-4 w-4" />
@@ -980,8 +1076,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                       </div>
                     </div>
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => setViewDoc(doc)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">View</button>
-                      {canWrite && <button onClick={() => openEdit(doc)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Edit</button>}
+                      {doc.fileType === 'pdf' ? (
+                        <button onClick={() => setViewDoc(doc)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">View</button>
+                      ) : (
+                        <button onClick={() => openEditContent(doc)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Edit</button>
+                      )}
+                      {canWrite && <button onClick={() => openEdit(doc)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Metadata</button>}
                       {canDelete && <button onClick={() => setDeleteTarget({ id: doc.id, fileName: doc.fileName })} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Delete</button>}
                       {canWrite && <button onClick={() => handleReprocess(doc)} className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium">Reprocess</button>}
                     </div>
@@ -1136,12 +1236,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                   Start recording
                 </button>
               )}
-              <button
-                onClick={restartDictation}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border border-border bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
-              >
-                Restart
-              </button>
               {isDictating && (
                 <span className="flex items-center gap-1.5 text-xs text-destructive">
                   <span className="h-2 w-2 rounded-full bg-destructive animate-pulse" />
@@ -1154,6 +1248,73 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             <button onClick={() => { stopDictation(); setDictateOpen(false); setDictateName(""); setDictateContent(""); }} className="px-5 py-2 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Cancel</button>
             <button onClick={handleInsertDictation} disabled={isInsertingDictation || !dictateName.trim() || !dictateContent.trim()} className="px-5 py-2 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50">
               {isInsertingDictation ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin inline" /> Inserting...</> : "Insert"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Content Modal (txt/docx) ── */}
+      <Dialog open={!!editContentDoc} onOpenChange={open => { if (!open) { stopEditContentDictation(); setEditContentDoc(null); setEditContentName(""); setEditContentText(""); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit document</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-sm font-medium">Document name</Label>
+              <Input
+                value={editContentName}
+                onChange={e => setEditContentName(e.target.value)}
+                placeholder="Enter document name"
+                className="mt-1.5"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Content</Label>
+              {isEditContentLoading ? (
+                <div className="flex items-center justify-center min-h-[200px] border border-border rounded-md mt-1.5">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <Textarea
+                  ref={editContentTextareaRef}
+                  value={editContentText}
+                  onChange={e => setEditContentText(e.target.value)}
+                  placeholder="Document content..."
+                  className="mt-1.5 min-h-[200px]"
+                />
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {isEditContentDictating ? (
+                <button
+                  onClick={stopEditContentDictation}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                  Stop recording
+                </button>
+              ) : (
+                <button
+                  onClick={startEditContentDictation}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
+                >
+                  <Mic className="h-3.5 w-3.5" />
+                  Start recording
+                </button>
+              )}
+              {isEditContentDictating && (
+                <span className="flex items-center gap-1.5 text-xs text-destructive">
+                  <span className="h-2 w-2 rounded-full bg-destructive animate-pulse" />
+                  Recording...
+                </span>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <button onClick={() => { stopEditContentDictation(); setEditContentDoc(null); }} className="px-5 py-2 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Cancel</button>
+            <button onClick={handleSaveEditContent} disabled={isEditContentSaving || !editContentText.trim()} className="px-5 py-2 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50">
+              {isEditContentSaving ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin inline" /> Saving...</> : "Insert"}
             </button>
           </DialogFooter>
         </DialogContent>
