@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    const { documentName, content, docType, site, equipmentType, equipmentMake, equipmentModel, allowedRoles, projectId, dynamicMetadata } = await req.json()
+    const { documentId, documentName, content, docType, site, equipmentType, equipmentMake, equipmentModel, allowedRoles, projectId, dynamicMetadata, isUpdate } = await req.json()
 
     if (!documentName || !content || content.trim().length === 0) {
       return new Response(JSON.stringify({ error: 'Document name and content are required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
@@ -47,25 +47,42 @@ Deno.serve(async (req) => {
     // Ensure .docx extension
     const filename = documentName.endsWith('.docx') ? documentName : `${documentName}.docx`
 
-    const docId = crypto.randomUUID()
-    const { error: docError } = await supabase.from('documents').insert({
-      id: docId,
-      filename,
-      doc_type: docType || 'unknown',
-      upload_date: new Date().toISOString().split('T')[0],
-      site: site || null,
-      equipment_make: equipmentMake || null,
-      equipment_model: equipmentModel || null,
-      page_count: Math.ceil(content.length / 3000) || 1,
-      total_chunks: 0,
-      ingested_chunks: 0,
-      ingestion_status: 'in_progress',
-      allowed_roles: allowedRoles || ['all'],
-      project_id: projectId || null,
-      metadata: dynamicMetadata || {},
-    })
+    let docId: string
 
-    if (docError) throw docError
+    if (isUpdate && documentId) {
+      // Update existing document
+      docId = documentId
+      await supabase.from('chunks').delete().eq('document_id', docId)
+      const { error: updateError } = await supabase.from('documents').update({
+        filename,
+        ingestion_status: 'in_progress',
+        ingestion_error: null,
+        total_chunks: 0,
+        ingested_chunks: 0,
+        page_count: Math.ceil(content.length / 3000) || 1,
+      }).eq('id', docId)
+      if (updateError) throw updateError
+    } else {
+      // Create new document
+      docId = crypto.randomUUID()
+      const { error: docError } = await supabase.from('documents').insert({
+        id: docId,
+        filename,
+        doc_type: docType || 'unknown',
+        upload_date: new Date().toISOString().split('T')[0],
+        site: site || null,
+        equipment_make: equipmentMake || null,
+        equipment_model: equipmentModel || null,
+        page_count: Math.ceil(content.length / 3000) || 1,
+        total_chunks: 0,
+        ingested_chunks: 0,
+        ingestion_status: 'in_progress',
+        allowed_roles: allowedRoles || ['all'],
+        project_id: projectId || null,
+        metadata: dynamicMetadata || {},
+      })
+      if (docError) throw docError
+    }
 
     // Background processing
     const backgroundWork = (async () => {
