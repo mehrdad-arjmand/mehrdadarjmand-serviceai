@@ -15,13 +15,12 @@ async function verifyAdmin(req: Request) {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) throw new Error('Unauthorized')
 
-  const token = authHeader.replace('Bearer ', '')
-  const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: authHeader } },
-    auth: { persistSession: false, autoRefreshToken: false }
+  const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { Authorization: authHeader, apikey: supabaseAnonKey },
   })
-  const { data: { user }, error } = await authClient.auth.getUser(token)
-  if (error || !user) throw new Error('Unauthorized')
+  if (!userRes.ok) throw new Error('Unauthorized')
+  const user = await userRes.json()
+  if (!user?.id) throw new Error('Unauthorized')
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
   const { data: isAdmin } = await supabase.rpc('check_is_admin', { check_user_id: user.id })
