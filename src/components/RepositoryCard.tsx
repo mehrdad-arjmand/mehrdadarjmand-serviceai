@@ -41,6 +41,7 @@ interface Document {
   ingestionStatus: string;
   ingestionError: string | null;
   allowedRoles: string[];
+  metadata: Record<string, string>;
 }
 
 interface Role {
@@ -229,25 +230,20 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
 
+  // Project metadata fields
+  const [projectFields, setProjectFields] = useState<string[]>([]);
+
   // Upload state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
 
-  // Upload metadata
-  const [docType, setDocType] = useState("");
-  const [site, setSite] = useState("");
-  const [equipmentType, setEquipmentType] = useState("");
-  const [equipmentMake, setEquipmentMake] = useState("");
-  const [equipmentModel, setEquipmentModel] = useState("");
+  // Dynamic upload metadata (keyed by field name)
+  const [uploadMetadata, setUploadMetadata] = useState<Record<string, string>>({});
   const [selectedRoles, setSelectedRoles] = useState<string[]>(["all"]);
 
-  // Dropdown options
-  const [docTypeOptions, setDocTypeOptions] = useState<string[]>([]);
-  const [siteOptions, setSiteOptions] = useState<string[]>([]);
-  const [equipmentTypeOptions, setEquipmentTypeOptions] = useState<string[]>([]);
-  const [equipmentMakeOptions, setEquipmentMakeOptions] = useState<string[]>([]);
-  const [equipmentModelOptions, setEquipmentModelOptions] = useState<string[]>([]);
+  // Dropdown options (keyed by field name)
+  const [fieldOptions, setFieldOptions] = useState<Record<string, string[]>>({});
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
 
   // Documents
@@ -258,21 +254,13 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [filterDocType, setFilterDocType] = useState("");
-  const [filterSite, setFilterSite] = useState("");
-  const [filterEquipmentType, setFilterEquipmentType] = useState("");
-  const [filterMake, setFilterMake] = useState("");
-  const [filterModel, setFilterModel] = useState("");
+  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [filterRole, setFilterRole] = useState("");
 
   // Modals
   const [viewDoc, setViewDoc] = useState<Document | null>(null);
   const [editTarget, setEditTarget] = useState<Document | null>(null);
-  const [editDocType, setEditDocType] = useState("");
-  const [editSite, setEditSite] = useState("");
-  const [editEquipmentType, setEditEquipmentType] = useState("");
-  const [editEquipmentMake, setEditEquipmentMake] = useState("");
-  const [editEquipmentModel, setEditEquipmentModel] = useState("");
+  const [editMetadata, setEditMetadata] = useState<Record<string, string>>({});
   const [editSelectedRoles, setEditSelectedRoles] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; fileName: string } | null>(null);
@@ -293,15 +281,33 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Fetch dropdown options ──
+  // ── Fetch project metadata fields ──
+  useEffect(() => {
+    const fetchProjectFields = async () => {
+      if (!projectId) {
+        setProjectFields([]);
+        return;
+      }
+      const { data } = await supabase
+        .from('project_metadata_fields')
+        .select('field_name')
+        .eq('project_id', projectId)
+        .order('created_at');
+      setProjectFields(data?.map(f => f.field_name) || []);
+    };
+    fetchProjectFields();
+  }, [projectId]);
+
+  // ── Fetch dropdown options for each field ──
   const fetchDropdownOptions = async () => {
     const { data } = await supabase.from('dropdown_options').select('category, value').order('value');
     if (data) {
-      setDocTypeOptions(data.filter(d => d.category === 'docType').map(d => d.value));
-      setSiteOptions(data.filter(d => d.category === 'site').map(d => d.value));
-      setEquipmentTypeOptions(data.filter(d => d.category === 'equipmentType').map(d => d.value));
-      setEquipmentMakeOptions(data.filter(d => d.category === 'equipmentMake').map(d => d.value));
-      setEquipmentModelOptions(data.filter(d => d.category === 'equipmentModel').map(d => d.value));
+      const grouped: Record<string, string[]> = {};
+      data.forEach(d => {
+        if (!grouped[d.category]) grouped[d.category] = [];
+        grouped[d.category].push(d.value);
+      });
+      setFieldOptions(grouped);
     }
   };
 
@@ -347,6 +353,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         ingestionStatus: doc.ingestion_status || 'pending',
         ingestionError: doc.ingestion_error || null,
         allowedRoles: (doc as any).allowed_roles || ['admin'],
+        metadata: (doc as any).metadata || {},
       };
     }));
 
@@ -364,10 +371,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   }, [projectId]);
 
   // ── Add new dropdown option ──
-  const handleAddOption = async (category: string, value: string, setter: (opts: string[]) => void, currentOpts: string[]) => {
+  const handleAddOption = async (category: string, value: string) => {
     if (!value.trim()) return;
     await supabase.from('dropdown_options').insert({ category, value: value.trim() });
-    if (!currentOpts.includes(value.trim())) setter([...currentOpts, value.trim()]);
     await fetchDropdownOptions();
   };
 
@@ -379,20 +385,26 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     try {
       const formData = new FormData();
       filesToUpload.forEach(f => formData.append('files', f));
-      if (docType) formData.append('docType', docType);
       formData.append('uploadDate', new Date().toISOString().split('T')[0]);
-      if (site) formData.append('site', site);
-      if (equipmentType) formData.append('equipmentType', equipmentType);
-      if (equipmentMake) formData.append('equipmentMake', equipmentMake);
-      if (equipmentModel) formData.append('equipmentModel', equipmentModel);
       formData.append('allowedRoles', JSON.stringify(selectedRoles));
       if (projectId) formData.append('projectId', projectId);
+      
+      // Send dynamic metadata as JSON
+      formData.append('dynamicMetadata', JSON.stringify(uploadMetadata));
+
+      // Also send legacy fields for backward compatibility
+      if (uploadMetadata['Document Type']) formData.append('docType', uploadMetadata['Document Type']);
+      if (uploadMetadata['Site']) formData.append('site', uploadMetadata['Site']);
+      if (uploadMetadata['Equipment Type']) formData.append('equipmentType', uploadMetadata['Equipment Type']);
+      if (uploadMetadata['Make']) formData.append('equipmentMake', uploadMetadata['Make']);
+      if (uploadMetadata['Model']) formData.append('equipmentModel', uploadMetadata['Model']);
+
       const { data, error } = await supabase.functions.invoke('ingest', { body: formData });
       if (error) throw error;
       if (data.success) {
         toast({ title: "Upload successful", description: `${data.documents.length} file(s) queued for indexing.` });
         setSelectedFiles([]);
-        setDocType(""); setSite(""); setEquipmentType(""); setEquipmentMake(""); setEquipmentModel("");
+        setUploadMetadata({});
         setSelectedRoles(["all"]); setMetadataOpen(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
         await fetchDocuments();
@@ -421,13 +433,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         body: {
           documentName: copiedTextName.trim(),
           content: copiedTextContent.trim(),
-          docType: docType || undefined,
-          site: site || undefined,
-          equipmentType: equipmentType || undefined,
-          equipmentMake: equipmentMake || undefined,
-          equipmentModel: equipmentModel || undefined,
+          docType: uploadMetadata['Document Type'] || undefined,
+          site: uploadMetadata['Site'] || undefined,
+          equipmentType: uploadMetadata['Equipment Type'] || undefined,
+          equipmentMake: uploadMetadata['Make'] || undefined,
+          equipmentModel: uploadMetadata['Model'] || undefined,
           allowedRoles: selectedRoles,
           projectId: projectId || undefined,
+          dynamicMetadata: uploadMetadata,
         }
       });
       if (error) throw error;
@@ -500,13 +513,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         body: {
           documentName: dictateName.trim(),
           content: dictateContent.trim(),
-          docType: docType || undefined,
-          site: site || undefined,
-          equipmentType: equipmentType || undefined,
-          equipmentMake: equipmentMake || undefined,
-          equipmentModel: equipmentModel || undefined,
+          docType: uploadMetadata['Document Type'] || undefined,
+          site: uploadMetadata['Site'] || undefined,
+          equipmentType: uploadMetadata['Equipment Type'] || undefined,
+          equipmentMake: uploadMetadata['Make'] || undefined,
+          equipmentModel: uploadMetadata['Model'] || undefined,
           allowedRoles: selectedRoles,
           projectId: projectId || undefined,
+          dynamicMetadata: uploadMetadata,
         }
       });
       if (error) throw error;
@@ -538,11 +552,15 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   // ── Edit ──
   const openEdit = (doc: Document) => {
     setEditTarget(doc);
-    setEditDocType(doc.docType === 'unknown' ? '' : doc.docType);
-    setEditSite(doc.site || '');
-    setEditEquipmentType(doc.equipmentType === 'unknown' ? '' : doc.equipmentType);
-    setEditEquipmentMake(doc.equipmentMake || '');
-    setEditEquipmentModel(doc.equipmentModel || '');
+    // Build edit metadata from doc's metadata + legacy fields
+    const meta: Record<string, string> = { ...(doc.metadata || {}) };
+    // Fill from legacy columns if not in metadata
+    if (doc.docType && doc.docType !== 'unknown' && !meta['Document Type']) meta['Document Type'] = doc.docType;
+    if (doc.site && !meta['Site']) meta['Site'] = doc.site;
+    if (doc.equipmentType && doc.equipmentType !== 'unknown' && !meta['Equipment Type']) meta['Equipment Type'] = doc.equipmentType;
+    if (doc.equipmentMake && !meta['Make']) meta['Make'] = doc.equipmentMake;
+    if (doc.equipmentModel && !meta['Model']) meta['Model'] = doc.equipmentModel;
+    setEditMetadata(meta);
     setEditSelectedRoles(doc.allowedRoles);
   };
 
@@ -550,8 +568,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     if (!editTarget) return;
     setIsSaving(true);
     try {
-      await supabase.from('documents').update({ doc_type: editDocType || null, site: editSite || null, equipment_make: editEquipmentMake || null, equipment_model: editEquipmentModel || null, allowed_roles: editSelectedRoles }).eq('id', editTarget.id);
-      if (editEquipmentType !== editTarget.equipmentType) await supabase.from('chunks').update({ equipment: editEquipmentType || null }).eq('document_id', editTarget.id);
+      const updateData: any = {
+        allowed_roles: editSelectedRoles,
+        metadata: editMetadata,
+      };
+      // Also update legacy columns if present
+      if (editMetadata['Document Type'] !== undefined) updateData.doc_type = editMetadata['Document Type'] || null;
+      if (editMetadata['Site'] !== undefined) updateData.site = editMetadata['Site'] || null;
+      if (editMetadata['Make'] !== undefined) updateData.equipment_make = editMetadata['Make'] || null;
+      if (editMetadata['Model'] !== undefined) updateData.equipment_model = editMetadata['Model'] || null;
+
+      await supabase.from('documents').update(updateData).eq('id', editTarget.id);
+
+      if (editMetadata['Equipment Type'] !== undefined) {
+        await supabase.from('chunks').update({ equipment: editMetadata['Equipment Type'] || null }).eq('document_id', editTarget.id);
+      }
+
       toast({ title: "Document updated" });
       setEditTarget(null);
       await fetchDocuments();
@@ -567,14 +599,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     setReprocessingIds(prev => new Set(prev).add(doc.id));
 
     try {
-      // 1. Clear existing embeddings so generate-embeddings will re-process them
       const { error: clearError } = await supabase
         .from('chunks')
         .update({ embedding: null })
         .eq('document_id', doc.id);
       if (clearError) throw clearError;
 
-      // 2. Reset document status and embedded count
       await supabase.from('documents').update({
         ingestion_status: 'processing_embeddings',
         ingestion_error: null,
@@ -583,7 +613,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       await fetchDocuments();
 
-      // 3. Poll with batch mode until complete
       let complete = false;
       let attempts = 0;
       const maxAttempts = 200;
@@ -602,7 +631,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
         complete = embedResponse?.complete === true;
 
-        // Update ingested_chunks in documents table for live progress
         if (embedResponse?.embedded != null) {
           await supabase.from('documents').update({
             ingested_chunks: embedResponse.embedded,
@@ -634,24 +662,40 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
   // ── Filter active tags ──
   const activeFilters: { key: string; label: string; clear: () => void }[] = [];
-  if (filterDocType) activeFilters.push({ key: 'type', label: `Type: ${filterDocType}`, clear: () => setFilterDocType("") });
-  if (filterSite) activeFilters.push({ key: 'site', label: `Site: ${filterSite}`, clear: () => setFilterSite("") });
-  if (filterEquipmentType) activeFilters.push({ key: 'eqtype', label: `Equipment: ${filterEquipmentType}`, clear: () => setFilterEquipmentType("") });
-  if (filterMake) activeFilters.push({ key: 'make', label: `Make: ${filterMake}`, clear: () => setFilterMake("") });
-  if (filterModel) activeFilters.push({ key: 'model', label: `Model: ${filterModel}`, clear: () => setFilterModel("") });
+  projectFields.forEach(field => {
+    if (filterValues[field]) {
+      activeFilters.push({ key: field, label: `${field}: ${filterValues[field]}`, clear: () => setFilterValues(prev => { const n = { ...prev }; delete n[field]; return n; }) });
+    }
+  });
   if (filterRole) activeFilters.push({ key: 'role', label: `Role: ${filterRole}`, clear: () => setFilterRole("") });
 
-  const clearAllFilters = () => { setFilterDocType(""); setFilterSite(""); setFilterEquipmentType(""); setFilterMake(""); setFilterModel(""); setFilterRole(""); setSearchQuery(""); };
+  const clearAllFilters = () => { setFilterValues({}); setFilterRole(""); setSearchQuery(""); };
+
+  // ── Get metadata value from doc (check metadata JSONB first, then legacy columns) ──
+  const getDocFieldValue = (doc: Document, field: string): string => {
+    if (doc.metadata && doc.metadata[field]) return doc.metadata[field];
+    // Legacy mapping
+    const legacyMap: Record<string, string | null> = {
+      'Document Type': doc.docType !== 'unknown' ? doc.docType : null,
+      'Site': doc.site,
+      'Equipment Type': doc.equipmentType !== 'unknown' ? doc.equipmentType : null,
+      'Make': doc.equipmentMake,
+      'Model': doc.equipmentModel,
+    };
+    return legacyMap[field] || '';
+  };
 
   // ── Filtered documents ──
   const filteredDocuments = documents.filter(doc => {
     const q = searchQuery.toLowerCase();
     if (q && !doc.fileName.toLowerCase().includes(q) && !doc.docType.toLowerCase().includes(q) && !(doc.site || '').toLowerCase().includes(q) && !(doc.equipmentMake || '').toLowerCase().includes(q) && !(doc.equipmentModel || '').toLowerCase().includes(q)) return false;
-    if (filterDocType && doc.docType !== filterDocType) return false;
-    if (filterSite && doc.site !== filterSite) return false;
-    if (filterEquipmentType && doc.equipmentType !== filterEquipmentType) return false;
-    if (filterMake && doc.equipmentMake !== filterMake) return false;
-    if (filterModel && doc.equipmentModel !== filterModel) return false;
+    // Dynamic field filters
+    for (const field of projectFields) {
+      if (filterValues[field]) {
+        const val = getDocFieldValue(doc, field);
+        if (val !== filterValues[field]) return false;
+      }
+    }
     if (filterRole && !doc.allowedRoles.includes(filterRole) && !doc.allowedRoles.includes("all")) return false;
     return true;
   });
@@ -668,16 +712,23 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
   const getMetaTags = (doc: Document) => {
     const tags: string[] = [];
-    if (doc.docType && doc.docType !== 'unknown') tags.push(doc.docType);
-    if (doc.site) tags.push(doc.site);
-    if (doc.equipmentType && doc.equipmentType !== 'unknown') tags.push(doc.equipmentType);
-    if (doc.equipmentMake) tags.push(doc.equipmentMake);
-    if (doc.equipmentModel) tags.push(doc.equipmentModel);
+    // Use project fields to get tags
+    for (const field of projectFields) {
+      const val = getDocFieldValue(doc, field);
+      if (val) tags.push(val);
+    }
+    // Fallback: if no project fields, use legacy
+    if (projectFields.length === 0) {
+      if (doc.docType && doc.docType !== 'unknown') tags.push(doc.docType);
+      if (doc.site) tags.push(doc.site);
+      if (doc.equipmentType && doc.equipmentType !== 'unknown') tags.push(doc.equipmentType);
+      if (doc.equipmentMake) tags.push(doc.equipmentMake);
+      if (doc.equipmentModel) tags.push(doc.equipmentModel);
+    }
     return tags;
   };
 
   const StatusBadge = ({ doc }: { doc: Document }) => {
-    // If all chunks have embeddings, treat as complete regardless of ingestion_status lag
     const effectivelyComplete = doc.ingestionStatus === 'complete' || (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks);
     if (effectivelyComplete) return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
     if (doc.ingestionStatus === 'failed') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(0 86% 97%)', color: 'hsl(0 72% 51%)', borderColor: 'hsl(0 72% 80%)' }}><AlertCircle className="h-3 w-3" />Failed</span>;
@@ -685,10 +736,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
   };
 
+  // Compute grid columns based on field count + Access Role
+  const metadataFieldCount = projectFields.length + 1; // +1 for Access Role
+  const gridCols = metadataFieldCount <= 2 ? 2 : 3;
+
   return (
     <div className="space-y-0 pb-12">
 
-      {/* Project dropdown + tab switcher row — full width, aligned with header */}
+      {/* Project dropdown + tab switcher row */}
       {(projects || tabSwitcher) && (
         <div className="flex items-center justify-between px-4 py-3">
           {projects && currentProject && onProjectSwitch ? (
@@ -730,7 +785,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             <p className="text-sm text-muted-foreground">or select an option below</p>
           </div>
 
-          {/* Buttons row: Metadata | + | Upload files, Copied text, Dictate */}
+          {/* Buttons row */}
           <div className="py-6 px-8 flex items-center justify-center gap-3">
             <input ref={fileInputRef} type="file" id="file-upload" multiple accept=".pdf,.docx,.txt" className="hidden" onChange={handleFileSelect} />
             <button
@@ -770,21 +825,27 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             </button>
           </div>
 
-          {/* Metadata panel */}
+          {/* Metadata panel — dynamic fields from project + Access Role */}
           {metadataOpen && (
             <>
               <Separator />
               <div className="px-8 py-6">
                 <div className="flex items-center justify-between mb-5">
                   <p className="text-sm font-semibold text-foreground">Upload metadata</p>
-                  <button onClick={() => { setDocType(""); setSite(""); setEquipmentType(""); setEquipmentMake(""); setEquipmentModel(""); setSelectedRoles(["all"]); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+                  <button onClick={() => { setUploadMetadata({}); setSelectedRoles(["all"]); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
                 </div>
-                <div className="grid grid-cols-3 gap-x-8 gap-y-5">
-                  <InlineSelect label="Document Type" value={docType} onChange={setDocType} options={docTypeOptions} allowAdd onAddNew={v => handleAddOption('docType', v, setDocTypeOptions, docTypeOptions)} />
-                  <InlineSelect label="Site" value={site} onChange={setSite} options={siteOptions} allowAdd onAddNew={v => handleAddOption('site', v, setSiteOptions, siteOptions)} />
-                  <InlineSelect label="Equipment Type" value={equipmentType} onChange={setEquipmentType} options={equipmentTypeOptions} allowAdd onAddNew={v => handleAddOption('equipmentType', v, setEquipmentTypeOptions, equipmentTypeOptions)} />
-                  <InlineSelect label="Make" value={equipmentMake} onChange={setEquipmentMake} options={equipmentMakeOptions} allowAdd onAddNew={v => handleAddOption('equipmentMake', v, setEquipmentMakeOptions, equipmentMakeOptions)} />
-                  <InlineSelect label="Model" value={equipmentModel} onChange={setEquipmentModel} options={equipmentModelOptions} allowAdd onAddNew={v => handleAddOption('equipmentModel', v, setEquipmentModelOptions, equipmentModelOptions)} />
+                <div className={`grid gap-x-8 gap-y-5 ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                  {projectFields.map(field => (
+                    <InlineSelect
+                      key={field}
+                      label={field}
+                      value={uploadMetadata[field] || ""}
+                      onChange={v => setUploadMetadata(prev => ({ ...prev, [field]: v }))}
+                      options={fieldOptions[field] || []}
+                      allowAdd
+                      onAddNew={v => handleAddOption(field, v)}
+                    />
+                  ))}
                   <RoleSelect label="Access Role" selectedRoles={selectedRoles} availableRoles={availableRoles} onChange={setSelectedRoles} />
                 </div>
               </div>
@@ -842,19 +903,23 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           )}
         </div>
 
-        {/* Filter panel */}
+        {/* Filter panel — dynamic fields from project + Access Role */}
         {filtersOpen && (
           <div className="border border-border rounded-xl p-6 bg-background shadow-sm">
             <div className="flex items-center justify-between mb-5">
               <p className="text-sm font-semibold text-foreground">Search filters</p>
-              <button onClick={() => { setFilterDocType(""); setFilterSite(""); setFilterEquipmentType(""); setFilterMake(""); setFilterModel(""); setFilterRole(""); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+              <button onClick={() => { setFilterValues({}); setFilterRole(""); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
             </div>
-            <div className="grid grid-cols-3 gap-x-8 gap-y-5">
-              <InlineSelect label="Document Type" value={filterDocType} onChange={v => { setFilterDocType(v); setVisibleCount(10); }} options={docTypeOptions} />
-              <InlineSelect label="Site" value={filterSite} onChange={v => { setFilterSite(v); setVisibleCount(10); }} options={siteOptions} />
-              <InlineSelect label="Equipment Type" value={filterEquipmentType} onChange={v => { setFilterEquipmentType(v); setVisibleCount(10); }} options={equipmentTypeOptions} />
-              <InlineSelect label="Make" value={filterMake} onChange={v => { setFilterMake(v); setVisibleCount(10); }} options={equipmentMakeOptions} />
-              <InlineSelect label="Model" value={filterModel} onChange={v => { setFilterModel(v); setVisibleCount(10); }} options={equipmentModelOptions} />
+            <div className={`grid gap-x-8 gap-y-5 ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+              {projectFields.map(field => (
+                <InlineSelect
+                  key={field}
+                  label={field}
+                  value={filterValues[field] || ""}
+                  onChange={v => { setFilterValues(prev => ({ ...prev, [field]: v })); setVisibleCount(10); }}
+                  options={fieldOptions[field] || []}
+                />
+              ))}
               <InlineSelect label="Access Role" value={filterRole} onChange={v => { setFilterRole(v); setVisibleCount(10); }} options={availableRoles.map(r => r.role)} />
             </div>
           </div>
@@ -880,7 +945,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
             return (
               <div key={doc.id}>
-                {/* Row */}
                 <div
                   className="py-5 flex items-start justify-between cursor-pointer hover:bg-muted/30 px-2 -mx-2 rounded-lg transition-colors min-h-[72px]"
                   onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
@@ -899,7 +963,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                   </div>
                 </div>
 
-                {/* Expanded panel */}
                 {isExpanded && (
                   <div className="mx-2 mb-4 border border-border rounded-xl p-5 bg-muted/20">
                     <div className="grid grid-cols-3 gap-6 mb-5">
@@ -929,7 +992,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           })}
         </div>
 
-        {/* Load more */}
         {filteredDocuments.length > visibleCount && (
           <div className="flex justify-center mt-6">
             <button onClick={() => setVisibleCount(v => v + 10)} className="px-6 py-2 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
@@ -953,18 +1015,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         />
       )}
 
-      {/* ── Edit Modal ── */}
+      {/* ── Edit Modal — dynamic fields from project + Access Role ── */}
       <Dialog open={!!editTarget} onOpenChange={open => !open && setEditTarget(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit metadata</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-5 py-2">
-            <InlineSelect label="Document Type" value={editDocType} onChange={setEditDocType} options={docTypeOptions} />
-            <InlineSelect label="Site" value={editSite} onChange={setEditSite} options={siteOptions} />
-            <InlineSelect label="Equipment Type" value={editEquipmentType} onChange={setEditEquipmentType} options={equipmentTypeOptions} />
-            <InlineSelect label="Make" value={editEquipmentMake} onChange={setEditEquipmentMake} options={equipmentMakeOptions} />
-            <InlineSelect label="Model" value={editEquipmentModel} onChange={setEditEquipmentModel} options={equipmentModelOptions} />
+          <div className={`grid gap-x-6 gap-y-5 py-2 ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-2'}`}>
+            {projectFields.map(field => (
+              <InlineSelect
+                key={field}
+                label={field}
+                value={editMetadata[field] || ""}
+                onChange={v => setEditMetadata(prev => ({ ...prev, [field]: v }))}
+                options={fieldOptions[field] || []}
+              />
+            ))}
             <RoleSelect label="Access Role" selectedRoles={editSelectedRoles} availableRoles={availableRoles} onChange={setEditSelectedRoles} />
           </div>
           <DialogFooter>

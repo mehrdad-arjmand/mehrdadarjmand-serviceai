@@ -118,6 +118,18 @@ Deno.serve(async (req) => {
     const equipmentMake = formData.get('equipmentMake')
     const equipmentModel = formData.get('equipmentModel')
     const allowedRolesRaw = formData.get('allowedRoles')
+    const projectIdRaw = formData.get('projectId')
+    const dynamicMetadataRaw = formData.get('dynamicMetadata')
+
+    // Parse dynamic metadata
+    let dynamicMetadata: Record<string, string> = {}
+    if (dynamicMetadataRaw && typeof dynamicMetadataRaw === 'string') {
+      try {
+        dynamicMetadata = JSON.parse(dynamicMetadataRaw)
+      } catch {
+        console.log('Invalid dynamicMetadata format')
+      }
+    }
 
     // Validate file count
     if (!files || files.length === 0) throw new Error('No files provided')
@@ -191,6 +203,8 @@ Deno.serve(async (req) => {
           ingested_chunks: 0,
           ingestion_status: 'in_progress',
           allowed_roles: allowedRoles,
+          project_id: projectIdRaw ? String(projectIdRaw) : null,
+          metadata: dynamicMetadata,
         })
 
       if (docError) {
@@ -391,7 +405,6 @@ async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): 
   }
   console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches of up to ${BATCH_SIZE}`)
 
-  // Run ALL batches in parallel to avoid shutdown before completion
   const batchPromises = batches.map(async (batch, b) => {
     const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
     console.log(`Gemini batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
