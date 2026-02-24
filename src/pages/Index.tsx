@@ -41,6 +41,7 @@ const Index = () => {
           setCurrentProject(found || null);
         }
       }
+      setProjectsFetched(true);
     };
     fetchProjects();
   }, [projectId]);
@@ -75,11 +76,13 @@ const Index = () => {
   }, [projectId]);
 
   // Redirect to /projects if no project selected
+  const [projectsFetched, setProjectsFetched] = useState(false);
+
   useEffect(() => {
-    if (!projectId && projects.length > 0) {
+    if (projectsFetched && !projectId) {
       navigate("/projects", { replace: true });
     }
-  }, [projectId, projects, navigate]);
+  }, [projectId, projectsFetched, navigate]);
 
   const handleProjectSwitch = (project: Project) => {
     setCurrentProject(project);
