@@ -264,6 +264,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
+      // Refresh session to ensure valid auth token
+      await supabase.auth.getSession();
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true, projectId: projectId || undefined }
       });
@@ -298,6 +300,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
+      // Refresh session to ensure valid auth token
+      await supabase.auth.getSession();
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false, projectId: projectId || undefined }
       });
