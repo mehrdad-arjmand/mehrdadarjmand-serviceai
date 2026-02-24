@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Search, X, Loader2, ChevronRight, ChevronDown, Check } from "lucide-react";
+import { Plus, Search, X, Loader2, ChevronRight, ChevronDown, Check, FolderOpen } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { format } from "date-fns";
 import { toast } from "@/hooks/use-toast";
@@ -362,7 +362,7 @@ const Projects = () => {
                       onDoubleClick={() => navigate(`/?project=${project.id}`)}
                     >
                       <div className="flex-1 min-w-0 pr-4">
-                        <p className="text-sm font-semibold text-foreground">{project.name}</p>
+                        <p className="text-sm font-semibold text-foreground flex items-center gap-2"><FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />{project.name}</p>
                         <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
                           {project.allowed_roles.map((role) => (
                             <span key={role} className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background capitalize">{role}</span>

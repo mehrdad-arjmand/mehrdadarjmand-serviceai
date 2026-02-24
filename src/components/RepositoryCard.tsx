@@ -1,7 +1,7 @@
 import {
   Trash2, Loader2, CheckCircle, AlertCircle, Clock, Check,
   SlidersHorizontal, ChevronRight, ChevronDown, X, Search, Plus,
-  Upload, ClipboardPaste, Mic, Square
+  Upload, ClipboardPaste, Mic, Square, FolderOpen
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -846,6 +846,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 w-[228px] px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
+                  <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   <span className="flex-1 text-left truncate">{currentProject.name}</span>
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                 </button>
@@ -857,6 +858,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                     onClick={() => onProjectSwitch(project)}
                     className="flex items-center justify-between"
                   >
+                    <FolderOpen className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                     <span className="truncate">{project.name}</span>
                     {project.id === currentProject.id && (
                       <Check className="h-4 w-4 text-foreground flex-shrink-0" />
