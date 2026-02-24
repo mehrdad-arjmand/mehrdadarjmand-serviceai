@@ -26,16 +26,17 @@ export async function checkPermission(
     return { hasPermission: false, userId: null, error: 'Missing or invalid authorization header' }
   }
 
-  // Verify user token
-  const token = authHeader.replace('Bearer ', '')
-  const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: authHeader } },
-    auth: { persistSession: false, autoRefreshToken: false }
+  // Verify user token via direct API call
+  const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { Authorization: authHeader, apikey: supabaseAnonKey },
   })
 
-  const { data: { user }, error: authError } = await authClient.auth.getUser(token)
+  if (!userRes.ok) {
+    return { hasPermission: false, userId: null, error: 'Unauthorized: Invalid token' }
+  }
 
-  if (authError || !user) {
+  const user = await userRes.json()
+  if (!user?.id) {
     return { hasPermission: false, userId: null, error: 'Unauthorized: Invalid token' }
   }
 
@@ -50,7 +51,6 @@ export async function checkPermission(
 
   if (error) {
     console.error('Permission check error:', error)
-    // Default to denying access on error
     return { hasPermission: false, userId: user.id, error: 'Permission check failed' }
   }
 
