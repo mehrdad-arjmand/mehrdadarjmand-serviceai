@@ -47,18 +47,42 @@ const Index = () => {
   }, [projectId]);
 
   const fetchStats = async () => {
-    let docsQuery = supabase.from('documents').select('*', { count: 'exact', head: true });
-    let chunksQuery = supabase.from('chunks').select('*', { count: 'exact', head: true });
+    try {
+      let docsQuery = supabase.from('documents').select('id', { count: 'exact' });
 
-    if (projectId) {
-      docsQuery = docsQuery.eq('project_id', projectId);
+      if (projectId) {
+        docsQuery = docsQuery.eq('project_id', projectId);
+      }
+
+      const { data: docsData, count: docsCount, error: docsError } = await docsQuery;
+      
+      if (docsError) {
+        console.error('Error fetching document stats:', docsError);
+      }
+
+      // Use data length as fallback if count is null
+      const docCount = docsCount ?? docsData?.length ?? 0;
+      setHasDocuments(docCount > 0);
+
+      // Get chunks count filtered by project documents
+      if (projectId && docsData && docsData.length > 0) {
+        const docIds = docsData.map(d => d.id);
+        const { count: chunksC } = await supabase
+          .from('chunks')
+          .select('*', { count: 'exact', head: true })
+          .in('document_id', docIds);
+        setChunksCount(chunksC || 0);
+      } else if (!projectId) {
+        const { count: chunksC } = await supabase
+          .from('chunks')
+          .select('*', { count: 'exact', head: true });
+        setChunksCount(chunksC || 0);
+      } else {
+        setChunksCount(0);
+      }
+    } catch (err) {
+      console.error('Error in fetchStats:', err);
     }
-
-    const { count: docsCount } = await docsQuery;
-    const { count: chunksC } = await chunksQuery;
-
-    setHasDocuments((docsCount || 0) > 0);
-    setChunksCount(chunksC || 0);
   };
 
   useEffect(() => {
