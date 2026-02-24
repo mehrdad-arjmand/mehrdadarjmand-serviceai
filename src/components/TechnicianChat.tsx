@@ -412,12 +412,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                     <DropdownMenuItem
                       key={project.id}
                       onClick={() => onProjectSwitch(project)}
-                      className="flex items-center justify-between"
+                      className="flex items-center gap-2"
                     >
                       <FolderOpen className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                      <span className="truncate">{project.name}</span>
+                      <span className="flex-1 text-left truncate">{project.name}</span>
                       {project.id === currentProject.id && (
-                        <Check className="h-4 w-4 text-foreground flex-shrink-0" />
+                        <Check className="h-4 w-4 text-foreground flex-shrink-0 ml-auto" />
                       )}
                     </DropdownMenuItem>
                   ))}
