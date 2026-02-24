@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    const { documentName, content, docType, site, equipmentType, equipmentMake, equipmentModel, allowedRoles, projectId } = await req.json()
+    const { documentName, content, docType, site, equipmentType, equipmentMake, equipmentModel, allowedRoles, projectId, dynamicMetadata } = await req.json()
 
     if (!documentName || !content || content.trim().length === 0) {
       return new Response(JSON.stringify({ error: 'Document name and content are required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
       ingestion_status: 'in_progress',
       allowed_roles: allowedRoles || ['all'],
       project_id: projectId || null,
+      metadata: dynamicMetadata || {},
     })
 
     if (docError) throw docError

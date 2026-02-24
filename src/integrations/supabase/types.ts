@@ -69,6 +69,7 @@ export type Database = {
           ingested_chunks: number | null
           ingestion_error: string | null
           ingestion_status: string | null
+          metadata: Json | null
           page_count: number | null
           project_id: string | null
           site: string | null
@@ -86,6 +87,7 @@ export type Database = {
           ingested_chunks?: number | null
           ingestion_error?: string | null
           ingestion_status?: string | null
+          metadata?: Json | null
           page_count?: number | null
           project_id?: string | null
           site?: string | null
@@ -103,6 +105,7 @@ export type Database = {
           ingested_chunks?: number | null
           ingestion_error?: string | null
           ingestion_status?: string | null
+          metadata?: Json | null
           page_count?: number | null
           project_id?: string | null
           site?: string | null
