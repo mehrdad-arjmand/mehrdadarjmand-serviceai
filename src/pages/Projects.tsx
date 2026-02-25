@@ -332,11 +332,17 @@ const Projects = () => {
   };
 
   const fetchUsers = async () => {
-    // Only admins can list users via RPC
     const isAdmin = permissions.role === 'admin';
     if (isAdmin) {
       const { data } = await supabase.rpc('list_users_with_roles');
       if (data) setAllUsers(data.map((u) => ({ user_id: u.user_id, email: u.email, role: u.role })));
+    } else if (permissions.landing.write) {
+      // Non-admin with write access: fetch users by available roles
+      const roleNames = availableRoles.map((r) => r.role);
+      if (roleNames.length > 0) {
+        const { data } = await supabase.rpc('list_users_by_roles', { p_roles: roleNames });
+        if (data) setAllUsers(data.map((u: any) => ({ user_id: u.user_id, email: u.email, role: u.role })));
+      }
     }
   };
 
@@ -349,21 +355,22 @@ const Projects = () => {
   useEffect(() => {
     if (!permissions.isLoading) {
       fetchUsers();
-      // Set default roles to include current user's role
       if (currentUserRole) {
         setSelectedRoles((prev) => prev.length === 0 ? [currentUserRole] : prev);
       }
     }
-  }, [permissions.isLoading, currentUserRole]);
+  }, [permissions.isLoading, currentUserRole, availableRoles]);
 
   const saveProjectUsers = async (projectId: string, userIds: string[]) => {
     // Delete existing
-    await (supabase as any).from("project_allowed_users").delete().eq("project_id", projectId);
+    const { error: delError } = await supabase.from("project_allowed_users").delete().eq("project_id", projectId);
+    if (delError) console.error("Error deleting project users:", delError);
     // If "all" is selected or no specific users, don't add individual entries
     if (userIds.includes("all") || userIds.length === 0) return;
     // Insert specific users
     const rows = userIds.map((uid) => ({ project_id: projectId, user_id: uid }));
-    await (supabase as any).from("project_allowed_users").insert(rows);
+    const { error: insError } = await supabase.from("project_allowed_users").insert(rows);
+    if (insError) console.error("Error inserting project users:", insError);
   };
 
   const handleCreateProject = async () => {
@@ -440,7 +447,7 @@ const Projects = () => {
   const handleDeleteProject = async () => {
     if (!deleteTarget) return;
     try {
-      await (supabase as any).from("project_allowed_users").delete().eq("project_id", deleteTarget.id);
+      await supabase.from("project_allowed_users").delete().eq("project_id", deleteTarget.id);
       await supabase.from("project_metadata_fields").delete().eq("project_id", deleteTarget.id);
       const { data: docs } = await supabase.from("documents").select("id").eq("project_id", deleteTarget.id);
       if (docs) {
@@ -472,7 +479,7 @@ const Projects = () => {
     setEditMetadataFields(data?.map((f) => f.field_name) || []);
     setEditNewFieldName("");
     // Fetch existing allowed users
-    const { data: allowedUsers } = await (supabase as any)
+    const { data: allowedUsers } = await supabase
       .from("project_allowed_users")
       .select("user_id")
       .eq("project_id", project.id);
@@ -487,13 +494,14 @@ const Projects = () => {
     if (!editTarget) return;
     setIsSaving(true);
     try {
-      await supabase
+      const { error: updateError } = await supabase
         .from("projects")
         .update({
           name: editName.trim(),
           allowed_roles: editRoles.length > 0 ? editRoles : (currentUserRole ? [currentUserRole] : ["admin"]),
         })
         .eq("id", editTarget.id);
+      if (updateError) throw updateError;
 
       // Sync metadata fields
       await supabase.from("project_metadata_fields").delete().eq("project_id", editTarget.id);
@@ -505,7 +513,7 @@ const Projects = () => {
 
       // Sync per-user access
       if (editUserIds.includes("all")) {
-        await (supabase as any).from("project_allowed_users").delete().eq("project_id", editTarget.id);
+        await supabase.from("project_allowed_users").delete().eq("project_id", editTarget.id);
       } else if (user) {
         const userIdsToSave = [...new Set([user.id, ...editUserIds])];
         await saveProjectUsers(editTarget.id, userIdsToSave);
@@ -701,7 +709,7 @@ const Projects = () => {
               disabledRoles={disabledRoles}
             />
 
-            {permissions.role === 'admin' && (
+            {(permissions.role === 'admin' || permissions.landing.write) && (
               <UserMultiSelect
                 selectedUserIds={selectedUserIds}
                 allUsers={allUsers}
@@ -779,7 +787,7 @@ const Projects = () => {
               disabledRoles={disabledRoles}
             />
 
-            {permissions.role === 'admin' && (
+            {(permissions.role === 'admin' || permissions.landing.write) && (
               <UserMultiSelect
                 selectedUserIds={editUserIds}
                 allUsers={allUsers}
