@@ -356,6 +356,9 @@ export type Database = {
           description: string | null
           display_name: string | null
           id: string
+          landing_delete: boolean
+          landing_read: boolean
+          landing_write: boolean
           repository_delete: boolean
           repository_read: boolean
           repository_write: boolean
@@ -370,6 +373,9 @@ export type Database = {
           description?: string | null
           display_name?: string | null
           id?: string
+          landing_delete?: boolean
+          landing_read?: boolean
+          landing_write?: boolean
           repository_delete?: boolean
           repository_read?: boolean
           repository_write?: boolean
@@ -384,6 +390,9 @@ export type Database = {
           description?: string | null
           display_name?: string | null
           id?: string
+          landing_delete?: boolean
+          landing_read?: boolean
+          landing_write?: boolean
           repository_delete?: boolean
           repository_read?: boolean
           repository_write?: boolean
