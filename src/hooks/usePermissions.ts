@@ -15,6 +15,7 @@ export interface UserPermissions {
   role: AppRole | null;
   repository: TabPermissions;
   assistant: TabPermissions;
+  landing: TabPermissions;
   isLoading: boolean;
   refetch: () => Promise<void>;
 }
@@ -30,6 +31,7 @@ export function usePermissions(): UserPermissions {
   const [role, setRole] = useState<AppRole | null>(null);
   const [repository, setRepository] = useState<TabPermissions>(defaultPermissions);
   const [assistant, setAssistant] = useState<TabPermissions>(defaultPermissions);
+  const [landing, setLanding] = useState<TabPermissions>(defaultPermissions);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchPermissions = useCallback(async () => {
@@ -37,6 +39,7 @@ export function usePermissions(): UserPermissions {
       setRole(null);
       setRepository(defaultPermissions);
       setAssistant(defaultPermissions);
+      setLanding(defaultPermissions);
       setIsLoading(false);
       return;
     }
@@ -51,6 +54,7 @@ export function usePermissions(): UserPermissions {
         setRole('demo');
         setRepository({ read: true, write: false, delete: false });
         setAssistant({ read: true, write: true, delete: false });
+        setLanding({ read: true, write: false, delete: false });
       } else if (data && data.length > 0) {
         const perms = data[0];
         setRole(perms.role as AppRole);
@@ -64,18 +68,25 @@ export function usePermissions(): UserPermissions {
           write: perms.assistant_write,
           delete: perms.assistant_delete,
         });
+        setLanding({
+          read: (perms as any).landing_read ?? true,
+          write: (perms as any).landing_write ?? false,
+          delete: (perms as any).landing_delete ?? false,
+        });
       } else {
         // No role assigned - default to demo permissions
         console.log('No role assigned for user, using default demo permissions');
         setRole('demo');
         setRepository({ read: true, write: false, delete: false });
         setAssistant({ read: true, write: true, delete: false });
+        setLanding({ read: true, write: false, delete: false });
       }
     } catch (err) {
       console.error('Error fetching permissions:', err);
       setRole('demo');
       setRepository({ read: true, write: false, delete: false });
       setAssistant({ read: true, write: true, delete: false });
+      setLanding({ read: true, write: false, delete: false });
     } finally {
       setIsLoading(false);
     }
@@ -89,13 +100,14 @@ export function usePermissions(): UserPermissions {
     role,
     repository,
     assistant,
+    landing,
     isLoading,
     refetch: fetchPermissions,
   };
 }
 
 // Helper hook to check a specific permission
-export function useHasPermission(tab: 'repository' | 'assistant', action: 'read' | 'write' | 'delete'): boolean {
+export function useHasPermission(tab: 'repository' | 'assistant' | 'landing', action: 'read' | 'write' | 'delete'): boolean {
   const permissions = usePermissions();
   return permissions[tab][action];
 }
