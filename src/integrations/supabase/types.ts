@@ -216,6 +216,35 @@ export type Database = {
         }
         Relationships: []
       }
+      project_allowed_users: {
+        Row: {
+          created_at: string | null
+          id: string
+          project_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          project_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          project_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_allowed_users_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_metadata_fields: {
         Row: {
           created_at: string
@@ -525,6 +554,14 @@ export type Database = {
       }
       has_role: { Args: { _role: string; _user_id: string }; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
+      list_users_by_roles: {
+        Args: { p_roles: string[] }
+        Returns: {
+          email: string
+          role: string
+          user_id: string
+        }[]
+      }
       list_users_with_roles: {
         Args: never
         Returns: {
