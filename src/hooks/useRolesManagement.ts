@@ -271,6 +271,31 @@ export function useRolesManagement() {
     }
   };
 
+  const deleteUser = async (userId: string) => {
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase.rpc('delete_user', { p_user_id: userId });
+      if (error) {
+        console.error('Error deleting user:', error);
+        toast({
+          title: "Error",
+          description: error.message || "Failed to delete user.",
+          variant: "destructive",
+        });
+        return false;
+      }
+      toast({ title: "Success", description: "User deleted successfully." });
+      await Promise.all([fetchRoles(), fetchUsers()]);
+      return true;
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      toast({ title: "Error", description: "An unexpected error occurred.", variant: "destructive" });
+      return false;
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return {
     roles,
     users,
@@ -281,5 +306,6 @@ export function useRolesManagement() {
     assignUserRole,
     createRole,
     deleteRole,
+    deleteUser,
   };
 }

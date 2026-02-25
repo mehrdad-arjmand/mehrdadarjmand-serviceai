@@ -516,6 +516,7 @@ export type Database = {
             Returns: undefined
           }
       delete_role: { Args: { p_role: string }; Returns: undefined }
+      delete_user: { Args: { p_user_id: string }; Returns: undefined }
       get_all_roles: {
         Args: never
         Returns: {
