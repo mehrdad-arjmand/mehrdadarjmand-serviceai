@@ -180,7 +180,7 @@ const Projects = () => {
       costs.length > 0 ? costs.reduce((sum, d) => sum + (d.upstream_inference_cost || 0), 0) / costs.length : 0;
 
     setMetrics([
-      { label: "ACCURACY", sublabel: "Hit rate", value: `${(avgHitRate * 100).toFixed(1)}%` },
+      { label: "QUALITY", sublabel: "Hit rate", value: `${(avgHitRate * 100).toFixed(1)}%` },
       {
         label: "TIME",
         sublabel: "Median latency",
