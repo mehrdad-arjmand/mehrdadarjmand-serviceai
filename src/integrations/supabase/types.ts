@@ -456,19 +456,36 @@ export type Database = {
         Returns: undefined
       }
       check_is_admin: { Args: { check_user_id: string }; Returns: boolean }
-      create_role: {
-        Args: {
-          p_assistant_delete?: boolean
-          p_assistant_read?: boolean
-          p_assistant_write?: boolean
-          p_description?: string
-          p_repository_delete?: boolean
-          p_repository_read?: boolean
-          p_repository_write?: boolean
-          p_role: string
-        }
-        Returns: undefined
-      }
+      create_role:
+        | {
+            Args: {
+              p_assistant_delete?: boolean
+              p_assistant_read?: boolean
+              p_assistant_write?: boolean
+              p_description?: string
+              p_repository_delete?: boolean
+              p_repository_read?: boolean
+              p_repository_write?: boolean
+              p_role: string
+            }
+            Returns: undefined
+          }
+        | {
+            Args: {
+              p_assistant_delete?: boolean
+              p_assistant_read?: boolean
+              p_assistant_write?: boolean
+              p_description?: string
+              p_landing_delete?: boolean
+              p_landing_read?: boolean
+              p_landing_write?: boolean
+              p_repository_delete?: boolean
+              p_repository_read?: boolean
+              p_repository_write?: boolean
+              p_role: string
+            }
+            Returns: undefined
+          }
       delete_role: { Args: { p_role: string }; Returns: undefined }
       get_all_roles: {
         Args: never
@@ -555,20 +572,38 @@ export type Database = {
               text: string
             }[]
           }
-      update_role_permissions: {
-        Args: {
-          p_assistant_delete?: boolean
-          p_assistant_read?: boolean
-          p_assistant_write?: boolean
-          p_description?: string
-          p_new_role_name?: string
-          p_repository_delete?: boolean
-          p_repository_read?: boolean
-          p_repository_write?: boolean
-          p_role: string
-        }
-        Returns: undefined
-      }
+      update_role_permissions:
+        | {
+            Args: {
+              p_assistant_delete?: boolean
+              p_assistant_read?: boolean
+              p_assistant_write?: boolean
+              p_description?: string
+              p_new_role_name?: string
+              p_repository_delete?: boolean
+              p_repository_read?: boolean
+              p_repository_write?: boolean
+              p_role: string
+            }
+            Returns: undefined
+          }
+        | {
+            Args: {
+              p_assistant_delete?: boolean
+              p_assistant_read?: boolean
+              p_assistant_write?: boolean
+              p_description?: string
+              p_landing_delete?: boolean
+              p_landing_read?: boolean
+              p_landing_write?: boolean
+              p_new_role_name?: string
+              p_repository_delete?: boolean
+              p_repository_read?: boolean
+              p_repository_write?: boolean
+              p_role: string
+            }
+            Returns: undefined
+          }
       verify_phone_last_4: { Args: { p_digits: string }; Returns: boolean }
     }
     Enums: {
