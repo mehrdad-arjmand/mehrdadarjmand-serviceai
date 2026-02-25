@@ -468,6 +468,9 @@ export type Database = {
           assistant_read: boolean
           assistant_write: boolean
           description: string
+          landing_delete: boolean
+          landing_read: boolean
+          landing_write: boolean
           repository_delete: boolean
           repository_read: boolean
           repository_write: boolean
@@ -481,6 +484,9 @@ export type Database = {
           assistant_delete: boolean
           assistant_read: boolean
           assistant_write: boolean
+          landing_delete: boolean
+          landing_read: boolean
+          landing_write: boolean
           repository_delete: boolean
           repository_read: boolean
           repository_write: boolean

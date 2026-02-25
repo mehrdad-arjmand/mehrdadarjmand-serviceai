@@ -12,6 +12,9 @@ export interface RoleWithPermissions {
   assistant_read: boolean;
   assistant_write: boolean;
   assistant_delete: boolean;
+  landing_read: boolean;
+  landing_write: boolean;
+  landing_delete: boolean;
   user_count: number;
 }
 
@@ -98,6 +101,9 @@ export function useRolesManagement() {
         p_assistant_read: updates.assistant_read,
         p_assistant_write: updates.assistant_write,
         p_assistant_delete: updates.assistant_delete,
+        p_landing_read: updates.landing_read,
+        p_landing_write: updates.landing_write,
+        p_landing_delete: updates.landing_delete,
       });
 
       if (error) {
@@ -184,6 +190,9 @@ export function useRolesManagement() {
         p_assistant_read: permissions.assistant_read ?? false,
         p_assistant_write: permissions.assistant_write ?? false,
         p_assistant_delete: permissions.assistant_delete ?? false,
+        p_landing_read: permissions.landing_read ?? false,
+        p_landing_write: permissions.landing_write ?? false,
+        p_landing_delete: permissions.landing_delete ?? false,
       });
 
       if (error) {
