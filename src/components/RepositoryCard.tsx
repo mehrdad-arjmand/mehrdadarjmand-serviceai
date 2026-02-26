@@ -1063,7 +1063,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
                 {isExpanded && (
                   <div className="pl-8 pr-8 pb-5">
-                    <Separator className="mb-5 w-[calc(100%-1rem)]" />
+                    <Separator className="mb-5" />
                     <div className="grid grid-cols-3 gap-6 mb-5">
                       <div>
                         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Uploaded</p>
