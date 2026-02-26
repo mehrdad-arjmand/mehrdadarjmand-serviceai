@@ -653,7 +653,7 @@ const Projects = () => {
                     </div>
 
                     {isExpanded && (
-                      <div className="pl-8 pr-2 pb-5">
+                      <div className="pl-8 pr-8 pb-5">
                         <Separator className="mb-5 w-[calc(100%-1rem)]" />
                         <div className="grid grid-cols-3 gap-6 mb-5">
                           <div>
