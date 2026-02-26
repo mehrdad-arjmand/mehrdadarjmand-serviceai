@@ -279,6 +279,7 @@ const Projects = () => {
   const [editNewFieldName, setEditNewFieldName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [filterRole, setFilterRole] = useState("");
+  const [projectMetadataFields, setProjectMetadataFields] = useState<Record<string, string[]>>({});
   const [metrics, setMetrics] = useState<MetricCard[]>([
     { label: "QUALITY", sublabel: "Hit rate", value: "—" },
     { label: "TIME", sublabel: "Median latency", value: "—" },
@@ -290,7 +291,22 @@ const Projects = () => {
 
   const fetchProjects = async () => {
     const { data, error } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
-    if (!error && data) setProjects(data);
+    if (!error && data) {
+      setProjects(data);
+      // Fetch metadata fields for all projects
+      const { data: fields } = await supabase
+        .from("project_metadata_fields")
+        .select("project_id, field_name")
+        .in("project_id", data.map((p) => p.id));
+      if (fields) {
+        const map: Record<string, string[]> = {};
+        fields.forEach((f) => {
+          if (!map[f.project_id]) map[f.project_id] = [];
+          map[f.project_id].push(f.field_name);
+        });
+        setProjectMetadataFields(map);
+      }
+    }
     setLoading(false);
   };
 
@@ -614,12 +630,12 @@ const Projects = () => {
                           {project.name}
                         </p>
                         <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
-                          {project.allowed_roles.map((role) => (
+                          {(projectMetadataFields[project.id] || []).map((field) => (
                             <span
-                              key={role}
-                              className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background capitalize"
+                              key={field}
+                              className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background"
                             >
-                              {role}
+                              {field}
                             </span>
                           ))}
                         </div>
@@ -640,14 +656,6 @@ const Projects = () => {
                       <div className="pl-8 pr-2 pb-5">
                         <Separator className="mb-5 w-[calc(100%-1rem)]" />
                         <div className="grid grid-cols-3 gap-6 mb-5">
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                              Created
-                            </p>
-                            <p className="text-sm text-foreground">
-                              {format(new Date(project.created_at), "MMM d, yyyy")}
-                            </p>
-                          </div>
                           <div>
                             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                               Access Roles
@@ -684,6 +692,7 @@ const Projects = () => {
               })
             )}
           </div>
+          {filteredProjects.length > 0 && <Separator />}
         </div>
       </main>
 
