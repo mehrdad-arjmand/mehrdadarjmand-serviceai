@@ -642,6 +642,10 @@ export type Database = {
             }
             Returns: undefined
           }
+      user_has_project_access: {
+        Args: { p_project_id: string; p_user_id?: string }
+        Returns: boolean
+      }
       verify_phone_last_4: { Args: { p_digits: string }; Returns: boolean }
     }
     Enums: {
