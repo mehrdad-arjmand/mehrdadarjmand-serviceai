@@ -1094,6 +1094,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             );
           })}
         </div>
+        {visibleDocuments.length > 0 && <Separator />}
 
         {filteredDocuments.length > visibleCount && (
           <div className="flex justify-center mt-6">
