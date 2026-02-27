@@ -13,9 +13,7 @@ export const Header = () => {
           onClick={() => navigate("/projects")}
           className="flex items-center gap-3 hover:opacity-80 transition-opacity"
         >
-          <div className="w-9 h-9 rounded-xl bg-foreground flex items-center justify-center shadow-premium flex-shrink-0">
-            <span className="text-background font-semibold text-xs tracking-tight">AI</span>
-          </div>
+          <img src="/logo.svg" alt="Service AI" className="w-9 h-9 flex-shrink-0" />
           <div className="text-left">
             <h1 className="text-base font-semibold text-foreground tracking-tight leading-tight">Service AI</h1>
             <p className="text-[11px] text-muted-foreground font-normal leading-tight">Enterprise Knowledge Base</p>
