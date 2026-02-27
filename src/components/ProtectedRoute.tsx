@@ -10,13 +10,14 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-6">
-        <img src="/logo.svg" alt="Service AI" className="w-16 h-16" />
-        <div className="w-48 flex flex-col items-center gap-3">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-5">
+        <img src="/logo.svg" alt="Service AI" className="w-20 h-20" />
+        <h1 className="text-lg font-semibold text-foreground tracking-tight">Service AI</h1>
+        <div className="w-48 flex flex-col items-center gap-2.5 mt-2">
           <div className="w-full h-1 rounded-full bg-border overflow-hidden">
             <div className="h-full bg-foreground rounded-full animate-loading-bar" />
           </div>
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-xs text-muted-foreground">Loading...</p>
         </div>
       </div>
     );
