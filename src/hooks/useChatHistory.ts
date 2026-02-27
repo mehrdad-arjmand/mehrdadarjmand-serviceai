@@ -25,6 +25,9 @@ export interface ConversationFilters {
   equipmentType: string;
   equipmentMake: string;
   equipmentModel: string;
+  documentIds: string[];
+  dynamicMetadata: Record<string, string>;
+  accessRole: string;
 }
 
 export interface Conversation {
@@ -51,6 +54,9 @@ export function getDefaultFilters(): ConversationFilters {
     equipmentType: "",
     equipmentMake: "",
     equipmentModel: "",
+    documentIds: [],
+    dynamicMetadata: {},
+    accessRole: "",
   };
 }
 

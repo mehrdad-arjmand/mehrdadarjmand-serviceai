@@ -225,6 +225,71 @@ const RoleSelect = ({ label, selectedRoles, availableRoles, onChange }: RoleSele
   );
 };
 
+// ─── Document Multi-Select ────────────────────────────────────────────────────
+interface DocItem { id: string; name: string; }
+interface DocumentMultiSelectProps {
+  label: string;
+  selectedIds: string[];
+  documents: DocItem[];
+  onChange: (ids: string[]) => void;
+}
+
+const DocumentMultiSelect = ({ label, selectedIds, documents, onChange }: DocumentMultiSelectProps) => {
+  const [open, setOpen] = useState(false);
+  const allSelected = selectedIds.length === 0 || (documents.length > 0 && selectedIds.length === documents.length);
+
+  const toggle = (id: string) => {
+    if (id === "__all__") {
+      onChange([]);
+    } else {
+      let next: string[];
+      if (selectedIds.includes(id)) {
+        next = selectedIds.filter(i => i !== id);
+      } else {
+        next = [...selectedIds, id];
+      }
+      if (next.length === documents.length) next = [];
+      onChange(next);
+    }
+  };
+
+  const displayLabel = selectedIds.length === 0 ? "All" : selectedIds.length === 1 ? (documents.find(d => d.id === selectedIds[0])?.name || "1 document") : `${selectedIds.length} documents`;
+
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">{label}</p>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button className="w-full flex items-center justify-between h-10 border border-border rounded-lg px-3 text-sm bg-background hover:bg-muted/40 transition-colors text-left">
+            <span className="text-foreground truncate">{displayLabel}</span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-0 z-50 bg-background border border-border shadow-lg" align="start">
+          <Command>
+            <CommandInput placeholder="Search documents..." />
+            <CommandList>
+              <CommandEmpty>No documents found.</CommandEmpty>
+              <CommandGroup>
+                <CommandItem onSelect={() => toggle("__all__")} className="text-sm">
+                  <Check className={cn("mr-2 h-3.5 w-3.5", allSelected ? "opacity-100" : "opacity-0")} />
+                  All Documents
+                </CommandItem>
+                <Separator className="my-1" />
+                {documents.map(doc => (
+                  <CommandItem key={doc.id} onSelect={() => toggle(doc.id)} className="text-sm">
+                    <Check className={cn("mr-2 h-3.5 w-3.5", selectedIds.includes(doc.id) || allSelected ? "opacity-100" : "opacity-0")} />
+                    <span className="truncate">{doc.name}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, projects, currentProject, onProjectSwitch, tabSwitcher }: RepositoryCardProps) => {
   const canWrite = permissions.write;
@@ -256,6 +321,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [filterRole, setFilterRole] = useState("");
+  const [filterDocumentIds, setFilterDocumentIds] = useState<string[]>([]);
 
   // Modals
   const [viewDoc, setViewDoc] = useState<Document | null>(null);
@@ -764,8 +830,15 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     }
   });
   if (filterRole) activeFilters.push({ key: 'role', label: `Role: ${filterRole}`, clear: () => setFilterRole("") });
+  if (filterDocumentIds.length > 0) {
+    const docLabel = filterDocumentIds.length === 1 ? (documents.find(d => d.id === filterDocumentIds[0])?.fileName || '1 document') : `${filterDocumentIds.length} documents`;
+    activeFilters.push({ key: 'documents', label: `Documents: ${docLabel}`, clear: () => setFilterDocumentIds([]) });
+  }
 
-  const clearAllFilters = () => { setFilterValues({}); setFilterRole(""); setSearchQuery(""); };
+  const clearAllFilters = () => { setFilterValues({}); setFilterRole(""); setFilterDocumentIds([]); setSearchQuery(""); };
+
+  // Document items for multi-select
+  const docItems: DocItem[] = documents.map(d => ({ id: d.id, name: d.fileName }));
 
   // ── Get metadata value from doc (check metadata JSONB first, then legacy columns) ──
   const getDocFieldValue = (doc: Document, field: string): string => {
@@ -793,6 +866,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       }
     }
     if (filterRole && !doc.allowedRoles.includes(filterRole) && !doc.allowedRoles.includes("all")) return false;
+    if (filterDocumentIds.length > 0 && !filterDocumentIds.includes(doc.id)) return false;
     return true;
   });
 
@@ -832,8 +906,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
   };
 
-  // Compute grid columns based on field count + Access Role
-  const metadataFieldCount = projectFields.length + 1; // +1 for Access Role
+  // Compute grid columns based on field count + Access Role + Documents
+  const metadataFieldCount = projectFields.length + 2; // +1 for Access Role, +1 for Documents
   const gridCols = metadataFieldCount <= 2 ? 2 : 3;
 
   return (
@@ -1001,12 +1075,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           )}
         </div>
 
-        {/* Filter panel — dynamic fields from project + Access Role */}
+        {/* Filter panel — dynamic fields from project + Access Role + Documents */}
         {filtersOpen && (
           <div className="border border-border rounded-xl p-6 bg-background shadow-sm">
             <div className="flex items-center justify-between mb-5">
               <p className="text-sm font-semibold text-foreground">Search filters</p>
-              <button onClick={() => { setFilterValues({}); setFilterRole(""); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+              <button onClick={() => { setFilterValues({}); setFilterRole(""); setFilterDocumentIds([]); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
             </div>
             <div className={`grid gap-x-8 gap-y-5 ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
               {projectFields.map(field => (
@@ -1019,6 +1093,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                 />
               ))}
               <InlineSelect label="Access Role" value={filterRole} onChange={v => { setFilterRole(v); setVisibleCount(10); }} options={availableRoles.map(r => r.role)} />
+              <DocumentMultiSelect label="Documents" selectedIds={filterDocumentIds} documents={docItems} onChange={ids => { setFilterDocumentIds(ids); setVisibleCount(10); }} />
             </div>
           </div>
         )}
