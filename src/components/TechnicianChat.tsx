@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen, ArrowDown, ChevronDown, Check, FolderOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,10 +11,10 @@ import { useChatHistory, ChatMessage, ConversationFilters, ChatSource } from "@/
 import { MarkdownWithCitations } from "@/components/MarkdownWithCitations";
 import { DocumentViewerModal } from "@/components/DocumentViewerModal";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TabPermissions } from "@/hooks/usePermissions";
@@ -68,7 +69,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     site: "",
     equipmentType: "",
     equipmentMake: "",
-    equipmentModel: ""
+    equipmentModel: "",
+    documentIds: [],
+    dynamicMetadata: {},
+    accessRole: "",
   });
 
   const [filtersLocked, setFiltersLocked] = useState(false);
@@ -97,32 +101,55 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     currentFiltersRef.current = currentFilters;
   }, [currentFilters]);
 
-  const [docTypes, setDocTypes] = useState<string[]>([]);
-  const [sites, setSites] = useState<string[]>([]);
-  const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
-  const [equipmentMakes, setEquipmentMakes] = useState<string[]>([]);
-  const [equipmentModels, setEquipmentModels] = useState<string[]>([]);
+  // Dynamic project fields, dropdown options, roles, and document list for filters
+  const [projectFields, setProjectFields] = useState<string[]>([]);
+  const [fieldOptions, setFieldOptions] = useState<Record<string, string[]>>({});
+  const [availableRoles, setAvailableRoles] = useState<{ role: string; displayName: string | null }[]>([]);
+  const [projectDocuments, setProjectDocuments] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
-    const fetchFilterOptions = async () => {
-      try {
-        const { data: dropdownData } = await supabase.
-        from('dropdown_options').
-        select('category, value').
-        order('value');
-        if (dropdownData) {
-          setDocTypes(dropdownData.filter((d) => d.category === 'docType').map((d) => d.value));
-          setSites(dropdownData.filter((d) => d.category === 'site').map((d) => d.value));
-          setEquipmentTypes(dropdownData.filter((d) => d.category === 'equipmentType').map((d) => d.value));
-          setEquipmentMakes(dropdownData.filter((d) => d.category === 'equipmentMake').map((d) => d.value));
-          setEquipmentModels(dropdownData.filter((d) => d.category === 'equipmentModel').map((d) => d.value));
-        }
-      } catch (error) {
-        console.error('Error fetching filter options:', error);
+    const fetchProjectFields = async () => {
+      if (!projectId) { setProjectFields([]); return; }
+      const { data } = await supabase.from('project_metadata_fields').select('field_name').eq('project_id', projectId).order('created_at');
+      setProjectFields(data?.map(f => f.field_name) || []);
+    };
+    fetchProjectFields();
+  }, [projectId]);
+
+  useEffect(() => {
+    const fetchDropdownOptions = async () => {
+      const { data } = await supabase.from('dropdown_options').select('category, value').order('value');
+      if (data) {
+        const grouped: Record<string, string[]> = {};
+        data.forEach(d => { if (!grouped[d.category]) grouped[d.category] = []; grouped[d.category].push(d.value); });
+        setFieldOptions(grouped);
       }
     };
-    fetchFilterOptions();
-  }, [hasDocuments]);
+    fetchDropdownOptions();
+  }, []);
+
+  useEffect(() => {
+    const fetchRoles = async () => {
+      const { data } = await supabase.from('role_permissions').select('role, display_name').order('role');
+      if (data) setAvailableRoles(data.map(r => ({ role: r.role, displayName: r.display_name })));
+    };
+    fetchRoles();
+  }, []);
+
+  useEffect(() => {
+    const fetchProjectDocs = async () => {
+      if (!projectId) { setProjectDocuments([]); return; }
+      const { data } = await supabase.from('documents').select('id, filename').eq('project_id', projectId).order('filename');
+      setProjectDocuments(data?.map(d => ({ id: d.id, name: d.filename })) || []);
+    };
+    fetchProjectDocs();
+
+    // Subscribe to document changes to keep list fresh
+    const channel = supabase.channel('assistant-docs-filter')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchProjectDocs)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [projectId]);
 
   const scrollToBottom = useCallback(() => {
     if (chatContainerRef.current) {
@@ -267,7 +294,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       // Refresh session to ensure valid auth token
       await supabase.auth.getSession();
       const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true, projectId: projectId || undefined }
+        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true, projectId: projectId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
       });
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, inputMode: "voice", timestamp: new Date(), sources: data.sources || [] };
@@ -303,7 +330,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       // Refresh session to ensure valid auth token
       await supabase.auth.getSession();
       const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false, projectId: projectId || undefined }
+        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false, projectId: projectId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
       });
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, timestamp: new Date(), sources: data.sources || [] };
@@ -371,6 +398,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     setCurrentFilters((prev) => ({ ...prev, [key]: value === "__all__" ? "" : value }));
   };
 
+  const handleDynamicMetadataChange = (field: string, value: string) => {
+    setCurrentFilters(prev => ({
+      ...prev,
+      dynamicMetadata: { ...prev.dynamicMetadata, [field]: value || "" }
+    }));
+  };
+
   const hasText = question.trim().length > 0;
   const showSendButton = hasText && !isConversationMode;
   const showConversationButton = !hasText && !isConversationMode && !isDictating;
@@ -381,7 +415,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     return "You";
   };
 
-  const activeFilters = Object.entries(currentFilters).filter(([_, v]) => v && v !== "");
+  // Compute active filters from dynamic metadata + defaults
+  const activeFilters: { key: string; label: string; clear: () => void }[] = [];
+  Object.entries(currentFilters.dynamicMetadata).forEach(([field, value]) => {
+    if (value) activeFilters.push({ key: `meta_${field}`, label: `${field}: ${value}`, clear: () => handleDynamicMetadataChange(field, "") });
+  });
+  if (currentFilters.accessRole) activeFilters.push({ key: 'accessRole', label: `Role: ${currentFilters.accessRole}`, clear: () => setCurrentFilters(prev => ({ ...prev, accessRole: "" })) });
+  if (currentFilters.documentIds.length > 0) {
+    const docLabel = currentFilters.documentIds.length === 1 ? (projectDocuments.find(d => d.id === currentFilters.documentIds[0])?.name || '1 document') : `${currentFilters.documentIds.length} documents`;
+    activeFilters.push({ key: 'documents', label: `Documents: ${docLabel}`, clear: () => setCurrentFilters(prev => ({ ...prev, documentIds: [] })) });
+  }
+
+  // Grid cols for filter modal
+  const filterFieldCount = projectFields.length + 2; // +1 Access Role, +1 Documents
+  const filterGridCols = filterFieldCount <= 2 ? 2 : 3;
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }}>
@@ -574,10 +621,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
               <div className="relative rounded-2xl border border-border/60 bg-background shadow-sm focus-within:shadow-md focus-within:border-border transition-all overflow-hidden">
                 {activeFilters.length > 0 &&
               <div className="flex flex-wrap gap-1.5 px-4 pt-3">
-                    {activeFilters.map(([key, value]) =>
-                <Badge key={key} variant="secondary" className="text-xs gap-1 h-5 px-2 bg-primary/10 text-primary hover:bg-primary/20">
-                        {value as string}
-                        <X className="h-3 w-3 cursor-pointer" onClick={() => handleFilterChange(key as keyof ConversationFilters, "__all__")} />
+                    {activeFilters.map(f =>
+                <Badge key={f.key} variant="secondary" className="text-xs gap-1 h-5 px-2 bg-primary/10 text-primary hover:bg-primary/20">
+                        {f.label}
+                        <X className="h-3 w-3 cursor-pointer" onClick={f.clear} />
                       </Badge>
                 )}
                   </div>
@@ -653,56 +700,137 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           }
         </div>
 
-        {/* Filters Modal */}
+        {/* Filters Modal — mirrors Repository filter panel */}
         <Dialog open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Query Filters</DialogTitle>
               <DialogDescription>Scope retrieval to specific documents.</DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-2 gap-3 py-3">
-              {[
-              { label: "Document Type", key: "docType" as keyof ConversationFilters, options: docTypes },
-              { label: "Site", key: "site" as keyof ConversationFilters, options: sites },
-              { label: "Equipment Type", key: "equipmentType" as keyof ConversationFilters, options: equipmentTypes },
-              { label: "Equipment Make", key: "equipmentMake" as keyof ConversationFilters, options: equipmentMakes },
-              { label: "Equipment Model", key: "equipmentModel" as keyof ConversationFilters, options: equipmentModels },
-              { label: "Upload Date", key: "uploadDate" as keyof ConversationFilters, options: [] }].
-              map(({ label, key, options }) =>
-              <div key={key} className="space-y-1.5">
-                  <Label className="text-xs">{label}</Label>
-                  {key === "uploadDate" ?
-                <input
-                  type="date"
-                  value={currentFilters[key] as string || ""}
-                  onChange={(e) => handleFilterChange(key, e.target.value || undefined)}
-                  disabled={filtersLocked}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors" /> :
+            <div className={`grid gap-x-6 gap-y-4 py-3 ${filterGridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+              {/* Dynamic project metadata fields */}
+              {projectFields.map(field => {
+                const value = currentFilters.dynamicMetadata[field] || "";
+                const options = fieldOptions[field] || [];
+                return (
+                  <div key={field}>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">{field}</p>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button className="w-full flex items-center justify-between h-10 border border-border rounded-lg px-3 text-sm bg-background hover:bg-muted/40 transition-colors text-left" disabled={filtersLocked}>
+                          <span className={value ? "text-foreground" : "text-muted-foreground"}>{value || "All"}</span>
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-56 p-0 z-50 bg-background border border-border shadow-lg" align="start">
+                        <Command>
+                          <CommandList>
+                            <CommandGroup>
+                              <CommandItem onSelect={() => handleDynamicMetadataChange(field, "")} className="text-sm">
+                                <Check className={cn("mr-2 h-3.5 w-3.5", !value ? "opacity-100" : "opacity-0")} />
+                                All
+                              </CommandItem>
+                              {options.map(opt => (
+                                <CommandItem key={opt} onSelect={() => handleDynamicMetadataChange(field, opt)} className="text-sm">
+                                  <Check className={cn("mr-2 h-3.5 w-3.5", value === opt ? "opacity-100" : "opacity-0")} />
+                                  {opt}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                );
+              })}
 
+              {/* Default: Access Role */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Access Role</p>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button className="w-full flex items-center justify-between h-10 border border-border rounded-lg px-3 text-sm bg-background hover:bg-muted/40 transition-colors text-left" disabled={filtersLocked}>
+                      <span className={currentFilters.accessRole ? "text-foreground" : "text-muted-foreground"}>{currentFilters.accessRole || "All"}</span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-0 z-50 bg-background border border-border shadow-lg" align="start">
+                    <Command>
+                      <CommandList>
+                        <CommandGroup>
+                          <CommandItem onSelect={() => setCurrentFilters(prev => ({ ...prev, accessRole: "" }))} className="text-sm">
+                            <Check className={cn("mr-2 h-3.5 w-3.5", !currentFilters.accessRole ? "opacity-100" : "opacity-0")} />
+                            All
+                          </CommandItem>
+                          {availableRoles.map(role => (
+                            <CommandItem key={role.role} onSelect={() => setCurrentFilters(prev => ({ ...prev, accessRole: role.role }))} className="text-sm">
+                              <Check className={cn("mr-2 h-3.5 w-3.5", currentFilters.accessRole === role.role ? "opacity-100" : "opacity-0")} />
+                              {role.displayName || role.role}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
 
-                <Select
-                  value={currentFilters[key] as string || "__all__"}
-                  onValueChange={(v) => handleFilterChange(key, v)}
-                  disabled={filtersLocked}>
-
-                      <SelectTrigger className="h-9 text-sm">
-                        <SelectValue placeholder="All" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All</SelectItem>
-                        {options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                }
-                </div>
-              )}
+              {/* Default: Documents multi-select */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Documents</p>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button className="w-full flex items-center justify-between h-10 border border-border rounded-lg px-3 text-sm bg-background hover:bg-muted/40 transition-colors text-left" disabled={filtersLocked}>
+                      <span className="text-foreground truncate">
+                        {currentFilters.documentIds.length === 0 ? "All" :
+                         currentFilters.documentIds.length === 1 ? (projectDocuments.find(d => d.id === currentFilters.documentIds[0])?.name || "1 document") :
+                         `${currentFilters.documentIds.length} documents`}
+                      </span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-0 z-50 bg-background border border-border shadow-lg" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search documents..." />
+                      <CommandList>
+                        <CommandEmpty>No documents found.</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem onSelect={() => setCurrentFilters(prev => ({ ...prev, documentIds: [] }))} className="text-sm">
+                            <Check className={cn("mr-2 h-3.5 w-3.5", currentFilters.documentIds.length === 0 ? "opacity-100" : "opacity-0")} />
+                            All Documents
+                          </CommandItem>
+                          <Separator className="my-1" />
+                          {projectDocuments.map(doc => {
+                            const isSelected = currentFilters.documentIds.includes(doc.id) || currentFilters.documentIds.length === 0;
+                            return (
+                              <CommandItem key={doc.id} onSelect={() => {
+                                setCurrentFilters(prev => {
+                                  const ids = prev.documentIds;
+                                  let next: string[];
+                                  if (ids.includes(doc.id)) {
+                                    next = ids.filter(i => i !== doc.id);
+                                  } else {
+                                    next = [...ids, doc.id];
+                                  }
+                                  if (next.length === projectDocuments.length) next = [];
+                                  return { ...prev, documentIds: next };
+                                });
+                              }} className="text-sm">
+                                <Check className={cn("mr-2 h-3.5 w-3.5", isSelected ? "opacity-100" : "opacity-0")} />
+                                <span className="truncate">{doc.name}</span>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
             <DialogFooter>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setCurrentFilters({ docType: "", uploadDate: undefined, site: "", equipmentType: "", equipmentMake: "", equipmentModel: "" })}>
-
+                onClick={() => setCurrentFilters({ docType: "", uploadDate: undefined, site: "", equipmentType: "", equipmentMake: "", equipmentModel: "", documentIds: [], dynamicMetadata: {}, accessRole: "" })}>
                 Reset
               </Button>
               <Button onClick={() => setFiltersModalOpen(false)} className="bg-brand text-brand-foreground hover:bg-brand-hover">Apply</Button>
