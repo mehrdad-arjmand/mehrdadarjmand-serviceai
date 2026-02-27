@@ -671,7 +671,27 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     setEditContentText("");
     setIsEditContentLoading(true);
     const { data: chunks } = await supabase.from('chunks').select('text, chunk_index').eq('document_id', doc.id).order('chunk_index');
-    setEditContentText(chunks?.map(c => c.text).join('') || '');
+    // Reconstruct original text by removing overlap between consecutive chunks
+    if (chunks && chunks.length > 0) {
+      let fullText = chunks[0].text;
+      for (let i = 1; i < chunks.length; i++) {
+        const prev = chunks[i - 1].text;
+        const curr = chunks[i].text;
+        // Find the overlap: the end of prev that matches the start of curr
+        let overlapLen = 0;
+        const maxOverlap = Math.min(prev.length, curr.length, 300); // overlap is ~200 chars
+        for (let ol = maxOverlap; ol >= 10; ol--) {
+          if (prev.slice(-ol) === curr.slice(0, ol)) {
+            overlapLen = ol;
+            break;
+          }
+        }
+        fullText += curr.slice(overlapLen);
+      }
+      setEditContentText(fullText);
+    } else {
+      setEditContentText('');
+    }
     setIsEditContentLoading(false);
   };
 
