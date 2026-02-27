@@ -21,6 +21,12 @@ interface RAGQueryRequest {
   equipmentType?: string
   equipmentMake?: string
   equipmentModel?: string
+  // Document ID filter (from Documents multi-select)
+  documentIds?: string[]
+  // Dynamic metadata filters (from project metadata fields)
+  dynamicMetadata?: Record<string, string>
+  // Access role filter
+  accessRole?: string
   // Conversation mode
   history?: ConversationMessage[]
   isConversationMode?: boolean
@@ -247,6 +253,28 @@ Deno.serve(async (req) => {
       throw new Error('projectId must be a valid string')
     }
 
+    // Validate documentIds if provided
+    if (rawRequest.documentIds !== undefined) {
+      if (!Array.isArray(rawRequest.documentIds) || rawRequest.documentIds.length > 100) {
+        throw new Error('documentIds must be an array of at most 100 strings')
+      }
+      if (!rawRequest.documentIds.every((id: unknown) => typeof id === 'string' && id.length <= 100)) {
+        throw new Error('Each documentId must be a valid string')
+      }
+    }
+
+    // Validate dynamicMetadata if provided
+    if (rawRequest.dynamicMetadata !== undefined) {
+      if (typeof rawRequest.dynamicMetadata !== 'object' || rawRequest.dynamicMetadata === null || Array.isArray(rawRequest.dynamicMetadata)) {
+        throw new Error('dynamicMetadata must be an object')
+      }
+    }
+
+    // Validate accessRole if provided
+    if (rawRequest.accessRole !== undefined && !isValidOptionalString(rawRequest.accessRole, MAX_FILTER_LENGTH)) {
+      throw new Error('accessRole must be a valid string')
+    }
+
     // Build validated request
     const request: RAGQueryRequest = {
       question: (rawRequest.question as string).trim().slice(0, MAX_QUESTION_LENGTH),
@@ -257,6 +285,9 @@ Deno.serve(async (req) => {
       equipmentType: sanitizeString(rawRequest.equipmentType as string | undefined),
       equipmentMake: sanitizeString(rawRequest.equipmentMake as string | undefined),
       equipmentModel: sanitizeString(rawRequest.equipmentModel as string | undefined),
+      documentIds: rawRequest.documentIds as string[] | undefined,
+      dynamicMetadata: rawRequest.dynamicMetadata as Record<string, string> | undefined,
+      accessRole: sanitizeString(rawRequest.accessRole as string | undefined),
       history: rawRequest.history ? (rawRequest.history as ConversationMessage[]).slice(-MAX_HISTORY_LENGTH) : undefined,
       isConversationMode: rawRequest.isConversationMode as boolean | undefined
     }
@@ -270,6 +301,9 @@ Deno.serve(async (req) => {
       equipmentType,
       equipmentMake,
       equipmentModel,
+      documentIds: filterDocumentIds,
+      dynamicMetadata,
+      accessRole,
       history,
       isConversationMode
     } = request
@@ -277,7 +311,7 @@ Deno.serve(async (req) => {
     console.log('RAG Query:', { 
       question: question.slice(0, 100), 
       projectId: requestProjectId,
-      filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel },
+      filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel, documentIds: filterDocumentIds?.length, dynamicMetadata, accessRole },
       isConversationMode,
       historyLength: history?.length || 0
     })
@@ -339,9 +373,16 @@ Deno.serve(async (req) => {
 
     // Apply document filters if provided
     let filteredChunks = accessFilteredChunks
+
+    // Apply explicit document ID filter (from Documents multi-select)
+    if (filterDocumentIds && filterDocumentIds.length > 0) {
+      const docIdSet = new Set(filterDocumentIds)
+      filteredChunks = filteredChunks.filter((chunk: any) => docIdSet.has(chunk.document_id))
+      console.log(`After documentIds filter: ${filteredChunks.length} chunks (selected ${filterDocumentIds.length} documents)`)
+    }
     
-    if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel) {
-      let docQuery = supabase.from('documents').select('id')
+    if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel || accessRole || (dynamicMetadata && Object.values(dynamicMetadata).some(v => v))) {
+      let docQuery = supabase.from('documents').select('id, metadata, allowed_roles')
       
       if (requestProjectId) docQuery = docQuery.eq('project_id', requestProjectId)
       if (documentType) docQuery = docQuery.eq('doc_type', documentType)
@@ -359,8 +400,26 @@ Deno.serve(async (req) => {
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+
+      // Apply dynamic metadata and accessRole filters in-memory
+      let filteredDocs = matchingDocs || []
       
-      if (!matchingDocs || matchingDocs.length === 0) {
+      if (dynamicMetadata) {
+        for (const [field, value] of Object.entries(dynamicMetadata)) {
+          if (value) {
+            filteredDocs = filteredDocs.filter((d: any) => d.metadata && d.metadata[field] === value)
+          }
+        }
+      }
+
+      if (accessRole) {
+        filteredDocs = filteredDocs.filter((d: any) => {
+          const roles: string[] = d.allowed_roles || []
+          return roles.includes(accessRole) || roles.includes('all')
+        })
+      }
+      
+      if (filteredDocs.length === 0) {
         return new Response(
           JSON.stringify({ 
             success: true,
@@ -374,10 +433,10 @@ Deno.serve(async (req) => {
         )
       }
       
-      const matchingDocIds = new Set(matchingDocs.map(d => d.id))
+      const matchingDocIds = new Set(filteredDocs.map((d: any) => d.id))
       filteredChunks = filteredChunks.filter((chunk: any) => matchingDocIds.has(chunk.document_id))
       
-      console.log(`Filtered to ${filteredChunks.length} chunks from ${matchingDocs.length} matching documents`)
+      console.log(`Filtered to ${filteredChunks.length} chunks from ${filteredDocs.length} matching documents`)
     }
 
     // Apply equipment type filter on chunks (this field is on chunks table)
@@ -388,18 +447,35 @@ Deno.serve(async (req) => {
 
     // Get matching document IDs for filters (to pass to keyword fallback)
     let matchingDocIds: Set<string> | null = null
-    if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel) {
-      let docQuery = supabase.from('documents').select('id')
-      if (requestProjectId) docQuery = docQuery.eq('project_id', requestProjectId)
-      if (documentType) docQuery = docQuery.eq('doc_type', documentType)
-      if (uploadDate) docQuery = docQuery.eq('upload_date', uploadDate)
-      if (filterSite) docQuery = docQuery.eq('site', filterSite)
-      if (equipmentMake) docQuery = docQuery.eq('equipment_make', equipmentMake)
-      if (equipmentModel) docQuery = docQuery.eq('equipment_model', equipmentModel)
-      
-      const { data: matchingDocs } = await docQuery
-      if (matchingDocs && matchingDocs.length > 0) {
-        matchingDocIds = new Set(matchingDocs.map(d => d.id))
+    if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel || filterDocumentIds?.length || accessRole || (dynamicMetadata && Object.values(dynamicMetadata).some(v => v))) {
+      if (filterDocumentIds && filterDocumentIds.length > 0) {
+        // If explicit document IDs, use those directly
+        matchingDocIds = new Set(filterDocumentIds)
+      } else {
+        let docQuery = supabase.from('documents').select('id, metadata, allowed_roles')
+        if (requestProjectId) docQuery = docQuery.eq('project_id', requestProjectId)
+        if (documentType) docQuery = docQuery.eq('doc_type', documentType)
+        if (uploadDate) docQuery = docQuery.eq('upload_date', uploadDate)
+        if (filterSite) docQuery = docQuery.eq('site', filterSite)
+        if (equipmentMake) docQuery = docQuery.eq('equipment_make', equipmentMake)
+        if (equipmentModel) docQuery = docQuery.eq('equipment_model', equipmentModel)
+        
+        const { data: matchingDocs } = await docQuery
+        if (matchingDocs && matchingDocs.length > 0) {
+          let filteredDocs = matchingDocs
+          if (dynamicMetadata) {
+            for (const [field, value] of Object.entries(dynamicMetadata)) {
+              if (value) filteredDocs = filteredDocs.filter((d: any) => d.metadata && d.metadata[field] === value)
+            }
+          }
+          if (accessRole) {
+            filteredDocs = filteredDocs.filter((d: any) => {
+              const roles: string[] = d.allowed_roles || []
+              return roles.includes(accessRole) || roles.includes('all')
+            })
+          }
+          if (filteredDocs.length > 0) matchingDocIds = new Set(filteredDocs.map((d: any) => d.id))
+        }
       }
     }
 
