@@ -52,9 +52,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const {
     messages: chatHistory,
+    filters: conversationFilters,
     conversations,
     activeConversationId,
     addMessage,
+    updateFilters,
     startNewConversation,
     deleteConversation,
     switchConversation,
@@ -63,17 +65,19 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     reorderConversations
   } = useChatHistory(projectId);
 
-  const [currentFilters, setCurrentFilters] = useState<ConversationFilters>({
-    docType: "",
-    uploadDate: undefined,
-    site: "",
-    equipmentType: "",
-    equipmentMake: "",
-    equipmentModel: "",
-    documentIds: [],
-    dynamicMetadata: {},
-    accessRole: "",
-  });
+  // Sync filters from conversation storage
+  const [currentFilters, setCurrentFilters] = useState<ConversationFilters>(conversationFilters);
+
+  // When active conversation changes, load its filters
+  useEffect(() => {
+    setCurrentFilters(conversationFilters);
+  }, [activeConversationId]);
+
+  // Persist filter changes to conversation
+  const updateCurrentFilters = (newFilters: ConversationFilters) => {
+    setCurrentFilters(newFilters);
+    updateFilters(newFilters);
+  };
 
   const [filtersLocked, setFiltersLocked] = useState(false);
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
@@ -395,14 +399,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const handleSend = () => {if (question.trim()) {sendMessage(question, isDictating ? "dictation" : "text");}};
 
   const handleFilterChange = (key: keyof ConversationFilters, value: string | undefined) => {
-    setCurrentFilters((prev) => ({ ...prev, [key]: value === "__all__" ? "" : value }));
+    updateCurrentFilters({ ...currentFilters, [key]: value === "__all__" ? "" : value });
   };
 
   const handleDynamicMetadataChange = (field: string, value: string) => {
-    setCurrentFilters(prev => ({
-      ...prev,
-      dynamicMetadata: { ...prev.dynamicMetadata, [field]: value || "" }
-    }));
+    const newFilters = {
+      ...currentFilters,
+      dynamicMetadata: { ...currentFilters.dynamicMetadata, [field]: value || "" }
+    };
+    updateCurrentFilters(newFilters);
   };
 
   const hasText = question.trim().length > 0;
@@ -420,10 +425,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   Object.entries(currentFilters.dynamicMetadata).forEach(([field, value]) => {
     if (value) activeFilters.push({ key: `meta_${field}`, label: `${field}: ${value}`, clear: () => handleDynamicMetadataChange(field, "") });
   });
-  if (currentFilters.accessRole) activeFilters.push({ key: 'accessRole', label: `Role: ${currentFilters.accessRole}`, clear: () => setCurrentFilters(prev => ({ ...prev, accessRole: "" })) });
+  if (currentFilters.accessRole) activeFilters.push({ key: 'accessRole', label: `Role: ${currentFilters.accessRole}`, clear: () => updateCurrentFilters({ ...currentFilters, accessRole: "" }) });
   if (currentFilters.documentIds.length > 0) {
     const docLabel = currentFilters.documentIds.length === 1 ? (projectDocuments.find(d => d.id === currentFilters.documentIds[0])?.name || '1 document') : `${currentFilters.documentIds.length} documents`;
-    activeFilters.push({ key: 'documents', label: `Documents: ${docLabel}`, clear: () => setCurrentFilters(prev => ({ ...prev, documentIds: [] })) });
+    activeFilters.push({ key: 'documents', label: `Documents: ${docLabel}`, clear: () => updateCurrentFilters({ ...currentFilters, documentIds: [] }) });
   }
 
   // Grid cols for filter modal
@@ -757,12 +762,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                     <Command>
                       <CommandList>
                         <CommandGroup>
-                          <CommandItem onSelect={() => setCurrentFilters(prev => ({ ...prev, accessRole: "" }))} className="text-sm">
+                          <CommandItem onSelect={() => updateCurrentFilters({ ...currentFilters, accessRole: "" })} className="text-sm">
                             <Check className={cn("mr-2 h-3.5 w-3.5", !currentFilters.accessRole ? "opacity-100" : "opacity-0")} />
                             All
                           </CommandItem>
                           {availableRoles.map(role => (
-                            <CommandItem key={role.role} onSelect={() => setCurrentFilters(prev => ({ ...prev, accessRole: role.role }))} className="text-sm">
+                            <CommandItem key={role.role} onSelect={() => updateCurrentFilters({ ...currentFilters, accessRole: role.role })} className="text-sm">
                               <Check className={cn("mr-2 h-3.5 w-3.5", currentFilters.accessRole === role.role ? "opacity-100" : "opacity-0")} />
                               {role.displayName || role.role}
                             </CommandItem>
@@ -793,7 +798,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                       <CommandList>
                         <CommandEmpty>No documents found.</CommandEmpty>
                         <CommandGroup>
-                          <CommandItem onSelect={() => setCurrentFilters(prev => ({ ...prev, documentIds: [] }))} className="text-sm">
+                          <CommandItem onSelect={() => updateCurrentFilters({ ...currentFilters, documentIds: [] })} className="text-sm">
                             <Check className={cn("mr-2 h-3.5 w-3.5", currentFilters.documentIds.length === 0 ? "opacity-100" : "opacity-0")} />
                             All Documents
                           </CommandItem>
@@ -802,17 +807,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                             const isSelected = currentFilters.documentIds.includes(doc.id) || currentFilters.documentIds.length === 0;
                             return (
                               <CommandItem key={doc.id} onSelect={() => {
-                                setCurrentFilters(prev => {
-                                  const ids = prev.documentIds;
-                                  let next: string[];
-                                  if (ids.includes(doc.id)) {
-                                    next = ids.filter(i => i !== doc.id);
-                                  } else {
-                                    next = [...ids, doc.id];
-                                  }
-                                  if (next.length === projectDocuments.length) next = [];
-                                  return { ...prev, documentIds: next };
-                                });
+                                const ids = currentFilters.documentIds;
+                                let next: string[];
+                                if (ids.includes(doc.id)) {
+                                  next = ids.filter(i => i !== doc.id);
+                                } else {
+                                  next = [...ids, doc.id];
+                                }
+                                if (next.length === projectDocuments.length) next = [];
+                                updateCurrentFilters({ ...currentFilters, documentIds: next });
                               }} className="text-sm">
                                 <Check className={cn("mr-2 h-3.5 w-3.5", isSelected ? "opacity-100" : "opacity-0")} />
                                 <span className="truncate">{doc.name}</span>
@@ -830,7 +833,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setCurrentFilters({ docType: "", uploadDate: undefined, site: "", equipmentType: "", equipmentMake: "", equipmentModel: "", documentIds: [], dynamicMetadata: {}, accessRole: "" })}>
+                onClick={() => updateCurrentFilters({ docType: "", uploadDate: undefined, site: "", equipmentType: "", equipmentMake: "", equipmentModel: "", documentIds: [], dynamicMetadata: {}, accessRole: "" })}>
                 Reset
               </Button>
               <Button onClick={() => setFiltersModalOpen(false)} className="bg-brand text-brand-foreground hover:bg-brand-hover">Apply</Button>
