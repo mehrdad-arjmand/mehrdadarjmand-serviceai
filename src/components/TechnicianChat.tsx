@@ -7,7 +7,7 @@ import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, Sliders
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
-import { useChatHistory, ChatMessage, ConversationFilters, ChatSource } from "@/hooks/useChatHistory";
+import { useChatHistory, ChatMessage, ConversationFilters, ChatSource, getDefaultFilters } from "@/hooks/useChatHistory";
 import { MarkdownWithCitations } from "@/components/MarkdownWithCitations";
 import { DocumentViewerModal } from "@/components/DocumentViewerModal";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
@@ -66,11 +66,21 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   } = useChatHistory(projectId);
 
   // Sync filters from conversation storage
-  const [currentFilters, setCurrentFilters] = useState<ConversationFilters>(conversationFilters);
+  const [currentFilters, setCurrentFilters] = useState<ConversationFilters>({
+    ...getDefaultFilters(),
+    ...conversationFilters,
+    dynamicMetadata: conversationFilters?.dynamicMetadata || {},
+    documentIds: conversationFilters?.documentIds || [],
+  });
 
   // When active conversation changes, load its filters
   useEffect(() => {
-    setCurrentFilters(conversationFilters);
+    setCurrentFilters({
+      ...getDefaultFilters(),
+      ...conversationFilters,
+      dynamicMetadata: conversationFilters?.dynamicMetadata || {},
+      documentIds: conversationFilters?.documentIds || [],
+    });
   }, [activeConversationId]);
 
   // Persist filter changes to conversation
@@ -422,7 +432,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   // Compute active filters from dynamic metadata + defaults
   const activeFilters: { key: string; label: string; clear: () => void }[] = [];
-  Object.entries(currentFilters.dynamicMetadata).forEach(([field, value]) => {
+  Object.entries(currentFilters.dynamicMetadata || {}).forEach(([field, value]) => {
     if (value) activeFilters.push({ key: `meta_${field}`, label: `${field}: ${value}`, clear: () => handleDynamicMetadataChange(field, "") });
   });
   if (currentFilters.accessRole) activeFilters.push({ key: 'accessRole', label: `Role: ${currentFilters.accessRole}`, clear: () => updateCurrentFilters({ ...currentFilters, accessRole: "" }) });
