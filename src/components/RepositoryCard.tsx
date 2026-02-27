@@ -745,15 +745,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     stopEditContentDictation();
     setIsEditContentSaving(true);
     try {
-      await supabase.from('chunks').delete().eq('document_id', editContentDoc.id);
-      await supabase.from('documents').update({
-        filename: editContentName.trim() || editContentDoc.fileName,
-        ingestion_status: 'in_progress',
-        ingestion_error: null,
-        total_chunks: 0,
-        ingested_chunks: 0,
-      }).eq('id', editContentDoc.id);
-
       const { data, error } = await supabase.functions.invoke('ingest-text', {
         body: {
           documentId: editContentDoc.id,
