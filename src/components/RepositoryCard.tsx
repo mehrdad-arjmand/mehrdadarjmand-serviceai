@@ -1139,7 +1139,10 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             return (
               <div key={doc.id}>
                 <div
-                  className="py-5 flex items-start justify-between cursor-pointer hover:bg-muted/30 px-2 -mx-2 rounded-lg transition-colors min-h-[72px]"
+                  className={cn(
+                    "py-5 flex items-start justify-between cursor-pointer px-2 -mx-2 rounded-lg transition-colors min-h-[72px]",
+                    isExpanded ? "bg-muted/30" : "hover:bg-muted/30"
+                  )}
                   onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
                 >
                   <div className="flex-1 min-w-0 pr-4">
@@ -1157,7 +1160,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                 </div>
 
                 {isExpanded && (
-                  <div className="pl-8 pr-8 pb-5">
+                  <div className="pl-8 pr-8 pb-5 bg-muted/30 -mx-2 px-[calc(2rem+0.5rem)] rounded-b-lg">
                     <Separator className="mb-5" />
                     <div className="grid grid-cols-3 gap-6 mb-5">
                       <div>
