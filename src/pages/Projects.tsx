@@ -620,7 +620,10 @@ const Projects = () => {
                 return (
                   <div key={project.id}>
                     <div
-                      className="py-5 flex items-start justify-between cursor-pointer hover:bg-muted/30 px-2 -mx-2 rounded-lg transition-colors min-h-[72px]"
+                      className={cn(
+                        "py-5 flex items-start justify-between cursor-pointer px-2 -mx-2 rounded-lg transition-colors min-h-[72px]",
+                        isExpanded ? "bg-muted/30" : "hover:bg-muted/30"
+                      )}
                       onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
                       onDoubleClick={() => navigate(`/?project=${project.id}`)}
                     >
@@ -653,7 +656,7 @@ const Projects = () => {
                     </div>
 
                     {isExpanded && (
-                      <div className="pl-8 pr-8 pb-5">
+                      <div className="pl-8 pr-8 pb-5 bg-muted/30 -mx-2 px-[calc(2rem+0.5rem)] rounded-b-lg">
                         <Separator className="mb-5" />
                         <div className="grid grid-cols-3 gap-6 mb-5">
                           <div>

@@ -115,28 +115,28 @@ const Index = () => {
 
   if (permissions.isLoading) {
     return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <main className="px-6 lg:px-10 py-10 flex items-center justify-center">
-          <div className="flex items-center gap-3 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span>Loading permissions...</span>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-6">
+        <img src="/logo.svg" alt="Service AI" className="w-16 h-16" />
+        <div className="w-48 flex flex-col items-center gap-3">
+          <div className="w-full h-1 rounded-full bg-border overflow-hidden">
+            <div className="h-full bg-foreground rounded-full animate-loading-bar" />
           </div>
-        </main>
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
 
   if (!projectId || !currentProject) {
     return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <main className="px-6 lg:px-10 py-10 flex items-center justify-center">
-          <div className="flex items-center gap-3 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span>Loading...</span>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-6">
+        <img src="/logo.svg" alt="Service AI" className="w-16 h-16" />
+        <div className="w-48 flex flex-col items-center gap-3">
+          <div className="w-full h-1 rounded-full bg-border overflow-hidden">
+            <div className="h-full bg-foreground rounded-full animate-loading-bar" />
           </div>
-        </main>
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
