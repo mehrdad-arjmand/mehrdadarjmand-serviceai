@@ -248,11 +248,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     currentTranscriptRef.current = '';
-    recognition.onstart = () => {setConversationState("listening");setQuestion("");currentTranscriptRef.current = '';};
+    let convFinalTranscript = '';
+    recognition.onstart = () => {setConversationState("listening");setQuestion("");currentTranscriptRef.current = '';convFinalTranscript = '';};
     recognition.onresult = (event: any) => {
       clearSilenceTimer();
-      let fullTranscript = '';
-      for (let i = 0; i < event.results.length; i++) {fullTranscript += event.results[i][0].transcript;}
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) { convFinalTranscript += transcript + ' '; } else { interimTranscript += transcript; }
+      }
+      const fullTranscript = convFinalTranscript + interimTranscript;
       currentTranscriptRef.current = fullTranscript;
       setQuestion(fullTranscript);
       silenceTimerRef.current = setTimeout(() => {
