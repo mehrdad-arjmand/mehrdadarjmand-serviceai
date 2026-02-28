@@ -244,22 +244,21 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.continuous = true;
+    recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     currentTranscriptRef.current = '';
-    let convFinalTranscript = '';
-    recognition.onstart = () => {setConversationState("listening");setQuestion("");currentTranscriptRef.current = '';convFinalTranscript = '';};
+    recognition.onstart = () => {setConversationState("listening");};
     recognition.onresult = (event: any) => {
       clearSilenceTimer();
-      let interimTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) { convFinalTranscript += transcript + ' '; } else { interimTranscript += transcript; }
+      let finalText = '';
+      let interimText = '';
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) { finalText += event.results[i][0].transcript; } else { interimText += event.results[i][0].transcript; }
       }
-      const fullTranscript = convFinalTranscript + interimTranscript;
-      currentTranscriptRef.current = fullTranscript;
-      setQuestion(fullTranscript);
+      const display = (finalText + interimText).trim();
+      currentTranscriptRef.current = display;
+      setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
         const transcript = currentTranscriptRef.current.trim();
         if (transcript && conversationActiveRef.current && recognitionRef.current) {
@@ -288,10 +287,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       } else {recognitionRef.current = null;}
     };
     recognition.onend = () => {
-      const hadTranscript = currentTranscriptRef.current.trim().length > 0;
       recognitionRef.current = null;
-      if (conversationActiveRef.current && conversationState === "listening" && !hadTranscript) {
-        setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);
+      // In single-shot mode, restart if we're still in conversation mode and no silence timer is pending
+      if (conversationActiveRef.current && !silenceTimerRef.current) {
+        setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 200);
       }
     };
     recognition.start();
@@ -368,18 +367,19 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.continuous = true;
+    recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
-    let finalTranscript = '';
+    const dictationParts: string[] = [];
     recognition.onstart = () => {setIsDictating(true);};
     recognition.onresult = (event: any) => {
-      let interimTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {finalTranscript += transcript + ' ';} else {interimTranscript += transcript;}
+      let finalText = '';
+      let interimText = '';
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) { finalText += event.results[i][0].transcript; } else { interimText += event.results[i][0].transcript; }
       }
-      setQuestion(finalTranscript + interimTranscript);
+      if (finalText) { dictationParts.push(finalText); }
+      setQuestion(dictationParts.join(' ') + (interimText ? ' ' + interimText : ''));
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
@@ -388,7 +388,26 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       setIsDictating(false);
       recognitionRef.current = null;
     };
-    recognition.onend = () => {setIsDictating(false);recognitionRef.current = null;};
+    let dictationActive = true;
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      if (!dictationActive) { setIsDictating(false); return; }
+      // Restart for continuous dictation experience
+      const SpeechRecognition2 = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const newRecognition = new SpeechRecognition2();
+      newRecognition.continuous = false;
+      newRecognition.interimResults = true;
+      newRecognition.lang = 'en-US';
+      newRecognition.onstart = recognition.onstart;
+      newRecognition.onresult = recognition.onresult;
+      newRecognition.onerror = (e: any) => { dictationActive = false; recognition.onerror(e); };
+      newRecognition.onend = recognition.onend;
+      recognitionRef.current = newRecognition;
+      try { newRecognition.start(); } catch(e) { setIsDictating(false); dictationActive = false; }
+    };
+    // Patch stopListening to deactivate restart loop
+    const origStop = recognition.stop.bind(recognition);
+    recognition.stop = () => { dictationActive = false; origStop(); };
     recognition.start();
   }, [toast]);
 
