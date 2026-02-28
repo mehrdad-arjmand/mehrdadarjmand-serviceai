@@ -108,6 +108,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const [showScrollDown, setShowScrollDown] = useState(false);
   const conversationActiveRef = useRef(false);
   const dictationActiveRef = useRef(false);
+  const dictationPartsRef = useRef<string[]>([]);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
@@ -197,6 +198,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const stopListening = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
     dictationActiveRef.current = false;
+    dictationPartsRef.current = [];
     if (recognitionRef.current) {try {recognitionRef.current.stop();} catch (e) {}recognitionRef.current = null;}
     setIsDictating(false);
     currentTranscriptRef.current = '';
@@ -372,7 +374,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
-    const dictationParts: string[] = [];
     dictationActiveRef.current = true;
     recognition.onstart = () => {setIsDictating(true);};
     recognition.onresult = (event: any) => {
@@ -381,15 +382,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) { finalText += event.results[i][0].transcript; } else { interimText += event.results[i][0].transcript; }
       }
-      if (finalText) { dictationParts.push(finalText); }
-      setQuestion(dictationParts.join(' ') + (interimText ? ' ' + interimText : ''));
+      if (finalText) { dictationPartsRef.current.push(finalText); }
+      setQuestion(dictationPartsRef.current.join(' ') + (interimText ? ' ' + interimText : ''));
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
       if (event.error === 'not-allowed') {toast({ title: "Microphone permission denied", description: "Please enable mic access in your browser.", variant: "destructive" });} else
       if (event.error !== 'aborted' && event.error !== 'no-speech') {toast({ title: "Speech recognition error", description: event.error, variant: "destructive" });}
       if (event.error === 'no-speech' && dictationActiveRef.current) {
-        // Silently restart on no-speech during dictation
         recognitionRef.current = null;
         setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, 300);
         return;
@@ -401,13 +401,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.onend = () => {
       recognitionRef.current = null;
       if (!dictationActiveRef.current) { setIsDictating(false); return; }
-      // Restart for continuous dictation experience
       setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, 200);
     };
     recognition.start();
   }, [toast]);
 
-  const handleDictateToggle = () => {if (isDictating) {stopListening();} else {startDictation();}};
+  const handleDictateToggle = () => {if (isDictating) {stopListening();} else {dictationPartsRef.current = []; startDictation();}};
 
   const handleConversationToggle = () => {
     if (isConversationMode) {
