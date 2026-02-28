@@ -107,6 +107,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const conversationActiveRef = useRef(false);
+  const dictationActiveRef = useRef(false);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
@@ -195,6 +196,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const stopListening = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
+    dictationActiveRef.current = false;
     if (recognitionRef.current) {try {recognitionRef.current.stop();} catch (e) {}recognitionRef.current = null;}
     setIsDictating(false);
     currentTranscriptRef.current = '';
@@ -371,6 +373,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     const dictationParts: string[] = [];
+    dictationActiveRef.current = true;
     recognition.onstart = () => {setIsDictating(true);};
     recognition.onresult = (event: any) => {
       let finalText = '';
@@ -384,30 +387,23 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
       if (event.error === 'not-allowed') {toast({ title: "Microphone permission denied", description: "Please enable mic access in your browser.", variant: "destructive" });} else
-      if (event.error !== 'aborted') {toast({ title: "Speech recognition error", description: event.error, variant: "destructive" });}
+      if (event.error !== 'aborted' && event.error !== 'no-speech') {toast({ title: "Speech recognition error", description: event.error, variant: "destructive" });}
+      if (event.error === 'no-speech' && dictationActiveRef.current) {
+        // Silently restart on no-speech during dictation
+        recognitionRef.current = null;
+        setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, 300);
+        return;
+      }
+      dictationActiveRef.current = false;
       setIsDictating(false);
       recognitionRef.current = null;
     };
-    let dictationActive = true;
     recognition.onend = () => {
       recognitionRef.current = null;
-      if (!dictationActive) { setIsDictating(false); return; }
+      if (!dictationActiveRef.current) { setIsDictating(false); return; }
       // Restart for continuous dictation experience
-      const SpeechRecognition2 = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const newRecognition = new SpeechRecognition2();
-      newRecognition.continuous = false;
-      newRecognition.interimResults = true;
-      newRecognition.lang = 'en-US';
-      newRecognition.onstart = recognition.onstart;
-      newRecognition.onresult = recognition.onresult;
-      newRecognition.onerror = (e: any) => { dictationActive = false; recognition.onerror(e); };
-      newRecognition.onend = recognition.onend;
-      recognitionRef.current = newRecognition;
-      try { newRecognition.start(); } catch(e) { setIsDictating(false); dictationActive = false; }
+      setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, 200);
     };
-    // Patch stopListening to deactivate restart loop
-    const origStop = recognition.stop.bind(recognition);
-    recognition.stop = () => { dictationActive = false; origStop(); };
     recognition.start();
   }, [toast]);
 
