@@ -284,7 +284,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
         recognitionRef.current = null;
         setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);
-      } else if (event.error !== 'aborted' && conversationActiveRef.current) {
+      } else if (event.error === 'aborted') {
+        recognitionRef.current = null;
+      } else if (conversationActiveRef.current) {
         recognitionRef.current = null;
         setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 500);
       } else {recognitionRef.current = null;}
@@ -312,8 +314,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
-      // Refresh session to ensure valid auth token
-      await supabase.auth.getSession();
+      // Force refresh session to ensure valid auth token
+      await supabase.auth.refreshSession();
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true, projectId: projectId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
       });
@@ -348,8 +350,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
-      // Refresh session to ensure valid auth token
-      await supabase.auth.getSession();
+      // Force refresh session to ensure valid auth token
+      await supabase.auth.refreshSession();
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false, projectId: projectId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
       });
@@ -386,16 +388,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
-      if (event.error === 'not-allowed') {toast({ title: "Microphone permission denied", description: "Please enable mic access in your browser.", variant: "destructive" });} else
-      if (event.error !== 'aborted' && event.error !== 'no-speech') {toast({ title: "Speech recognition error", description: event.error, variant: "destructive" });}
+      if (event.error === 'not-allowed') {
+        toast({ title: "Microphone permission denied", description: "Please enable mic access in your browser.", variant: "destructive" });
+        dictationActiveRef.current = false; setIsDictating(false); recognitionRef.current = null; return;
+      }
       if (event.error === 'no-speech' && dictationActiveRef.current) {
         recognitionRef.current = null;
         setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, 300);
         return;
       }
-      dictationActiveRef.current = false;
-      setIsDictating(false);
-      recognitionRef.current = null;
+      if (event.error === 'aborted') { recognitionRef.current = null; return; }
+      toast({ title: "Speech recognition error", description: event.error, variant: "destructive" });
+      dictationActiveRef.current = false; setIsDictating(false); recognitionRef.current = null;
     };
     recognition.onend = () => {
       recognitionRef.current = null;
