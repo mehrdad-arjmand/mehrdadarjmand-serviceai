@@ -111,6 +111,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const dictationPartsRef = useRef<string[]>([]);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentTranscriptRef = useRef<string>("");
+  const abortCountRef = useRef<number>(0);
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
 
   useEffect(() => {
@@ -252,7 +253,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     currentTranscriptRef.current = '';
-    recognition.onstart = () => {setConversationState("listening");};
+    recognition.onstart = () => {setConversationState("listening"); abortCountRef.current = 0;};
     recognition.onresult = (event: any) => {
       clearSilenceTimer();
       let finalText = '';
@@ -286,6 +287,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);
       } else if (event.error === 'aborted') {
         recognitionRef.current = null;
+        abortCountRef.current++;
+        if (abortCountRef.current >= 3) {
+          conversationActiveRef.current = false;
+          setIsConversationMode(false);
+          setConversationState("idle");
+          toast({ title: "Voice not available", description: "Speech recognition is not available in this environment. Try a different browser.", variant: "destructive" });
+        }
+        return;
       } else if (conversationActiveRef.current) {
         recognitionRef.current = null;
         setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 500);
@@ -314,8 +323,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
-      // Force refresh session to ensure valid auth token
-      await supabase.auth.refreshSession();
+      // Ensure valid auth token before calling edge function
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        toast({ title: "Session expired", description: "Please log in again.", variant: "destructive" });
+        setIsQuerying(false); setConversationState("idle"); return;
+      }
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true, projectId: projectId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
       });
@@ -350,8 +363,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     
     const recentHistory = chatHistory.slice(-8).map((msg) => ({ role: msg.role, content: msg.content }));
     try {
-      // Force refresh session to ensure valid auth token
-      await supabase.auth.refreshSession();
+      // Ensure valid auth token before calling edge function
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        toast({ title: "Session expired", description: "Please log in again.", variant: "destructive" });
+        setIsQuerying(false); return;
+      }
       const { data, error } = await supabase.functions.invoke("rag-query", {
         body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false, projectId: projectId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
       });
@@ -376,7 +393,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     dictationActiveRef.current = true;
-    recognition.onstart = () => {setIsDictating(true);};
+    recognition.onstart = () => {setIsDictating(true); abortCountRef.current = 0;};
     recognition.onresult = (event: any) => {
       let finalText = '';
       let interimText = '';
@@ -397,7 +414,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, 300);
         return;
       }
-      if (event.error === 'aborted') { recognitionRef.current = null; return; }
+      if (event.error === 'aborted') {
+        recognitionRef.current = null;
+        abortCountRef.current++;
+        if (abortCountRef.current >= 3) {
+          dictationActiveRef.current = false; setIsDictating(false);
+          toast({ title: "Voice not available", description: "Speech recognition is not available in this environment. Try a different browser.", variant: "destructive" });
+        }
+        return;
+      }
       toast({ title: "Speech recognition error", description: event.error, variant: "destructive" });
       dictationActiveRef.current = false; setIsDictating(false); recognitionRef.current = null;
     };
