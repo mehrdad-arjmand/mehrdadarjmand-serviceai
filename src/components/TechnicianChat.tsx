@@ -265,9 +265,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
         const transcript = currentTranscriptRef.current.trim();
-        if (transcript && conversationActiveRef.current && recognitionRef.current) {
-          try {recognitionRef.current.stop();} catch (e) {}
-          recognitionRef.current = null;
+        if (transcript && conversationActiveRef.current) {
+          if (recognitionRef.current) {try {recognitionRef.current.stop();} catch (e) {}recognitionRef.current = null;}
           setConversationState("processing");
           setQuestion("");
           processConversationMessage(transcript);
