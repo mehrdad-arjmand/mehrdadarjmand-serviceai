@@ -65,7 +65,8 @@ const RoleMultiSelect = ({
   const toggle = (role: string) => {
     if (disabledRoles.includes(role)) return;
     if (role === "all") {
-      onChange(selectedRoles.includes("all") ? disabledRoles : ["all"]);
+      // When deselecting "all", keep disabled (required) roles
+      onChange(selectedRoles.includes("all") ? [...disabledRoles] : ["all"]);
     } else {
       let next = selectedRoles.filter((r) => r !== "all");
       if (next.includes(role)) {
@@ -140,12 +141,14 @@ const UserMultiSelect = ({
   selectedRoles,
   onChange,
   currentUserId,
+  isAdmin,
 }: {
   selectedUserIds: string[];
   allUsers: UserOption[];
   selectedRoles: string[];
   onChange: (userIds: string[]) => void;
   currentUserId: string;
+  isAdmin: boolean;
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -165,11 +168,23 @@ const UserMultiSelect = ({
   const isAllSelected = selectedUserIds.includes("all");
 
   const toggleAll = () => {
-    if (isAllSelected) {
-      // Keep current user
-      onChange([currentUserId]);
+    if (isAdmin) {
+      // Admin: "All" means clear specific user restrictions (role-based access)
+      if (isAllSelected) {
+        onChange([currentUserId]);
+      } else {
+        onChange(["all"]);
+      }
     } else {
-      onChange(["all"]);
+      // Non-admin: "All" only selects all VISIBLE eligible users (just themselves typically)
+      if (isAllSelected) {
+        onChange([currentUserId]);
+      } else {
+        // Select all eligible users explicitly (not "all" keyword which clears restrictions)
+        const allEligibleIds = eligibleUsers.map(u => u.user_id);
+        const uniqueIds = [...new Set([currentUserId, ...allEligibleIds])];
+        onChange(uniqueIds);
+      }
     }
   };
 
@@ -182,16 +197,18 @@ const UserMultiSelect = ({
       next = [...next, userId];
     }
     // Check if all eligible users are selected
-    if (next.length >= eligibleUsers.length && eligibleUsers.every((u) => next.includes(u.user_id))) {
+    if (isAdmin && next.length >= eligibleUsers.length && eligibleUsers.every((u) => next.includes(u.user_id))) {
       onChange(["all"]);
     } else {
       onChange(next);
     }
   };
 
-  const selectedCount = isAllSelected ? eligibleUsers.length : selectedUserIds.filter((id) => id !== "all").length;
+  const selectedCount = isAllSelected
+    ? (isAdmin ? eligibleUsers.length : eligibleUsers.length)
+    : selectedUserIds.filter((id) => id !== "all").length;
   const displayLabel = isAllSelected
-    ? "All users"
+    ? (isAdmin ? "All users" : `${eligibleUsers.length} user${eligibleUsers.length !== 1 ? "s" : ""}`)
     : selectedCount === 0
       ? "Select users"
       : `${selectedCount} user${selectedCount !== 1 ? "s" : ""}`;
@@ -393,7 +410,7 @@ const Projects = () => {
     if (!newProjectName.trim() || !user) return;
     setCreating(true);
     try {
-      const rolesToSave = selectedRoles.length > 0 ? selectedRoles : (currentUserRole ? [currentUserRole] : ["admin"]);
+      const rolesToSave = [...new Set([...(selectedRoles.length > 0 ? selectedRoles : (currentUserRole ? [currentUserRole] : [])), "admin"])];
       const { data: projectId, error } = await supabase.rpc('create_project', {
         p_name: newProjectName.trim(),
         p_allowed_roles: rolesToSave,
@@ -419,7 +436,7 @@ const Projects = () => {
       setShowCreate(false);
       setNewProjectName("");
       setMetadataFields([]);
-      setSelectedRoles(currentUserRole ? [currentUserRole] : []);
+      setSelectedRoles(currentUserRole ? [...new Set([currentUserRole, 'admin'])] : ['admin']);
       setSelectedUserIds(["all"]);
       fetchProjects();
     } catch (err: any) {
@@ -481,7 +498,7 @@ const Projects = () => {
   const openEdit = async (project: Project) => {
     setEditTarget(project);
     setEditName(project.name);
-    setEditRoles(project.allowed_roles);
+    setEditRoles([...new Set([...project.allowed_roles, 'admin'])]);
     // Fetch existing metadata fields
     const { data } = await supabase
       .from("project_metadata_fields")
@@ -510,7 +527,7 @@ const Projects = () => {
         .from("projects")
         .update({
           name: editName.trim(),
-          allowed_roles: editRoles.length > 0 ? editRoles : (currentUserRole ? [currentUserRole] : ["admin"]),
+          allowed_roles: [...new Set([...(editRoles.length > 0 ? editRoles : (currentUserRole ? [currentUserRole] : [])), "admin"])],
         })
         .eq("id", editTarget.id);
       if (updateError) throw updateError;
@@ -541,8 +558,14 @@ const Projects = () => {
     }
   };
 
-  // Current user's role is always required (can't deselect)
-  const disabledRoles = currentUserRole ? [currentUserRole] : [];
+  // Current user's role and admin are always required (can't deselect)
+  const isAdmin = permissions.role === 'admin';
+  const disabledRoles = (() => {
+    const roles = new Set<string>();
+    roles.add('admin'); // Admin role is always required
+    if (currentUserRole) roles.add(currentUserRole);
+    return Array.from(roles);
+  })();
 
   return (
     <div className="min-h-screen bg-popover">
@@ -581,7 +604,7 @@ const Projects = () => {
           </div>
           <button
             onClick={() => {
-              setSelectedRoles(currentUserRole ? [currentUserRole] : []);
+              setSelectedRoles(currentUserRole ? [...new Set([currentUserRole, 'admin'])] : ['admin']);
               setSelectedUserIds(["all"]);
               setShowCreate(true);
             }}
@@ -725,6 +748,7 @@ const Projects = () => {
                 selectedRoles={selectedRoles}
                 onChange={setSelectedUserIds}
                 currentUserId={user?.id || ''}
+                isAdmin={isAdmin}
               />
             )}
 
@@ -803,6 +827,7 @@ const Projects = () => {
                 selectedRoles={editRoles}
                 onChange={setEditUserIds}
                 currentUserId={user?.id || ''}
+                isAdmin={isAdmin}
               />
             )}
 
