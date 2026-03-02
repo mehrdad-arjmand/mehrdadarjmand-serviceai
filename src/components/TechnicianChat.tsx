@@ -99,7 +99,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const [isConversationMode, setIsConversationMode] = useState(false);
   const [conversationState, setConversationState] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
   const [isDictating, setIsDictating] = useState(false);
-  const SILENCE_THRESHOLD_MS = 1200;
+  const SILENCE_THRESHOLD_MS = 3000;
 
   const recognitionRef = useRef<any>(null);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
