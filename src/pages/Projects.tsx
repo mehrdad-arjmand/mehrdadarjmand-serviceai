@@ -168,23 +168,10 @@ const UserMultiSelect = ({
   const isAllSelected = selectedUserIds.includes("all");
 
   const toggleAll = () => {
-    if (isAdmin) {
-      // Admin: "All" means clear specific user restrictions (role-based access)
-      if (isAllSelected) {
-        onChange([currentUserId]);
-      } else {
-        onChange(["all"]);
-      }
+    if (isAllSelected) {
+      onChange([currentUserId]);
     } else {
-      // Non-admin: "All" only selects all VISIBLE eligible users (just themselves typically)
-      if (isAllSelected) {
-        onChange([currentUserId]);
-      } else {
-        // Select all eligible users explicitly (not "all" keyword which clears restrictions)
-        const allEligibleIds = eligibleUsers.map(u => u.user_id);
-        const uniqueIds = [...new Set([currentUserId, ...allEligibleIds])];
-        onChange(uniqueIds);
-      }
+      onChange(["all"]);
     }
   };
 
@@ -197,7 +184,7 @@ const UserMultiSelect = ({
       next = [...next, userId];
     }
     // Check if all eligible users are selected
-    if (isAdmin && next.length >= eligibleUsers.length && eligibleUsers.every((u) => next.includes(u.user_id))) {
+    if (next.length >= eligibleUsers.length && eligibleUsers.every((u) => next.includes(u.user_id))) {
       onChange(["all"]);
     } else {
       onChange(next);
@@ -205,10 +192,10 @@ const UserMultiSelect = ({
   };
 
   const selectedCount = isAllSelected
-    ? (isAdmin ? eligibleUsers.length : eligibleUsers.length)
+    ? eligibleUsers.length
     : selectedUserIds.filter((id) => id !== "all").length;
   const displayLabel = isAllSelected
-    ? (isAdmin ? "All users" : `${eligibleUsers.length} user${eligibleUsers.length !== 1 ? "s" : ""}`)
+    ? "All users"
     : selectedCount === 0
       ? "Select users"
       : `${selectedCount} user${selectedCount !== 1 ? "s" : ""}`;
@@ -364,15 +351,20 @@ const Projects = () => {
     if (data) setAvailableRoles(data.map((r) => ({ role: r.role, displayName: r.display_name })));
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (roles?: string[]) => {
     const isAdmin = permissions.role === 'admin';
     if (isAdmin) {
       const { data } = await supabase.rpc('list_users_with_roles');
       if (data) setAllUsers(data.map((u) => ({ user_id: u.user_id, email: u.email, role: u.role })));
-    } else if (permissions.landing.write) {
-      // Non-admin with write access: fetch users by available roles
-      const roleNames = availableRoles.map((r) => r.role);
-      if (roleNames.length > 0) {
+    } else {
+      // Non-admin: fetch all users in the selected roles so they can see who they're granting access to
+      const roleNames = roles || selectedRoles.filter(r => r !== 'all');
+      if (roleNames.length === 0 && availableRoles.length > 0) {
+        // Fallback to all available roles
+        const allRoleNames = availableRoles.map((r) => r.role);
+        const { data } = await supabase.rpc('list_users_by_roles', { p_roles: allRoleNames });
+        if (data) setAllUsers(data.map((u: any) => ({ user_id: u.user_id, email: u.email, role: u.role })));
+      } else if (roleNames.length > 0) {
         const { data } = await supabase.rpc('list_users_by_roles', { p_roles: roleNames });
         if (data) setAllUsers(data.map((u: any) => ({ user_id: u.user_id, email: u.email, role: u.role })));
       }
@@ -393,6 +385,14 @@ const Projects = () => {
       }
     }
   }, [permissions.isLoading, currentUserRole, availableRoles]);
+
+  // Re-fetch users when selected roles change (for non-admin users)
+  useEffect(() => {
+    if (!permissions.isLoading && permissions.role !== 'admin' && selectedRoles.length > 0) {
+      const roles = selectedRoles.includes('all') ? availableRoles.map(r => r.role) : selectedRoles;
+      fetchUsers(roles);
+    }
+  }, [selectedRoles]);
 
   const saveProjectUsers = async (projectId: string, userIds: string[]) => {
     // Delete existing
