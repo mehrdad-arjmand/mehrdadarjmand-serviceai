@@ -15,8 +15,14 @@ import AdminRoles from "./pages/AdminRoles";
 import QueryAnalytics from "./pages/QueryAnalytics";
 import Projects from "./pages/Projects";
 import NotFound from "./pages/NotFound";
+import { useGoogleAnalytics } from "@/hooks/useGoogleAnalytics";
 
 const queryClient = new QueryClient();
+
+function AnalyticsProvider({ children }: { children: React.ReactNode }) {
+  useGoogleAnalytics();
+  return <>{children}</>;
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -25,6 +31,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <AnalyticsProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
@@ -73,6 +80,7 @@ const App = () => (
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </AnalyticsProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
