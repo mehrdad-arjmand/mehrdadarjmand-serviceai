@@ -485,6 +485,10 @@ export type Database = {
         Returns: undefined
       }
       check_is_admin: { Args: { check_user_id: string }; Returns: boolean }
+      create_project: {
+        Args: { p_allowed_roles?: string[]; p_name: string }
+        Returns: string
+      }
       create_role:
         | {
             Args: {
