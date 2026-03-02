@@ -394,16 +394,12 @@ const Projects = () => {
     setCreating(true);
     try {
       const rolesToSave = selectedRoles.length > 0 ? selectedRoles : (currentUserRole ? [currentUserRole] : ["admin"]);
-      const { data: project, error } = await supabase
-        .from("projects")
-        .insert({
-          name: newProjectName.trim(),
-          created_by: user.id,
-          allowed_roles: rolesToSave,
-        })
-        .select()
-        .single();
+      const { data: projectId, error } = await supabase.rpc('create_project', {
+        p_name: newProjectName.trim(),
+        p_allowed_roles: rolesToSave,
+      });
       if (error) throw error;
+      const project = projectId ? { id: projectId } : null;
 
       if (metadataFields.length > 0 && project) {
         const { error: fieldsError } = await supabase
