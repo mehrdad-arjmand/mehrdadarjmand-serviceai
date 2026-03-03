@@ -53,19 +53,20 @@ const RoleMultiSelect = ({
   onChange,
   label = "Access Role",
   disabledRoles = [],
+  roleLabels = {},
 }: {
   selectedRoles: string[];
   availableRoles: RoleOption[];
   onChange: (roles: string[]) => void;
   label?: string;
   disabledRoles?: string[];
+  roleLabels?: Record<string, string>; // role -> label like "(owner)", "(required)"
 }) => {
   const [open, setOpen] = useState(false);
 
   const toggle = (role: string) => {
     if (disabledRoles.includes(role)) return;
     if (role === "all") {
-      // When deselecting "all", keep disabled (required) roles
       onChange(selectedRoles.includes("all") ? [...disabledRoles] : ["all"]);
     } else {
       let next = selectedRoles.filter((r) => r !== "all");
@@ -122,7 +123,12 @@ const RoleMultiSelect = ({
                       )}
                     />
                     {role.displayName || role.role}
-                    {disabledRoles.includes(role.role) && <span className="ml-auto text-xs text-muted-foreground">(required)</span>}
+                    {roleLabels[role.role] && (
+                      <span className="ml-auto text-xs text-muted-foreground">({roleLabels[role.role]})</span>
+                    )}
+                    {!roleLabels[role.role] && disabledRoles.includes(role.role) && (
+                      <span className="ml-auto text-xs text-muted-foreground">(required)</span>
+                    )}
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -142,6 +148,9 @@ const UserMultiSelect = ({
   onChange,
   currentUserId,
   isAdmin,
+  isOwner,
+  ownerId,
+  lockedUserIds = [],
 }: {
   selectedUserIds: string[];
   allUsers: UserOption[];
@@ -149,15 +158,16 @@ const UserMultiSelect = ({
   onChange: (userIds: string[]) => void;
   currentUserId: string;
   isAdmin: boolean;
+  isOwner: boolean;
+  ownerId?: string;
+  lockedUserIds?: string[]; // Users that cannot be deselected (for shared users: all existing users)
 }) => {
   const [open, setOpen] = useState(false);
 
-  // Filter users whose role is in selectedRoles (or all users if "all" is selected)
   const eligibleUsers = selectedRoles.includes("all")
     ? allUsers
     : allUsers.filter((u) => u.role && selectedRoles.includes(u.role));
 
-  // Group users by role
   const usersByRole = new Map<string, UserOption[]>();
   eligibleUsers.forEach((u) => {
     const role = u.role || "unassigned";
@@ -167,8 +177,12 @@ const UserMultiSelect = ({
 
   const isAllSelected = selectedUserIds.includes("all");
 
+  // Shared users can only add, never remove
+  const canRemove = isAdmin || isOwner;
+
   const toggleAll = () => {
     if (isAllSelected) {
+      if (!canRemove) return; // Shared users can't deselect all
       onChange([currentUserId]);
     } else {
       onChange(["all"]);
@@ -176,14 +190,15 @@ const UserMultiSelect = ({
   };
 
   const toggleUser = (userId: string) => {
-    if (userId === currentUserId) return; // Can't deselect self
+    if (userId === currentUserId) return;
+    if (lockedUserIds.includes(userId) && !canRemove) return; // Can't deselect locked users
     let next = selectedUserIds.filter((id) => id !== "all");
     if (next.includes(userId)) {
+      if (!canRemove) return; // Shared users can't deselect anyone
       next = next.filter((id) => id !== userId);
     } else {
       next = [...next, userId];
     }
-    // Check if all eligible users are selected
     if (next.length >= eligibleUsers.length && eligibleUsers.every((u) => next.includes(u.user_id))) {
       onChange(["all"]);
     } else {
@@ -202,11 +217,20 @@ const UserMultiSelect = ({
 
   if (eligibleUsers.length === 0) return null;
 
+  const getUserLabel = (u: UserOption) => {
+    if (u.user_id === currentUserId && isOwner) return "(owner)";
+    if (u.user_id === currentUserId) return "(shared)";
+    if (u.user_id === ownerId) return "(owner)";
+    return null;
+  };
+
   return (
     <div className="space-y-2">
       <Label>Access Users</Label>
       <p className="text-xs text-muted-foreground">
-        Select specific users within the chosen roles. Your own access is always included.
+        {canRemove
+          ? "Select specific users within the chosen roles. Your own access is always included."
+          : "You can share this project with additional users. Existing access cannot be removed."}
       </p>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -221,7 +245,10 @@ const UserMultiSelect = ({
           <Command>
             <CommandList>
               <CommandGroup>
-                <CommandItem onSelect={toggleAll} className="text-sm font-medium">
+                <CommandItem
+                  onSelect={toggleAll}
+                  className={cn("text-sm font-medium", !canRemove && isAllSelected && "opacity-60")}
+                >
                   <Check className={cn("mr-2 h-3.5 w-3.5", isAllSelected ? "opacity-100" : "opacity-0")} />
                   All
                 </CommandItem>
@@ -233,16 +260,18 @@ const UserMultiSelect = ({
                     </div>
                     {users.map((u) => {
                       const isSelf = u.user_id === currentUserId;
+                      const isLocked = !canRemove && (lockedUserIds.includes(u.user_id) || isSelf);
                       const isSelected = isAllSelected || selectedUserIds.includes(u.user_id);
+                      const userLabel = getUserLabel(u);
                       return (
                         <CommandItem
                           key={u.user_id}
                           onSelect={() => toggleUser(u.user_id)}
-                          className={cn("text-sm pl-4", isSelf && "opacity-70")}
+                          className={cn("text-sm pl-4", (isSelf || isLocked) && "opacity-70")}
                         >
                           <Check className={cn("mr-2 h-3.5 w-3.5", isSelected ? "opacity-100" : "opacity-0")} />
                           <span className="truncate">{u.email}</span>
-                          {isSelf && <span className="ml-auto text-xs text-muted-foreground">(you)</span>}
+                          {userLabel && <span className="ml-auto text-xs text-muted-foreground">{userLabel}</span>}
                         </CommandItem>
                       );
                     })}
@@ -279,6 +308,7 @@ const Projects = () => {
   const [editName, setEditName] = useState("");
   const [editRoles, setEditRoles] = useState<string[]>([]);
   const [editUserIds, setEditUserIds] = useState<string[]>(["all"]);
+  const [editLockedUserIds, setEditLockedUserIds] = useState<string[]>([]);
   const [editMetadataFields, setEditMetadataFields] = useState<string[]>([]);
   const [editNewFieldName, setEditNewFieldName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -290,14 +320,12 @@ const Projects = () => {
     { label: "COST", sublabel: "Average cost per thousand queries", value: "—" },
   ]);
 
-  // Get current user's role
   const currentUserRole = permissions.role;
 
   const fetchProjects = async () => {
     const { data, error } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
     if (!error && data) {
       setProjects(data);
-      // Fetch metadata fields for all projects
       const { data: fields } = await supabase
         .from("project_metadata_fields")
         .select("project_id, field_name")
@@ -357,10 +385,8 @@ const Projects = () => {
       const { data } = await supabase.rpc('list_users_with_roles');
       if (data) setAllUsers(data.map((u) => ({ user_id: u.user_id, email: u.email, role: u.role })));
     } else {
-      // Non-admin: fetch all users in the selected roles so they can see who they're granting access to
       const roleNames = roles || selectedRoles.filter(r => r !== 'all');
       if (roleNames.length === 0 && availableRoles.length > 0) {
-        // Fallback to all available roles
         const allRoleNames = availableRoles.map((r) => r.role);
         const { data } = await supabase.rpc('list_users_by_roles', { p_roles: allRoleNames });
         if (data) setAllUsers(data.map((u: any) => ({ user_id: u.user_id, email: u.email, role: u.role })));
@@ -386,7 +412,6 @@ const Projects = () => {
     }
   }, [permissions.isLoading, currentUserRole, availableRoles]);
 
-  // Re-fetch users when selected roles change (for non-admin users)
   useEffect(() => {
     if (!permissions.isLoading && permissions.role !== 'admin' && selectedRoles.length > 0) {
       const roles = selectedRoles.includes('all') ? availableRoles.map(r => r.role) : selectedRoles;
@@ -395,12 +420,9 @@ const Projects = () => {
   }, [selectedRoles]);
 
   const saveProjectUsers = async (projectId: string, userIds: string[]) => {
-    // Delete existing
     const { error: delError } = await supabase.from("project_allowed_users").delete().eq("project_id", projectId);
     if (delError) console.error("Error deleting project users:", delError);
-    // If "all" is selected or no specific users, don't add individual entries
     if (userIds.includes("all") || userIds.length === 0) return;
-    // Insert specific users
     const rows = userIds.map((uid) => ({ project_id: projectId, user_id: uid }));
     const { error: insError } = await supabase.from("project_allowed_users").insert(rows);
     if (insError) console.error("Error inserting project users:", insError);
@@ -425,9 +447,7 @@ const Projects = () => {
         if (fieldsError) console.error("Error creating metadata fields:", fieldsError);
       }
 
-      // Save per-user access
       if (project && !selectedUserIds.includes("all")) {
-        // Always include current user
         const userIdsToSave = [...new Set([user.id, ...selectedUserIds])];
         await saveProjectUsers(project.id, userIdsToSave);
       }
@@ -499,7 +519,6 @@ const Projects = () => {
     setEditTarget(project);
     setEditName(project.name);
     setEditRoles([...new Set([...project.allowed_roles, 'admin'])]);
-    // Fetch existing metadata fields
     const { data } = await supabase
       .from("project_metadata_fields")
       .select("field_name")
@@ -513,9 +532,19 @@ const Projects = () => {
       .select("user_id")
       .eq("project_id", project.id);
     if (allowedUsers && allowedUsers.length > 0) {
-      setEditUserIds(allowedUsers.map((u: any) => u.user_id));
+      const userIds = allowedUsers.map((u: any) => u.user_id);
+      setEditUserIds(userIds);
+      // For shared users (not owner, not admin): lock all existing users so they can't remove them
+      const isProjectOwner = project.created_by === user?.id;
+      const isAdminUser = permissions.role === 'admin';
+      if (!isProjectOwner && !isAdminUser) {
+        setEditLockedUserIds(userIds);
+      } else {
+        setEditLockedUserIds([]);
+      }
     } else {
       setEditUserIds(["all"]);
+      setEditLockedUserIds([]);
     }
   };
 
@@ -523,29 +552,52 @@ const Projects = () => {
     if (!editTarget) return;
     setIsSaving(true);
     try {
-      const { error: updateError } = await supabase
-        .from("projects")
-        .update({
-          name: editName.trim(),
-          allowed_roles: [...new Set([...(editRoles.length > 0 ? editRoles : (currentUserRole ? [currentUserRole] : [])), "admin"])],
-        })
-        .eq("id", editTarget.id);
-      if (updateError) throw updateError;
+      const isProjectOwner = editTarget.created_by === user?.id;
+      const isAdminUser = permissions.role === 'admin';
 
-      // Sync metadata fields
-      await supabase.from("project_metadata_fields").delete().eq("project_id", editTarget.id);
-      if (editMetadataFields.length > 0) {
-        await supabase
-          .from("project_metadata_fields")
-          .insert(editMetadataFields.map((field_name) => ({ project_id: editTarget.id, field_name })));
+      // Only owner/admin can update roles
+      if (isProjectOwner || isAdminUser) {
+        const { error: updateError } = await supabase
+          .from("projects")
+          .update({
+            name: editName.trim(),
+            allowed_roles: [...new Set([...(editRoles.length > 0 ? editRoles : (currentUserRole ? [currentUserRole] : [])), "admin"])],
+          })
+          .eq("id", editTarget.id);
+        if (updateError) throw updateError;
+      }
+
+      // Sync metadata fields (owner/admin only)
+      if (isProjectOwner || isAdminUser) {
+        await supabase.from("project_metadata_fields").delete().eq("project_id", editTarget.id);
+        if (editMetadataFields.length > 0) {
+          await supabase
+            .from("project_metadata_fields")
+            .insert(editMetadataFields.map((field_name) => ({ project_id: editTarget.id, field_name })));
+        }
       }
 
       // Sync per-user access
       if (editUserIds.includes("all")) {
-        await supabase.from("project_allowed_users").delete().eq("project_id", editTarget.id);
+        if (isProjectOwner || isAdminUser) {
+          await supabase.from("project_allowed_users").delete().eq("project_id", editTarget.id);
+        }
       } else if (user) {
-        const userIdsToSave = [...new Set([user.id, ...editUserIds])];
-        await saveProjectUsers(editTarget.id, userIdsToSave);
+        if (isProjectOwner || isAdminUser) {
+          // Owner/admin: full replace
+          const userIdsToSave = [...new Set([user.id, ...editUserIds])];
+          await saveProjectUsers(editTarget.id, userIdsToSave);
+        } else {
+          // Shared user: only add new users (merge with existing)
+          const newUserIds = editUserIds.filter(id => !editLockedUserIds.includes(id) && id !== user.id);
+          if (newUserIds.length > 0) {
+            const rows = newUserIds.map((uid) => ({ project_id: editTarget.id, user_id: uid }));
+            // Use upsert-like behavior: insert and ignore conflicts
+            for (const row of rows) {
+              await supabase.from("project_allowed_users").insert(row).select();
+            }
+          }
+        }
       }
 
       toast({ title: "Project updated" });
@@ -558,14 +610,39 @@ const Projects = () => {
     }
   };
 
-  // Current user's role and admin are always required (can't deselect)
   const isAdmin = permissions.role === 'admin';
   const disabledRoles = (() => {
     const roles = new Set<string>();
-    roles.add('admin'); // Admin role is always required
+    roles.add('admin');
     if (currentUserRole) roles.add(currentUserRole);
     return Array.from(roles);
   })();
+
+  // Build role labels for create dialog
+  const createRoleLabels: Record<string, string> = {};
+  createRoleLabels['admin'] = 'required';
+  if (currentUserRole && currentUserRole !== 'admin') {
+    createRoleLabels[currentUserRole] = 'owner';
+  }
+
+  // Build role labels for edit dialog
+  const getEditRoleLabels = (project: Project | null): Record<string, string> => {
+    if (!project) return {};
+    const labels: Record<string, string> = {};
+    labels['admin'] = 'required';
+    // Find owner's role
+    const ownerUser = allUsers.find(u => u.user_id === project.created_by);
+    if (ownerUser?.role && ownerUser.role !== 'admin') {
+      labels[ownerUser.role] = 'owner';
+    }
+    // If current user is shared (not owner, not admin), mark their role
+    if (project.created_by !== user?.id && !isAdmin && currentUserRole && !labels[currentUserRole]) {
+      labels[currentUserRole] = 'shared';
+    }
+    return labels;
+  };
+
+  const isProjectOwner = (project: Project) => project.created_by === user?.id;
 
   return (
     <div className="min-h-screen bg-popover">
@@ -636,6 +713,7 @@ const Projects = () => {
             ) : (
               filteredProjects.map((project) => {
                 const isExpanded = expandedProjectId === project.id;
+                const isOwner = isProjectOwner(project);
                 return (
                   <div key={project.id}>
                     <div
@@ -651,6 +729,9 @@ const Projects = () => {
                           <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                           {project.name}
                         </p>
+                        <p className="text-xs text-muted-foreground mt-1 ml-6">
+                          {format(new Date(project.created_at), "MMM d, yyyy")}
+                        </p>
                         <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
                           {(projectMetadataFields[project.id] || []).map((field) => (
                             <span
@@ -663,9 +744,20 @@ const Projects = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className="text-xs text-muted-foreground">
-                          {format(new Date(project.created_at), "MMM d, yyyy")}
+                        <span className="text-xs text-muted-foreground capitalize">
+                          {project.allowed_roles.includes("all") ? "All Roles" : project.allowed_roles.join(", ")}
                         </span>
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            "rounded-full text-[10px] px-2.5 py-0.5 font-medium",
+                            isOwner
+                              ? "bg-primary/15 text-primary border-primary/20"
+                              : "bg-accent text-accent-foreground"
+                          )}
+                        >
+                          {isOwner ? "Owner" : "Shared"}
+                        </Badge>
                         {isExpanded ? (
                           <ChevronDown className="h-4 w-4 text-muted-foreground" />
                         ) : (
@@ -694,12 +786,14 @@ const Projects = () => {
                           >
                             Edit
                           </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.name }); }}
-                            className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground"
-                          >
-                            Delete
-                          </button>
+                          {(isOwner || isAdmin) && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.name }); }}
+                              className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground"
+                            >
+                              Delete
+                            </button>
+                          )}
                           <button
                             onClick={(e) => { e.stopPropagation(); navigate(`/?project=${project.id}`); }}
                             className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium"
@@ -739,6 +833,7 @@ const Projects = () => {
               availableRoles={availableRoles}
               onChange={setSelectedRoles}
               disabledRoles={disabledRoles}
+              roleLabels={createRoleLabels}
             />
 
             {(permissions.role === 'admin' || permissions.landing.write) && (
@@ -749,6 +844,8 @@ const Projects = () => {
                 onChange={setSelectedUserIds}
                 currentUserId={user?.id || ''}
                 isAdmin={isAdmin}
+                isOwner={true}
+                ownerId={user?.id}
               />
             )}
 
@@ -810,7 +907,11 @@ const Projects = () => {
           <div className="space-y-5 py-2">
             <div className="space-y-2">
               <Label>Project Name</Label>
-              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                disabled={editTarget ? (!isProjectOwner(editTarget) && !isAdmin) : false}
+              />
             </div>
 
             <RoleMultiSelect
@@ -818,9 +919,10 @@ const Projects = () => {
               availableRoles={availableRoles}
               onChange={setEditRoles}
               disabledRoles={disabledRoles}
+              roleLabels={getEditRoleLabels(editTarget)}
             />
 
-            {(permissions.role === 'admin' || permissions.landing.write) && (
+            {(permissions.role === 'admin' || permissions.landing.write) && editTarget && (
               <UserMultiSelect
                 selectedUserIds={editUserIds}
                 allUsers={allUsers}
@@ -828,6 +930,9 @@ const Projects = () => {
                 onChange={setEditUserIds}
                 currentUserId={user?.id || ''}
                 isAdmin={isAdmin}
+                isOwner={isProjectOwner(editTarget)}
+                ownerId={editTarget.created_by}
+                lockedUserIds={editLockedUserIds}
               />
             )}
 
