@@ -67,15 +67,21 @@ const RoleMultiSelect = ({
   const toggle = (role: string) => {
     if (disabledRoles.includes(role)) return;
     if (role === "all") {
-      onChange(selectedRoles.includes("all") ? [...disabledRoles] : ["all"]);
+      if (selectedRoles.includes("all")) {
+        // Deselect all, but keep disabled roles selected
+        onChange([...disabledRoles]);
+      } else {
+        onChange(["all"]);
+      }
     } else {
       let next = selectedRoles.filter((r) => r !== "all");
       if (next.includes(role)) {
-        if (disabledRoles.includes(role)) return;
         next = next.filter((r) => r !== role);
       } else {
         next = [...next, role];
       }
+      // Ensure disabled roles are always present
+      disabledRoles.forEach(dr => { if (!next.includes(dr)) next.push(dr); });
       if (next.length === availableRoles.length) onChange(["all"]);
       else onChange(next);
     }
@@ -180,25 +186,35 @@ const UserMultiSelect = ({
   // Shared users can only add, never remove
   const canRemove = isAdmin || isOwner;
 
+  // Determine which user IDs are always locked (owner + admin users)
+  const alwaysLockedIds = new Set<string>();
+  if (ownerId) alwaysLockedIds.add(ownerId);
+  alwaysLockedIds.add(currentUserId);
+  // Admin users are always locked
+  eligibleUsers.forEach(u => { if (u.role === 'admin') alwaysLockedIds.add(u.user_id); });
+  lockedUserIds.forEach(id => alwaysLockedIds.add(id));
+
   const toggleAll = () => {
     if (isAllSelected) {
-      if (!canRemove) return; // Shared users can't deselect all
-      onChange([currentUserId]);
+      // Deselect all, but keep always-locked users selected
+      const kept = Array.from(alwaysLockedIds).filter(id => eligibleUsers.some(u => u.user_id === id));
+      onChange(kept.length > 0 ? kept : [currentUserId]);
     } else {
       onChange(["all"]);
     }
   };
 
   const toggleUser = (userId: string) => {
-    if (userId === currentUserId) return;
-    if (lockedUserIds.includes(userId) && !canRemove) return; // Can't deselect locked users
+    if (alwaysLockedIds.has(userId)) return; // Can never deselect locked users
+    if (!canRemove && selectedUserIds.includes(userId)) return; // Shared users can't deselect anyone
     let next = selectedUserIds.filter((id) => id !== "all");
     if (next.includes(userId)) {
-      if (!canRemove) return; // Shared users can't deselect anyone
       next = next.filter((id) => id !== userId);
     } else {
       next = [...next, userId];
     }
+    // Ensure always-locked users remain
+    alwaysLockedIds.forEach(id => { if (!next.includes(id)) next.push(id); });
     if (next.length >= eligibleUsers.length && eligibleUsers.every((u) => next.includes(u.user_id))) {
       onChange(["all"]);
     } else {
@@ -259,15 +275,14 @@ const UserMultiSelect = ({
                       {role}
                     </div>
                     {users.map((u) => {
-                      const isSelf = u.user_id === currentUserId;
-                      const isLocked = !canRemove && (lockedUserIds.includes(u.user_id) || isSelf);
+                      const isLocked = alwaysLockedIds.has(u.user_id) || (!canRemove && selectedUserIds.includes(u.user_id));
                       const isSelected = isAllSelected || selectedUserIds.includes(u.user_id);
                       const userLabel = getUserLabel(u);
                       return (
                         <CommandItem
                           key={u.user_id}
                           onSelect={() => toggleUser(u.user_id)}
-                          className={cn("text-sm pl-4", (isSelf || isLocked) && "opacity-70")}
+                          className={cn("text-sm pl-4", isLocked && "opacity-70")}
                         >
                           <Check className={cn("mr-2 h-3.5 w-3.5", isSelected ? "opacity-100" : "opacity-0")} />
                           <span className="truncate">{u.email}</span>
@@ -524,7 +539,7 @@ const Projects = () => {
       .select("field_name")
       .eq("project_id", project.id)
       .order("created_at");
-    setEditMetadataFields(data?.map((f) => f.field_name) || []);
+    setEditMetadataFields([...new Set(data?.map((f) => f.field_name) || [])]);
     setEditNewFieldName("");
     // Fetch existing allowed users
     const { data: allowedUsers } = await supabase
@@ -570,10 +585,11 @@ const Projects = () => {
       // Sync metadata fields (owner/admin only)
       if (isProjectOwner || isAdminUser) {
         await supabase.from("project_metadata_fields").delete().eq("project_id", editTarget.id);
-        if (editMetadataFields.length > 0) {
+        const uniqueFields = [...new Set(editMetadataFields)];
+        if (uniqueFields.length > 0) {
           await supabase
             .from("project_metadata_fields")
-            .insert(editMetadataFields.map((field_name) => ({ project_id: editTarget.id, field_name })));
+            .insert(uniqueFields.map((field_name) => ({ project_id: editTarget.id, field_name })));
         }
       }
 
@@ -729,9 +745,6 @@ const Projects = () => {
                           <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                           {project.name}
                         </p>
-                        <p className="text-xs text-muted-foreground mt-1 ml-6">
-                          {format(new Date(project.created_at), "MMM d, yyyy")}
-                        </p>
                         <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
                           {(projectMetadataFields[project.id] || []).map((field) => (
                             <span
@@ -744,16 +757,13 @@ const Projects = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className="text-xs text-muted-foreground capitalize">
-                          {project.allowed_roles.includes("all") ? "All Roles" : project.allowed_roles.join(", ")}
-                        </span>
                         <Badge
                           variant="secondary"
                           className={cn(
-                            "rounded-full text-[10px] px-2.5 py-0.5 font-medium",
+                            "rounded-full text-xs px-3 py-0.5 font-medium border",
                             isOwner
                               ? "bg-primary/15 text-primary border-primary/20"
-                              : "bg-accent text-accent-foreground"
+                              : "bg-accent text-accent-foreground border-border"
                           )}
                         >
                           {isOwner ? "Owner" : "Shared"}
@@ -770,6 +780,14 @@ const Projects = () => {
                       <div className="pl-8 pr-8 pb-5 bg-muted/30 -mx-2 px-[calc(2rem+0.5rem)] rounded-b-lg">
                         <Separator className="mb-5" />
                         <div className="grid grid-cols-3 gap-6 mb-5">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                              Created
+                            </p>
+                            <p className="text-sm text-foreground">
+                              {format(new Date(project.created_at), "MMM d, yyyy")}
+                            </p>
+                          </div>
                           <div>
                             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                               Access Roles
