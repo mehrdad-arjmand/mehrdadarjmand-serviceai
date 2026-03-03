@@ -14,8 +14,8 @@ import { toast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from
+"@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
@@ -53,24 +53,24 @@ const RoleMultiSelect = ({
   onChange,
   label = "Access Role",
   disabledRoles = [],
-  roleLabels = {},
-}: {
-  selectedRoles: string[];
-  availableRoles: RoleOption[];
-  onChange: (roles: string[]) => void;
-  label?: string;
-  disabledRoles?: string[];
-  roleLabels?: Record<string, string>; // role -> label like "(owner)", "(required)"
-}) => {
-  const [open, setOpen] = useState(false);
+  roleLabels = {}
 
-  const toggle = (role: string) => {
-    if (disabledRoles.includes(role)) return;
-    if (role === "all") {
-      if (selectedRoles.includes("all")) {
-        // Deselect all, but keep disabled roles selected
-        onChange([...disabledRoles]);
-      } else {
+
+
+
+
+
+
+
+
+
+
+
+
+
+}: {selectedRoles: string[];availableRoles: RoleOption[];onChange: (roles: string[]) => void;label?: string;disabledRoles?: string[];roleLabels?: Record<string, string>; // role -> label like "(owner)", "(required)"
+}) => {const [open, setOpen] = useState(false);const toggle = (role: string) => {if (disabledRoles.includes(role)) return;if (role === "all") {if (selectedRoles.includes("all")) {// Deselect all, but keep disabled roles selected
+        onChange([...disabledRoles]);} else {
         onChange(["all"]);
       }
     } else {
@@ -81,19 +81,19 @@ const RoleMultiSelect = ({
         next = [...next, role];
       }
       // Ensure disabled roles are always present
-      disabledRoles.forEach(dr => { if (!next.includes(dr)) next.push(dr); });
-      if (next.length === availableRoles.length) onChange(["all"]);
-      else onChange(next);
+      disabledRoles.forEach((dr) => {if (!next.includes(dr)) next.push(dr);});
+      if (next.length === availableRoles.length) onChange(["all"]);else
+      onChange(next);
     }
   };
 
-  const displayLabel = selectedRoles.includes("all")
-    ? "All"
-    : selectedRoles.length === 0
-      ? "Select roles"
-      : selectedRoles.length === 1
-        ? availableRoles.find((r) => r.role === selectedRoles[0])?.displayName || selectedRoles[0]
-        : `${selectedRoles.length} roles`;
+  const displayLabel = selectedRoles.includes("all") ?
+  "All" :
+  selectedRoles.length === 0 ?
+  "Select roles" :
+  selectedRoles.length === 1 ?
+  availableRoles.find((r) => r.role === selectedRoles[0])?.displayName || selectedRoles[0] :
+  `${selectedRoles.length} roles`;
 
   return (
     <div className="space-y-2">
@@ -116,34 +116,34 @@ const RoleMultiSelect = ({
                   All
                 </CommandItem>
                 <Separator className="my-1" />
-                {availableRoles.map((role) => (
-                  <CommandItem
-                    key={role.role}
-                    onSelect={() => toggle(role.role)}
-                    className={cn("text-sm capitalize", disabledRoles.includes(role.role) && "opacity-60")}
-                  >
+                {availableRoles.map((role) =>
+                <CommandItem
+                  key={role.role}
+                  onSelect={() => toggle(role.role)}
+                  className={cn("text-sm capitalize", disabledRoles.includes(role.role) && "opacity-60")}>
+                  
                     <Check
-                      className={cn(
-                        "mr-2 h-3.5 w-3.5",
-                        selectedRoles.includes(role.role) || selectedRoles.includes("all") ? "opacity-100" : "opacity-0",
-                      )}
-                    />
+                    className={cn(
+                      "mr-2 h-3.5 w-3.5",
+                      selectedRoles.includes(role.role) || selectedRoles.includes("all") ? "opacity-100" : "opacity-0"
+                    )} />
+                  
                     {role.displayName || role.role}
-                    {roleLabels[role.role] && (
-                      <span className="ml-auto text-xs text-muted-foreground">({roleLabels[role.role]})</span>
-                    )}
-                    {!roleLabels[role.role] && disabledRoles.includes(role.role) && (
-                      <span className="ml-auto text-xs text-muted-foreground">(required)</span>
-                    )}
+                    {roleLabels[role.role] &&
+                  <span className="ml-auto text-xs text-muted-foreground">({roleLabels[role.role]})</span>
+                  }
+                    {!roleLabels[role.role] && disabledRoles.includes(role.role) &&
+                  <span className="ml-auto text-xs text-muted-foreground">(required)</span>
+                  }
                   </CommandItem>
-                ))}
+                )}
               </CommandGroup>
             </CommandList>
           </Command>
         </PopoverContent>
       </Popover>
-    </div>
-  );
+    </div>);
+
 };
 
 // ─── User Multi-Select per Role ───────────────────────────────────────────────
@@ -156,26 +156,26 @@ const UserMultiSelect = ({
   isAdmin,
   isOwner,
   ownerId,
-  lockedUserIds = [],
-}: {
-  selectedUserIds: string[];
-  allUsers: UserOption[];
-  selectedRoles: string[];
-  onChange: (userIds: string[]) => void;
-  currentUserId: string;
-  isAdmin: boolean;
-  isOwner: boolean;
-  ownerId?: string;
-  lockedUserIds?: string[]; // Users that cannot be deselected (for shared users: all existing users)
-}) => {
-  const [open, setOpen] = useState(false);
+  lockedUserIds = []
 
-  const eligibleUsers = selectedRoles.includes("all")
-    ? allUsers
-    : allUsers.filter((u) => u.role && selectedRoles.includes(u.role));
 
-  const usersByRole = new Map<string, UserOption[]>();
-  eligibleUsers.forEach((u) => {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}: {selectedUserIds: string[];allUsers: UserOption[];selectedRoles: string[];onChange: (userIds: string[]) => void;currentUserId: string;isAdmin: boolean;isOwner: boolean;ownerId?: string;lockedUserIds?: string[]; // Users that cannot be deselected (for shared users: all existing users)
+}) => {const [open, setOpen] = useState(false);const eligibleUsers = selectedRoles.includes("all") ? allUsers : allUsers.filter((u) => u.role && selectedRoles.includes(u.role));const usersByRole = new Map<string, UserOption[]>();eligibleUsers.forEach((u) => {
     const role = u.role || "unassigned";
     if (!usersByRole.has(role)) usersByRole.set(role, []);
     usersByRole.get(role)!.push(u);
@@ -191,13 +191,13 @@ const UserMultiSelect = ({
   if (ownerId) alwaysLockedIds.add(ownerId);
   alwaysLockedIds.add(currentUserId);
   // Admin users are always locked
-  eligibleUsers.forEach(u => { if (u.role === 'admin') alwaysLockedIds.add(u.user_id); });
-  lockedUserIds.forEach(id => alwaysLockedIds.add(id));
+  eligibleUsers.forEach((u) => {if (u.role === 'admin') alwaysLockedIds.add(u.user_id);});
+  lockedUserIds.forEach((id) => alwaysLockedIds.add(id));
 
   const toggleAll = () => {
     if (isAllSelected) {
       // Deselect all, but keep always-locked users selected
-      const kept = Array.from(alwaysLockedIds).filter(id => eligibleUsers.some(u => u.user_id === id));
+      const kept = Array.from(alwaysLockedIds).filter((id) => eligibleUsers.some((u) => u.user_id === id));
       onChange(kept.length > 0 ? kept : [currentUserId]);
     } else {
       onChange(["all"]);
@@ -214,7 +214,7 @@ const UserMultiSelect = ({
       next = [...next, userId];
     }
     // Ensure always-locked users remain
-    alwaysLockedIds.forEach(id => { if (!next.includes(id)) next.push(id); });
+    alwaysLockedIds.forEach((id) => {if (!next.includes(id)) next.push(id);});
     if (next.length >= eligibleUsers.length && eligibleUsers.every((u) => next.includes(u.user_id))) {
       onChange(["all"]);
     } else {
@@ -222,14 +222,14 @@ const UserMultiSelect = ({
     }
   };
 
-  const selectedCount = isAllSelected
-    ? eligibleUsers.length
-    : selectedUserIds.filter((id) => id !== "all").length;
-  const displayLabel = isAllSelected
-    ? "All users"
-    : selectedCount === 0
-      ? "Select users"
-      : `${selectedCount} user${selectedCount !== 1 ? "s" : ""}`;
+  const selectedCount = isAllSelected ?
+  eligibleUsers.length :
+  selectedUserIds.filter((id) => id !== "all").length;
+  const displayLabel = isAllSelected ?
+  "All users" :
+  selectedCount === 0 ?
+  "Select users" :
+  `${selectedCount} user${selectedCount !== 1 ? "s" : ""}`;
 
   if (eligibleUsers.length === 0) return null;
 
@@ -244,9 +244,9 @@ const UserMultiSelect = ({
     <div className="space-y-2">
       <Label>Access Users</Label>
       <p className="text-xs text-muted-foreground">
-        {canRemove
-          ? "Select specific users within the chosen roles. Your own access is always included."
-          : "You can share this project with additional users. Existing access cannot be removed."}
+        {canRemove ?
+        "Select specific users within the chosen roles. Your own access is always included." :
+        "You can share this project with additional users. Existing access cannot be removed."}
       </p>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -263,42 +263,42 @@ const UserMultiSelect = ({
               <CommandGroup>
                 <CommandItem
                   onSelect={toggleAll}
-                  className={cn("text-sm font-medium", !canRemove && isAllSelected && "opacity-60")}
-                >
+                  className={cn("text-sm font-medium", !canRemove && isAllSelected && "opacity-60")}>
+                  
                   <Check className={cn("mr-2 h-3.5 w-3.5", isAllSelected ? "opacity-100" : "opacity-0")} />
                   All
                 </CommandItem>
                 <Separator className="my-1" />
-                {Array.from(usersByRole.entries()).map(([role, users]) => (
-                  <div key={role}>
+                {Array.from(usersByRole.entries()).map(([role, users]) =>
+                <div key={role}>
                     <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       {role}
                     </div>
                     {users.map((u) => {
-                      const isLocked = alwaysLockedIds.has(u.user_id) || (!canRemove && selectedUserIds.includes(u.user_id));
-                      const isSelected = isAllSelected || selectedUserIds.includes(u.user_id);
-                      const userLabel = getUserLabel(u);
-                      return (
-                        <CommandItem
-                          key={u.user_id}
-                          onSelect={() => toggleUser(u.user_id)}
-                          className={cn("text-sm pl-4", isLocked && "opacity-70")}
-                        >
+                    const isLocked = alwaysLockedIds.has(u.user_id) || !canRemove && selectedUserIds.includes(u.user_id);
+                    const isSelected = isAllSelected || selectedUserIds.includes(u.user_id);
+                    const userLabel = getUserLabel(u);
+                    return (
+                      <CommandItem
+                        key={u.user_id}
+                        onSelect={() => toggleUser(u.user_id)}
+                        className={cn("text-sm pl-4", isLocked && "opacity-70")}>
+                        
                           <Check className={cn("mr-2 h-3.5 w-3.5", isSelected ? "opacity-100" : "opacity-0")} />
                           <span className="truncate">{u.email}</span>
                           {userLabel && <span className="ml-auto text-xs text-muted-foreground">{userLabel}</span>}
-                        </CommandItem>
-                      );
-                    })}
+                        </CommandItem>);
+
+                  })}
                   </div>
-                ))}
+                )}
               </CommandGroup>
             </CommandList>
           </Command>
         </PopoverContent>
       </Popover>
-    </div>
-  );
+    </div>);
+
 };
 
 const Projects = () => {
@@ -318,7 +318,7 @@ const Projects = () => {
   const [availableRoles, setAvailableRoles] = useState<RoleOption[]>([]);
   const [allUsers, setAllUsers] = useState<UserOption[]>([]);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{id: string;name: string;} | null>(null);
   const [editTarget, setEditTarget] = useState<Project | null>(null);
   const [editName, setEditName] = useState("");
   const [editRoles, setEditRoles] = useState<string[]>([]);
@@ -330,10 +330,10 @@ const Projects = () => {
   const [filterRole, setFilterRole] = useState("");
   const [projectMetadataFields, setProjectMetadataFields] = useState<Record<string, string[]>>({});
   const [metrics, setMetrics] = useState<MetricCard[]>([
-    { label: "QUALITY", sublabel: "Hit rate", value: "—" },
-    { label: "TIME", sublabel: "Median latency", value: "—" },
-    { label: "COST", sublabel: "Average cost per thousand queries", value: "—" },
-  ]);
+  { label: "QUALITY", sublabel: "Hit rate", value: "—" },
+  { label: "TIME", sublabel: "Median latency", value: "—" },
+  { label: "COST", sublabel: "Average cost per thousand queries", value: "—" }]
+  );
 
   const currentUserRole = permissions.role;
 
@@ -341,10 +341,10 @@ const Projects = () => {
     const { data, error } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
     if (!error && data) {
       setProjects(data);
-      const { data: fields } = await supabase
-        .from("project_metadata_fields")
-        .select("project_id, field_name")
-        .in("project_id", data.map((p) => p.id));
+      const { data: fields } = await supabase.
+      from("project_metadata_fields").
+      select("project_id, field_name").
+      in("project_id", data.map((p) => p.id));
       if (fields) {
         const map: Record<string, string[]> = {};
         fields.forEach((f) => {
@@ -358,35 +358,35 @@ const Projects = () => {
   };
 
   const fetchMetrics = async () => {
-    const { data, error } = await supabase
-      .from("query_logs")
-      .select("hit_rate_at_k, execution_time_ms, upstream_inference_cost")
-      .not("execution_time_ms", "is", null);
+    const { data, error } = await supabase.
+    from("query_logs").
+    select("hit_rate_at_k, execution_time_ms, upstream_inference_cost").
+    not("execution_time_ms", "is", null);
     if (error || !data || data.length === 0) return;
 
     const hitRates = data.filter((d) => d.hit_rate_at_k !== null);
     const avgHitRate =
-      hitRates.length > 0 ? hitRates.reduce((sum, d) => sum + (d.hit_rate_at_k || 0), 0) / hitRates.length : 0;
+    hitRates.length > 0 ? hitRates.reduce((sum, d) => sum + (d.hit_rate_at_k || 0), 0) / hitRates.length : 0;
 
-    const latencies = data
-      .map((d) => d.execution_time_ms)
-      .filter((v): v is number => v !== null)
-      .sort((a, b) => a - b);
+    const latencies = data.
+    map((d) => d.execution_time_ms).
+    filter((v): v is number => v !== null).
+    sort((a, b) => a - b);
     const medianLatency = latencies.length > 0 ? latencies[Math.floor(latencies.length / 2)] : 0;
 
     const costs = data.filter((d) => d.upstream_inference_cost !== null);
     const avgCost =
-      costs.length > 0 ? costs.reduce((sum, d) => sum + (d.upstream_inference_cost || 0), 0) / costs.length : 0;
+    costs.length > 0 ? costs.reduce((sum, d) => sum + (d.upstream_inference_cost || 0), 0) / costs.length : 0;
 
     setMetrics([
-      { label: "QUALITY", sublabel: "Hit rate", value: `${(avgHitRate * 100).toFixed(1)}%` },
-      {
-        label: "TIME",
-        sublabel: "Median latency",
-        value: medianLatency >= 1000 ? `${(medianLatency / 1000).toFixed(1)} seconds` : `${medianLatency} ms`,
-      },
-      { label: "COST", sublabel: "Average cost per thousand queries", value: `$${(avgCost * 1000).toFixed(2)}` },
-    ]);
+    { label: "QUALITY", sublabel: "Hit rate", value: `${(avgHitRate * 100).toFixed(1)}%` },
+    {
+      label: "TIME",
+      sublabel: "Median latency",
+      value: medianLatency >= 1000 ? `${(medianLatency / 1000).toFixed(1)} seconds` : `${medianLatency} ms`
+    },
+    { label: "COST", sublabel: "Average cost per thousand queries", value: `$${(avgCost * 1000).toFixed(2)}` }]
+    );
   };
 
   const fetchRoles = async () => {
@@ -400,7 +400,7 @@ const Projects = () => {
       const { data } = await supabase.rpc('list_users_with_roles');
       if (data) setAllUsers(data.map((u) => ({ user_id: u.user_id, email: u.email, role: u.role })));
     } else {
-      const roleNames = roles || selectedRoles.filter(r => r !== 'all');
+      const roleNames = roles || selectedRoles.filter((r) => r !== 'all');
       if (roleNames.length === 0 && availableRoles.length > 0) {
         const allRoleNames = availableRoles.map((r) => r.role);
         const { data } = await supabase.rpc('list_users_by_roles', { p_roles: allRoleNames });
@@ -429,7 +429,7 @@ const Projects = () => {
 
   useEffect(() => {
     if (!permissions.isLoading && permissions.role !== 'admin' && selectedRoles.length > 0) {
-      const roles = selectedRoles.includes('all') ? availableRoles.map(r => r.role) : selectedRoles;
+      const roles = selectedRoles.includes('all') ? availableRoles.map((r) => r.role) : selectedRoles;
       fetchUsers(roles);
     }
   }, [selectedRoles]);
@@ -447,18 +447,18 @@ const Projects = () => {
     if (!newProjectName.trim() || !user) return;
     setCreating(true);
     try {
-      const rolesToSave = [...new Set([...(selectedRoles.length > 0 ? selectedRoles : (currentUserRole ? [currentUserRole] : [])), "admin"])];
+      const rolesToSave = [...new Set([...(selectedRoles.length > 0 ? selectedRoles : currentUserRole ? [currentUserRole] : []), "admin"])];
       const { data: projectId, error } = await supabase.rpc('create_project', {
         p_name: newProjectName.trim(),
-        p_allowed_roles: rolesToSave,
+        p_allowed_roles: rolesToSave
       });
       if (error) throw error;
       const project = projectId ? { id: projectId } : null;
 
       if (metadataFields.length > 0 && project) {
-        const { error: fieldsError } = await supabase
-          .from("project_metadata_fields")
-          .insert(metadataFields.map((field_name) => ({ project_id: project.id, field_name })));
+        const { error: fieldsError } = await supabase.
+        from("project_metadata_fields").
+        insert(metadataFields.map((field_name) => ({ project_id: project.id, field_name })));
         if (fieldsError) console.error("Error creating metadata fields:", fieldsError);
       }
 
@@ -534,18 +534,18 @@ const Projects = () => {
     setEditTarget(project);
     setEditName(project.name);
     setEditRoles([...new Set([...project.allowed_roles, 'admin'])]);
-    const { data } = await supabase
-      .from("project_metadata_fields")
-      .select("field_name")
-      .eq("project_id", project.id)
-      .order("created_at");
+    const { data } = await supabase.
+    from("project_metadata_fields").
+    select("field_name").
+    eq("project_id", project.id).
+    order("created_at");
     setEditMetadataFields([...new Set(data?.map((f) => f.field_name) || [])]);
     setEditNewFieldName("");
     // Fetch existing allowed users
-    const { data: allowedUsers } = await supabase
-      .from("project_allowed_users")
-      .select("user_id")
-      .eq("project_id", project.id);
+    const { data: allowedUsers } = await supabase.
+    from("project_allowed_users").
+    select("user_id").
+    eq("project_id", project.id);
     if (allowedUsers && allowedUsers.length > 0) {
       const userIds = allowedUsers.map((u: any) => u.user_id);
       setEditUserIds(userIds);
@@ -572,13 +572,13 @@ const Projects = () => {
 
       // Only owner/admin can update roles
       if (isProjectOwner || isAdminUser) {
-        const { error: updateError } = await supabase
-          .from("projects")
-          .update({
-            name: editName.trim(),
-            allowed_roles: [...new Set([...(editRoles.length > 0 ? editRoles : (currentUserRole ? [currentUserRole] : [])), "admin"])],
-          })
-          .eq("id", editTarget.id);
+        const { error: updateError } = await supabase.
+        from("projects").
+        update({
+          name: editName.trim(),
+          allowed_roles: [...new Set([...(editRoles.length > 0 ? editRoles : currentUserRole ? [currentUserRole] : []), "admin"])]
+        }).
+        eq("id", editTarget.id);
         if (updateError) throw updateError;
       }
 
@@ -587,9 +587,9 @@ const Projects = () => {
         await supabase.from("project_metadata_fields").delete().eq("project_id", editTarget.id);
         const uniqueFields = [...new Set(editMetadataFields)];
         if (uniqueFields.length > 0) {
-          await supabase
-            .from("project_metadata_fields")
-            .insert(uniqueFields.map((field_name) => ({ project_id: editTarget.id, field_name })));
+          await supabase.
+          from("project_metadata_fields").
+          insert(uniqueFields.map((field_name) => ({ project_id: editTarget.id, field_name })));
         }
       }
 
@@ -605,7 +605,7 @@ const Projects = () => {
           await saveProjectUsers(editTarget.id, userIdsToSave);
         } else {
           // Shared user: only add new users (merge with existing)
-          const newUserIds = editUserIds.filter(id => !editLockedUserIds.includes(id) && id !== user.id);
+          const newUserIds = editUserIds.filter((id) => !editLockedUserIds.includes(id) && id !== user.id);
           if (newUserIds.length > 0) {
             const rows = newUserIds.map((uid) => ({ project_id: editTarget.id, user_id: uid }));
             // Use upsert-like behavior: insert and ignore conflicts
@@ -647,7 +647,7 @@ const Projects = () => {
     const labels: Record<string, string> = {};
     labels['admin'] = 'required';
     // Find owner's role
-    const ownerUser = allUsers.find(u => u.user_id === project.created_by);
+    const ownerUser = allUsers.find((u) => u.user_id === project.created_by);
     if (ownerUser?.role && ownerUser.role !== 'admin') {
       labels[ownerUser.role] = 'owner';
     }
@@ -667,13 +667,13 @@ const Projects = () => {
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         {/* Metrics */}
         <div className="grid grid-cols-3 gap-4 mb-32">
-          {metrics.map((m) => (
-            <div key={m.label} className="rounded-2xl border border-border bg-card p-6 space-y-2">
+          {metrics.map((m) =>
+          <div key={m.label} className="rounded-2xl border border-border bg-card p-6 space-y-2">
               <p className="text-xs font-medium tracking-wider uppercase text-primary">{m.label}</p>
               <p className="text-2xl font-semibold text-foreground tracking-tight">{m.value}</p>
               <p className="text-xs text-muted-foreground">{m.sublabel}</p>
             </div>
-          ))}
+          )}
         </div>
 
         {/* Search + Create */}
@@ -684,16 +684,16 @@ const Projects = () => {
               placeholder="Search projects..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 pr-10 h-11 rounded-full border-border bg-background"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              >
+              className="pl-10 pr-10 h-11 rounded-full border-border bg-background" />
+            
+            {search &&
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+              
                 <X className="h-4 w-4" />
               </button>
-            )}
+            }
           </div>
           <button
             onClick={() => {
@@ -701,8 +701,8 @@ const Projects = () => {
               setSelectedUserIds(["all"]);
               setShowCreate(true);
             }}
-            className="inline-flex items-center gap-2 px-5 h-11 rounded-full text-sm font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors whitespace-nowrap"
-          >
+            className="inline-flex items-center gap-2 px-5 h-11 rounded-full text-sm font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors whitespace-nowrap">
+            
             <Plus className="h-4 w-4" />
             Create project
           </button>
@@ -718,66 +718,66 @@ const Projects = () => {
           </div>
           <Separator />
           <div className="divide-y divide-border mt-4">
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
+            {loading ?
+            <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : filteredProjects.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground text-sm">
+              </div> :
+            filteredProjects.length === 0 ?
+            <div className="text-center py-12 text-muted-foreground text-sm">
                 {search ? "No projects match your search." : "No projects yet. Create one to get started."}
-              </div>
-            ) : (
-              filteredProjects.map((project) => {
-                const isExpanded = expandedProjectId === project.id;
-                const isOwner = isProjectOwner(project);
-                return (
-                  <div key={project.id}>
+              </div> :
+
+            filteredProjects.map((project) => {
+              const isExpanded = expandedProjectId === project.id;
+              const isOwner = isProjectOwner(project);
+              return (
+                <div key={project.id}>
                     <div
-                      className={cn(
-                        "py-5 flex items-start justify-between cursor-pointer px-2 -mx-2 rounded-lg transition-colors min-h-[72px]",
-                        isExpanded ? "bg-muted/30" : "hover:bg-muted/30"
-                      )}
-                      onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
-                      onDoubleClick={() => navigate(`/?project=${project.id}`)}
-                    >
+                    className={cn(
+                      "py-5 flex items-start justify-between cursor-pointer px-2 -mx-2 rounded-lg transition-colors min-h-[72px]",
+                      isExpanded ? "bg-muted/30" : "hover:bg-muted/30"
+                    )}
+                    onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
+                    onDoubleClick={() => navigate(`/?project=${project.id}`)}>
+                    
                       <div className="flex-1 min-w-0 pr-4">
                         <p className="text-sm font-semibold text-foreground flex items-center gap-2">
                           <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                           {project.name}
                         </p>
                         <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
-                          {(projectMetadataFields[project.id] || []).map((field) => (
-                            <span
-                              key={field}
-                              className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background"
-                            >
+                          {(projectMetadataFields[project.id] || []).map((field) =>
+                        <span
+                          key={field}
+                          className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background">
+                          
                               {field}
                             </span>
-                          ))}
+                        )}
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <Badge
-                          variant="secondary"
-                          className={cn(
-                            "rounded-full text-xs px-3 py-0.5 font-medium border",
-                            isOwner
-                              ? "bg-primary/15 text-primary border-primary/20"
-                              : "bg-accent text-accent-foreground border-border"
-                          )}
-                        >
+                        variant="secondary"
+                        className={cn("rounded-full text-xs px-3 py-0.5 font-medium border bg-sky-100 text-sky-700 border-sky-400",
+
+                        isOwner ?
+                        "bg-primary/15 text-primary border-primary/20" :
+                        "bg-accent text-accent-foreground border-border"
+                        )}>
+                        
                           {isOwner ? "Owner" : "Shared"}
                         </Badge>
-                        {isExpanded ? (
-                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        )}
+                        {isExpanded ?
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" /> :
+
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      }
                       </div>
                     </div>
 
-                    {isExpanded && (
-                      <div className="pl-8 pr-8 pb-5 bg-muted/30 -mx-2 px-[calc(2rem+0.5rem)] rounded-b-lg">
+                    {isExpanded &&
+                  <div className="pl-8 pr-8 pb-5 bg-muted/30 -mx-2 px-[calc(2rem+0.5rem)] rounded-b-lg">
                         <Separator className="mb-5" />
                         <div className="grid grid-cols-3 gap-6 mb-5">
                           <div>
@@ -799,32 +799,32 @@ const Projects = () => {
                         </div>
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={(e) => { e.stopPropagation(); openEdit(project); }}
-                            className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground"
-                          >
+                        onClick={(e) => {e.stopPropagation();openEdit(project);}}
+                        className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
+                        
                             Edit
                           </button>
-                          {(isOwner || isAdmin) && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.name }); }}
-                              className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground"
-                            >
+                          {(isOwner || isAdmin) &&
+                      <button
+                        onClick={(e) => {e.stopPropagation();setDeleteTarget({ id: project.id, name: project.name });}}
+                        className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
+                        
                               Delete
                             </button>
-                          )}
+                      }
                           <button
-                            onClick={(e) => { e.stopPropagation(); navigate(`/?project=${project.id}`); }}
-                            className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium"
-                          >
+                        onClick={(e) => {e.stopPropagation();navigate(`/?project=${project.id}`);}}
+                        className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium">
+                        
                             Select
                           </button>
                         </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
+                  }
+                  </div>);
+
+            })
+            }
           </div>
           {filteredProjects.length > 0 && <Separator />}
         </div>
@@ -842,8 +842,8 @@ const Projects = () => {
               <Input
                 placeholder="e.g. Industrial Batteries"
                 value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-              />
+                onChange={(e) => setNewProjectName(e.target.value)} />
+              
             </div>
 
             <RoleMultiSelect
@@ -851,21 +851,21 @@ const Projects = () => {
               availableRoles={availableRoles}
               onChange={setSelectedRoles}
               disabledRoles={disabledRoles}
-              roleLabels={createRoleLabels}
-            />
+              roleLabels={createRoleLabels} />
+            
 
-            {(permissions.role === 'admin' || permissions.landing.write) && (
-              <UserMultiSelect
-                selectedUserIds={selectedUserIds}
-                allUsers={allUsers}
-                selectedRoles={selectedRoles}
-                onChange={setSelectedUserIds}
-                currentUserId={user?.id || ''}
-                isAdmin={isAdmin}
-                isOwner={true}
-                ownerId={user?.id}
-              />
-            )}
+            {(permissions.role === 'admin' || permissions.landing.write) &&
+            <UserMultiSelect
+              selectedUserIds={selectedUserIds}
+              allUsers={allUsers}
+              selectedRoles={selectedRoles}
+              onChange={setSelectedUserIds}
+              currentUserId={user?.id || ''}
+              isAdmin={isAdmin}
+              isOwner={true}
+              ownerId={user?.id} />
+
+            }
 
             <div className="space-y-2">
               <Label>Metadata Fields</Label>
@@ -873,14 +873,14 @@ const Projects = () => {
                 Define the metadata fields that will appear on the Repository upload form for this project.
               </p>
               <div className="flex flex-wrap gap-2">
-                {metadataFields.map((field) => (
-                  <Badge key={field} variant="secondary" className="rounded-full gap-1.5 pr-1.5">
+                {metadataFields.map((field) =>
+                <Badge key={field} variant="secondary" className="rounded-full gap-1.5 pr-1.5">
                     {field}
                     <button onClick={() => setMetadataFields(metadataFields.filter((f) => f !== field))}>
                       <X className="h-3 w-3" />
                     </button>
                   </Badge>
-                ))}
+                )}
               </div>
               <div className="flex gap-2">
                 <Input
@@ -888,8 +888,8 @@ const Projects = () => {
                   value={newFieldName}
                   onChange={(e) => setNewFieldName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addMetadataField())}
-                  className="flex-1"
-                />
+                  className="flex-1" />
+                
                 <Button type="button" variant="outline" size="sm" onClick={addMetadataField} className="shrink-0">
                   <Plus className="h-4 w-4" />
                   Add
@@ -900,15 +900,15 @@ const Projects = () => {
           <DialogFooter>
             <button
               onClick={() => setShowCreate(false)}
-              className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground"
-            >
+              className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
+              
               Cancel
             </button>
             <button
               onClick={handleCreateProject}
               disabled={!newProjectName.trim() || creating}
-              className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50"
-            >
+              className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50">
+              
               {creating && <Loader2 className="h-4 w-4 animate-spin inline mr-1" />}
               Create Project
             </button>
@@ -928,8 +928,8 @@ const Projects = () => {
               <Input
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                disabled={editTarget ? (!isProjectOwner(editTarget) && !isAdmin) : false}
-              />
+                disabled={editTarget ? !isProjectOwner(editTarget) && !isAdmin : false} />
+              
             </div>
 
             <RoleMultiSelect
@@ -937,22 +937,22 @@ const Projects = () => {
               availableRoles={availableRoles}
               onChange={setEditRoles}
               disabledRoles={disabledRoles}
-              roleLabels={getEditRoleLabels(editTarget)}
-            />
+              roleLabels={getEditRoleLabels(editTarget)} />
+            
 
-            {(permissions.role === 'admin' || permissions.landing.write) && editTarget && (
-              <UserMultiSelect
-                selectedUserIds={editUserIds}
-                allUsers={allUsers}
-                selectedRoles={editRoles}
-                onChange={setEditUserIds}
-                currentUserId={user?.id || ''}
-                isAdmin={isAdmin}
-                isOwner={isProjectOwner(editTarget)}
-                ownerId={editTarget.created_by}
-                lockedUserIds={editLockedUserIds}
-              />
-            )}
+            {(permissions.role === 'admin' || permissions.landing.write) && editTarget &&
+            <UserMultiSelect
+              selectedUserIds={editUserIds}
+              allUsers={allUsers}
+              selectedRoles={editRoles}
+              onChange={setEditUserIds}
+              currentUserId={user?.id || ''}
+              isAdmin={isAdmin}
+              isOwner={isProjectOwner(editTarget)}
+              ownerId={editTarget.created_by}
+              lockedUserIds={editLockedUserIds} />
+
+            }
 
             <div className="space-y-2">
               <Label>Metadata Fields</Label>
@@ -960,14 +960,14 @@ const Projects = () => {
                 Define the metadata fields that will appear on the Repository upload form for this project.
               </p>
               <div className="flex flex-wrap gap-2">
-                {editMetadataFields.map((field) => (
-                  <Badge key={field} variant="secondary" className="rounded-full gap-1.5 pr-1.5">
+                {editMetadataFields.map((field) =>
+                <Badge key={field} variant="secondary" className="rounded-full gap-1.5 pr-1.5">
                     {field}
                     <button onClick={() => setEditMetadataFields(editMetadataFields.filter((f) => f !== field))}>
                       <X className="h-3 w-3" />
                     </button>
                   </Badge>
-                ))}
+                )}
               </div>
               <div className="flex gap-2">
                 <Input
@@ -975,8 +975,8 @@ const Projects = () => {
                   value={editNewFieldName}
                   onChange={(e) => setEditNewFieldName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addEditMetadataField())}
-                  className="flex-1"
-                />
+                  className="flex-1" />
+                
                 <Button type="button" variant="outline" size="sm" onClick={addEditMetadataField} className="shrink-0">
                   <Plus className="h-4 w-4" />
                   Add
@@ -987,15 +987,15 @@ const Projects = () => {
           <DialogFooter>
             <button
               onClick={() => setEditTarget(null)}
-              className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground"
-            >
+              className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
+              
               Cancel
             </button>
             <button
               onClick={handleEditSave}
               disabled={!editName.trim() || isSaving}
-              className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50"
-            >
+              className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium disabled:opacity-50">
+              
               {isSaving && <Loader2 className="h-4 w-4 animate-spin inline mr-1" />}
               Save
             </button>
@@ -1016,15 +1016,15 @@ const Projects = () => {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteProject}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  );
+    </div>);
+
 };
 
 export default Projects;
