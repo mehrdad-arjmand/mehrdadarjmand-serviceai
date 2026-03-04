@@ -314,7 +314,7 @@ const Projects = () => {
   const [metadataFields, setMetadataFields] = useState<string[]>([]);
   const [newFieldName, setNewFieldName] = useState("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>(["all"]);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [availableRoles, setAvailableRoles] = useState<RoleOption[]>([]);
   const [allUsers, setAllUsers] = useState<UserOption[]>([]);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
@@ -472,7 +472,7 @@ const Projects = () => {
       setNewProjectName("");
       setMetadataFields([]);
       setSelectedRoles(currentUserRole ? [...new Set([currentUserRole, 'admin'])] : ['admin']);
-      setSelectedUserIds(["all"]);
+      setSelectedUserIds(user?.id ? [user.id] : []);
       fetchProjects();
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -567,6 +567,15 @@ const Projects = () => {
     if (!editTarget) return;
     setIsSaving(true);
     try {
+      // Re-verify access before saving (handles stale sessions)
+      const { data: hasAccess } = await supabase.rpc('user_has_project_access', { p_project_id: editTarget.id });
+      if (!hasAccess) {
+        toast({ title: "Access denied", description: "You no longer have access to this project. Please refresh the page.", variant: "destructive" });
+        setEditTarget(null);
+        setIsSaving(false);
+        fetchProjects();
+        return;
+      }
       const isProjectOwner = editTarget.created_by === user?.id;
       const isAdminUser = permissions.role === 'admin';
 
@@ -698,7 +707,7 @@ const Projects = () => {
           <button
             onClick={() => {
               setSelectedRoles(currentUserRole ? [...new Set([currentUserRole, 'admin'])] : ['admin']);
-              setSelectedUserIds(["all"]);
+              setSelectedUserIds(user?.id ? [user.id] : []);
               setShowCreate(true);
             }}
             className="inline-flex items-center gap-2 px-5 h-11 rounded-full text-sm font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors whitespace-nowrap">
@@ -759,11 +768,10 @@ const Projects = () => {
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <Badge
                         variant="secondary"
-                        className={cn("rounded-full text-xs px-3 py-0.5 font-medium border bg-sky-100 text-sky-700 border-sky-400",
-
+                        className={cn("rounded-full text-[11px] px-3 py-0.5 font-medium border",
                         isOwner ?
-                        "bg-primary/15 text-primary border-primary/20" :
-                        "bg-accent text-accent-foreground border-border"
+                        "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800" :
+                        "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800"
                         )}>
                         
                           {isOwner ? "Owner" : "Shared"}
