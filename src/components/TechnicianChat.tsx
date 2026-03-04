@@ -110,6 +110,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const dictationActiveRef = useRef(false);
   const dictationPartsRef = useRef<string[]>([]);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const ttsKeepAliveRef = useRef<NodeJS.Timeout | null>(null);
   const currentTranscriptRef = useRef<string>("");
   const abortCountRef = useRef<number>(0);
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
@@ -191,6 +192,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if ('speechSynthesis' in window) {window.speechSynthesis.onvoiceschanged = initVoice;}
     return () => {
       if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
+      if (ttsKeepAliveRef.current) {clearInterval(ttsKeepAliveRef.current);ttsKeepAliveRef.current = null;}
       stopListening();
       stopSpeaking();
     };
@@ -206,6 +208,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   }, []);
 
   const stopSpeaking = useCallback(() => {
+    if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if ('speechSynthesis' in window) {window.speechSynthesis.cancel();utteranceQueueRef.current++;}
     setIsSpeaking(false);
     setConversationState((prev) => prev === "speaking" ? "idle" : prev);
@@ -217,6 +220,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       onComplete?.();return;
     }
     window.speechSynthesis.cancel();
+    // Clear any existing keepAlive
+    if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     const cleanText = renderAnswerForSpeech(text);
     const sentences = splitIntoSentences(cleanText);
     if (sentences.length === 0) {onComplete?.();return;}
@@ -224,12 +229,28 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const queueId = ++utteranceQueueRef.current;
     let currentIndex = 0;
     setIsSpeaking(true);
+    // Chrome workaround: pause/resume every 10s to prevent cutting out after ~15s
+    ttsKeepAliveRef.current = setInterval(() => {
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }
+    }, 10000);
+    const cleanup = () => {
+      if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
+      setIsSpeaking(false);
+    };
     const speakNext = () => {
-      if (queueId !== utteranceQueueRef.current) return;
-      if (currentIndex >= sentences.length) {setIsSpeaking(false);onComplete?.();return;}
+      if (queueId !== utteranceQueueRef.current) { cleanup(); return; }
+      if (currentIndex >= sentences.length) { cleanup(); onComplete?.(); return; }
       const utterance = createUtterance(sentences[currentIndex], selectedVoiceRef.current);
       utterance.onend = () => {currentIndex++;speakNext();};
-      utterance.onerror = () => {setIsSpeaking(false);onComplete?.();};
+      utterance.onerror = (e) => {
+        console.error('[TTS] Utterance error:', e);
+        // On error, try to continue with next sentence instead of stopping
+        if (currentIndex < sentences.length - 1) { currentIndex++; setTimeout(speakNext, 100); }
+        else { cleanup(); onComplete?.(); }
+      };
       window.speechSynthesis.speak(utterance);
     };
     speakNext();
@@ -341,7 +362,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           setFiltersLocked(false);
           if (conversationActiveRef.current) {setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);}
         });
-      } else {setFiltersLocked(false);}
+      } else {
+        setFiltersLocked(false);
+        // Restart listening even if answer was empty
+        if (conversationActiveRef.current) {setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);}
+      }
     } catch (error: any) {
       console.error("Error querying assistant:", error);
       toast({ title: "Error querying assistant", description: error.message || "An unexpected error occurred.", variant: "destructive" });
