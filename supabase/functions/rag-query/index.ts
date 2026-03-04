@@ -14,6 +14,8 @@ interface RAGQueryRequest {
   question: string
   // Project scoping
   projectId?: string
+  // Session-based conversation memory
+  sessionId?: string
   // Optional document filters
   documentType?: string
   uploadDate?: string
@@ -279,6 +281,7 @@ Deno.serve(async (req) => {
     const request: RAGQueryRequest = {
       question: (rawRequest.question as string).trim().slice(0, MAX_QUESTION_LENGTH),
       projectId: rawRequest.projectId as string | undefined,
+      sessionId: rawRequest.sessionId as string | undefined,
       documentType: sanitizeString(rawRequest.documentType as string | undefined),
       uploadDate: rawRequest.uploadDate as string | undefined,
       filterSite: sanitizeString(rawRequest.filterSite as string | undefined),
@@ -295,6 +298,7 @@ Deno.serve(async (req) => {
     const { 
       question, 
       projectId: requestProjectId,
+      sessionId,
       documentType,
       uploadDate,
       filterSite,
@@ -307,13 +311,108 @@ Deno.serve(async (req) => {
       history,
       isConversationMode
     } = request
+
+    // Load conversation history from DB if sessionId is provided
+    let conversationHistory: ConversationMessage[] = []
+    let sessionSummary: string | null = null
+    
+    if (sessionId) {
+      try {
+        // Load session summary
+        const { data: sessionData } = await supabase
+          .from('chat_sessions')
+          .select('summary')
+          .eq('id', sessionId)
+          .single()
+        
+        sessionSummary = sessionData?.summary || null
+
+        // Load last 12 messages (6 turns) for sliding window
+        const { data: dbMessages, error: msgError } = await supabase
+          .from('chat_messages')
+          .select('role, content')
+          .eq('session_id', sessionId)
+          .order('created_at', { ascending: false })
+          .limit(12)
+
+        if (!msgError && dbMessages && dbMessages.length > 0) {
+          conversationHistory = dbMessages.reverse().map((m: any) => ({
+            role: m.role,
+            content: m.content
+          }))
+        }
+        
+        console.log(`Loaded ${conversationHistory.length} messages from session ${sessionId}, summary: ${sessionSummary ? 'yes' : 'no'}`)
+        
+        // Generate summary if history is getting long (>20 messages total) and no summary exists
+        if (!sessionSummary) {
+          const { count } = await supabase
+            .from('chat_messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('session_id', sessionId)
+          
+          if (count && count > 20) {
+            // Get older messages for summarization (skip last 12 we already have)
+            const { data: olderMessages } = await supabase
+              .from('chat_messages')
+              .select('role, content')
+              .eq('session_id', sessionId)
+              .order('created_at', { ascending: true })
+              .limit(20)
+            
+            if (olderMessages && olderMessages.length > 0) {
+              const summaryText = olderMessages.map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`).join('\n')
+              try {
+                const summaryResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`
+                  },
+                  body: JSON.stringify({
+                    model: 'google/gemini-2.5-flash-lite',
+                    messages: [
+                      { role: 'system', content: 'Summarize this conversation in 2-3 sentences, capturing key topics discussed and any important context. Be concise.' },
+                      { role: 'user', content: summaryText }
+                    ],
+                    temperature: 0.2,
+                    max_tokens: 200,
+                  })
+                })
+                
+                if (summaryResponse.ok) {
+                  const summaryData = await summaryResponse.json()
+                  sessionSummary = summaryData.choices?.[0]?.message?.content || null
+                  
+                  if (sessionSummary) {
+                    await supabase
+                      .from('chat_sessions')
+                      .update({ summary: sessionSummary })
+                      .eq('id', sessionId)
+                    console.log('Generated and stored conversation summary')
+                  }
+                }
+              } catch (e) {
+                console.error('Failed to generate summary:', e)
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error loading session history:', e)
+      }
+    } else if (history && history.length > 0) {
+      // Fallback: use client-sent history if no sessionId
+      conversationHistory = history.slice(-12)
+    }
     
     console.log('RAG Query:', { 
       question: question.slice(0, 100), 
       projectId: requestProjectId,
+      sessionId,
       filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel, documentIds: filterDocumentIds?.length, dynamicMetadata, accessRole },
       isConversationMode,
-      historyLength: history?.length || 0
+      historyLength: conversationHistory.length
     })
 
     // Generate embedding for the query using Lovable AI
@@ -556,13 +655,15 @@ CRITICAL INSTRUCTIONS:
 - Always prioritize safety - mention safety warnings when relevant.
 ${citationInstructions}`
 
-    // Build conversation context if in conversation mode
+    // Build conversation context from DB-loaded history
     let conversationContext = ''
-    if (isConversationMode && history && history.length > 0) {
-      // Include last 4 exchanges for context
-      const recentHistory = history.slice(-8)
-      conversationContext = '\n\nRecent conversation:\n' + recentHistory
-        .map(m => `${m.role === 'user' ? 'Technician' : 'Assistant'}: ${m.content}`)
+    if (sessionSummary) {
+      conversationContext += `\n\nConversation summary so far:\n${sessionSummary}`
+    }
+    if (conversationHistory.length > 0) {
+      const recentMsgs = conversationHistory.slice(-12)
+      conversationContext += '\n\nRecent conversation:\n' + recentMsgs
+        .map(m => `${m.role === 'user' ? 'Technician' : 'Assistant'}: ${m.content.slice(0, 500)}`)
         .join('\n')
     }
 

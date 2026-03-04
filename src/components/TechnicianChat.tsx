@@ -350,8 +350,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         toast({ title: "Session expired", description: "Please log in again.", variant: "destructive" });
         setIsQuerying(false); setConversationState("idle"); return;
       }
+      const currentSessionId = activeConversationId;
       const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true, projectId: projectId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
+        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: true, projectId: projectId || undefined, sessionId: currentSessionId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
       });
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, inputMode: "voice", timestamp: new Date(), sources: data.sources || [] };
@@ -394,8 +395,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         toast({ title: "Session expired", description: "Please log in again.", variant: "destructive" });
         setIsQuerying(false); return;
       }
+      const currentSessionId = activeConversationId;
       const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false, projectId: projectId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
+        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, history: recentHistory, isConversationMode: false, projectId: projectId || undefined, sessionId: currentSessionId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
       });
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, timestamp: new Date(), sources: data.sources || [] };
