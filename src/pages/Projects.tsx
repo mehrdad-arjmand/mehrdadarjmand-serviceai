@@ -675,7 +675,7 @@ const Projects = () => {
 
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         {/* Metrics */}
-        <div className="grid grid-cols-3 gap-4 mb-32">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-32">
           {metrics.map((m) =>
           <div key={m.label} className="rounded-2xl border border-border bg-card p-6 space-y-2">
               <p className="text-xs font-medium tracking-wider uppercase text-primary">{m.label}</p>
@@ -787,7 +787,7 @@ const Projects = () => {
                     {isExpanded &&
                   <div className="pl-8 pr-8 pb-5 bg-muted/30 -mx-2 px-[calc(2rem+0.5rem)] rounded-b-lg">
                         <Separator className="mb-5" />
-                        <div className="grid grid-cols-3 gap-6 mb-5">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-5">
                           <div>
                             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                               Created
