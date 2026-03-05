@@ -62,39 +62,42 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     switchConversation,
     ensureActiveConversation,
     renameConversation,
-    reorderConversations
+    reorderConversations,
+    isLoading: isHistoryLoading
   } = useChatHistory(projectId);
 
-  // Sync filters from conversation storage
-  const [currentFilters, setCurrentFilters] = useState<ConversationFilters>({
-    ...getDefaultFilters(),
-    ...conversationFilters,
-    dynamicMetadata: conversationFilters?.dynamicMetadata || {},
-    documentIds: conversationFilters?.documentIds || [],
-  });
+  // Load filters from localStorage for the active conversation
+  const getStoredFilters = useCallback((convId: string | null): ConversationFilters => {
+    if (!convId || !projectId) return getDefaultFilters();
+    try {
+      const stored = localStorage.getItem(`chat-filters-${projectId}-${convId}`);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getDefaultFilters();
+  }, [projectId]);
 
-  // When active conversation changes, load its filters
+  const [currentFilters, setCurrentFilters] = useState<ConversationFilters>(() => 
+    getStoredFilters(activeConversationId)
+  );
+
+  // When active conversation changes, load its filters from localStorage
   useEffect(() => {
-    setCurrentFilters({
-      ...getDefaultFilters(),
-      ...conversationFilters,
-      dynamicMetadata: conversationFilters?.dynamicMetadata || {},
-      documentIds: conversationFilters?.documentIds || [],
-    });
-  }, [activeConversationId]);
+    setCurrentFilters(getStoredFilters(activeConversationId));
+  }, [activeConversationId, getStoredFilters]);
 
-  // Persist filter changes to conversation
+  // Persist filter changes to localStorage and conversation state
   const updateCurrentFilters = (newFilters: ConversationFilters) => {
     setCurrentFilters(newFilters);
     updateFilters(newFilters);
+    if (activeConversationId && projectId) {
+      localStorage.setItem(`chat-filters-${projectId}-${activeConversationId}`, JSON.stringify(newFilters));
+    }
   };
 
   const [filtersLocked, setFiltersLocked] = useState(false);
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
 
-  useEffect(() => {
-    ensureActiveConversation();
-  }, [ensureActiveConversation]);
+  // Don't auto-create conversations on mount - only ensure when user sends a message
 
   const [isConversationMode, setIsConversationMode] = useState(false);
   const [conversationState, setConversationState] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
@@ -270,19 +273,24 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     currentTranscriptRef.current = '';
+    let finalTranscript = '';
     recognition.onstart = () => {setConversationState("listening"); abortCountRef.current = 0;};
     recognition.onresult = (event: any) => {
       clearSilenceTimer();
-      let finalText = '';
       let interimText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) { finalText += event.results[i][0].transcript; } else { interimText += event.results[i][0].transcript; }
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimText += transcript;
+        }
       }
-      const display = (finalText + interimText).trim();
+      const display = (finalTranscript + interimText).trim();
       currentTranscriptRef.current = display;
       setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
@@ -323,13 +331,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     };
     recognition.onend = () => {
       recognitionRef.current = null;
-      // In single-shot mode, restart if we're still in conversation mode and no silence timer is pending
       if (conversationActiveRef.current && !silenceTimerRef.current) {
         setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 200);
       }
     };
     recognition.start();
-  }, [toast, clearSilenceTimer, conversationState]);
+  }, [toast, clearSilenceTimer]);
 
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
@@ -416,19 +423,23 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     dictationActiveRef.current = true;
+    let finalTranscript = '';
     recognition.onstart = () => {setIsDictating(true); abortCountRef.current = 0;};
     recognition.onresult = (event: any) => {
-      let finalText = '';
       let interimText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) { finalText += event.results[i][0].transcript; } else { interimText += event.results[i][0].transcript; }
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimText += transcript;
+        }
       }
-      if (finalText) { dictationPartsRef.current.push(finalText); }
-      setQuestion(dictationPartsRef.current.join(' ') + (interimText ? ' ' + interimText : ''));
+      setQuestion((finalTranscript + interimText).trim());
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
