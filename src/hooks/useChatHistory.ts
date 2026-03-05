@@ -212,8 +212,20 @@ export function useChatHistory(projectId?: string) {
     activeConversationIdRef.current = data.id;
   }, [userId, projectId]);
 
-  // Ensure there's an active conversation
+  // Ensure there's an active conversation (waits for loading to complete)
+  const isLoadingRef = useRef(isLoading);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+
   const ensureActiveConversation = useCallback(async (): Promise<string | null> => {
+    // Wait for initial load to complete before deciding to create
+    if (isLoadingRef.current) {
+      // Wait up to 5s for loading to finish
+      for (let i = 0; i < 50; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        if (!isLoadingRef.current) break;
+      }
+    }
+
     const currentId = activeConversationIdRef.current;
     const currentConvs = conversationsRef.current;
 
