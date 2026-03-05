@@ -58,21 +58,29 @@ export function selectBestVoice(): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   if (voices.length === 0) return null;
   
-  // Priority list of voice name patterns (high quality neural voices)
+  // Priority list of voice name patterns (natural, human-like voices first)
   const preferredPatterns = [
+    /google.*uk.*english.*female/i,   // Google UK English Female - very natural
+    /google.*us.*english.*female/i,   // Google US English Female
     /google.*us.*english/i,
     /google.*english/i,
+    /microsoft.*aria.*online/i,       // Microsoft Aria Online - neural, natural
+    /microsoft.*jenny.*online/i,      // Microsoft Jenny - conversational
+    /microsoft.*guy.*online/i,        // Microsoft Guy - natural male
     /microsoft.*aria/i,
     /microsoft.*jenny/i,
     /microsoft.*guy/i,
+    /microsoft.*zira/i,
     /neural/i,
     /natural/i,
     /premium/i,
     /enhanced/i,
-    /samantha/i,  // macOS high quality voice
-    /alex/i,      // macOS
-    /karen/i,     // Australian English, good quality
-    /daniel/i,    // British English
+    /samantha/i,        // macOS high quality voice
+    /karen/i,           // Australian English, good quality
+    /daniel/i,          // British English
+    /moira/i,           // Irish English - distinctive
+    /fiona/i,           // Scottish English
+    /tessa/i,           // South African English
   ];
   
   // Filter to English voices only
@@ -123,9 +131,9 @@ export function createUtterance(
     utterance.voice = voice;
   }
   
-  // Natural delivery settings
-  utterance.rate = options?.rate ?? 0.95;   // Slightly slower for clarity
-  utterance.pitch = options?.pitch ?? 1.0;  // Natural pitch
+  // Natural delivery settings — slightly slower with warm pitch
+  utterance.rate = options?.rate ?? 0.92;   // Slightly slower for natural feel
+  utterance.pitch = options?.pitch ?? 1.02; // Very slightly elevated for warmth
   utterance.volume = options?.volume ?? 1.0;
   
   return utterance;
