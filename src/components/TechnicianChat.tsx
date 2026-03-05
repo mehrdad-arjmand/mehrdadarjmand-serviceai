@@ -47,7 +47,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const [documentViewer, setDocumentViewer] = useState<{ open: boolean; documentId: string; highlightText: string; filename: string; chunkIndex: number }>({ open: false, documentId: "", highlightText: "", filename: "", chunkIndex: 0 });
   const [isQuerying, setIsQuerying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const [sidebarOpen, setSidebarOpen] = useState(!isMobileDevice);
   const { toast } = useToast();
 
   const {
@@ -474,6 +475,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const handleDictateToggle = () => {if (isDictating) {stopListening();} else {dictationPartsRef.current = []; startDictation();}};
 
+  const stopConversationSpeaking = useCallback(() => {
+    // Stop TTS but stay in conversation mode — restart listening
+    if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
+    if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
+    setIsSpeaking(false);
+    setFiltersLocked(false);
+    if (conversationActiveRef.current) {
+      setConversationState("idle");
+      setTimeout(() => { if (conversationActiveRef.current) startConversationListening(); }, 300);
+    }
+  }, [startConversationListening]);
+
   const handleConversationToggle = () => {
     if (isConversationMode) {
       conversationActiveRef.current = false;
@@ -758,9 +771,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                   </div>
                   <div className="flex items-center gap-1">
                     {isConversationMode ?
-                  <Button onClick={handleConversationToggle} variant="destructive" size="icon" className="h-8 w-8 rounded-lg">
-                        <Square className="h-4 w-4" />
-                      </Button> :
+                  <>
+                        {conversationState === "speaking" && (
+                          <Button onClick={stopConversationSpeaking} variant="outline" size="icon" className="h-8 w-8 rounded-lg" title="Skip speech">
+                            <VolumeX className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Button onClick={handleConversationToggle} variant="destructive" size="icon" className="h-8 w-8 rounded-lg" title="End conversation">
+                          <Square className="h-4 w-4" />
+                        </Button>
+                      </> :
 
                   <>
                         <Button
