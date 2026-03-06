@@ -480,6 +480,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
     setIsSpeaking(false);
+    setIsQuerying(false);
     setFiltersLocked(false);
     // Clean up any existing recognition before restarting
     if (recognitionRef.current) {
@@ -489,8 +490,21 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     if (conversationActiveRef.current) {
       setConversationState("listening");
-      // Give the browser time to fully release the mic before restarting
-      setTimeout(() => { if (conversationActiveRef.current) startConversationListening(); }, 500);
+      setQuestion("");
+      // Retry startConversationListening with increasing delays to handle browser mic lock
+      const tryStart = (attempt: number) => {
+        if (!conversationActiveRef.current) return;
+        if (attempt > 5) {
+          setConversationState("idle");
+          return;
+        }
+        try {
+          startConversationListening();
+        } catch (e) {
+          setTimeout(() => tryStart(attempt + 1), 300 * attempt);
+        }
+      };
+      setTimeout(() => tryStart(1), 600);
     }
   }, [startConversationListening]);
 
@@ -754,7 +768,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 onChange={(e) => setQuestion(e.target.value)}
                 placeholder={
                 isConversationMode ?
-                conversationState === "listening" ? "Listening..." : conversationState === "processing" ? "Processing..." : conversationState === "speaking" ? "Speaking..." : "Voice active..." :
+                conversationState === "listening" ? "Listening..." : conversationState === "processing" ? "Processing..." : conversationState === "speaking" ? "Speaking..." : isSpeaking ? "Speaking..." : "Listening..." :
                 "Ask a question..."
                 }
                 rows={3}
