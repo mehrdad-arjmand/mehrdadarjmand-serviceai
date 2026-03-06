@@ -686,14 +686,14 @@ const Projects = () => {
         </div>
 
         {/* Search + Create */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search projects..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 pr-10 h-11 rounded-full border-border bg-background" />
+              className="pl-10 pr-10 h-11 rounded-full border-border bg-background w-full" />
             
             {search &&
             <button
@@ -710,7 +710,7 @@ const Projects = () => {
               setSelectedUserIds(user?.id ? [user.id] : []);
               setShowCreate(true);
             }}
-            className="inline-flex items-center gap-2 px-5 h-11 rounded-full text-sm font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors whitespace-nowrap">
+            className="inline-flex items-center justify-center gap-2 px-5 h-11 rounded-full text-sm font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors whitespace-nowrap w-full sm:w-auto">
             
             <Plus className="h-4 w-4" />
             Create project
