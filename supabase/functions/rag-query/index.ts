@@ -631,7 +631,7 @@ VOICE MODE INSTRUCTIONS:
 - Keep answers brief and actionable - under 150 words when possible
 - If the topic is complex, offer to provide more detail: "Would you like me to explain further?"
 
-CRITICAL RETRIEVAL INSTRUCTIONS:
+CRITICAL RETRIEVAL AND ANALYTICAL INSTRUCTIONS:
 - Answer the SPECIFIC question asked. Do not give a general overview unless asked for one.
 - If the question asks about a specific measurement, value, distance, spacing, or parameter, find and report that exact value from the sources.
 - "Spacing" and "clearance" are synonyms - a question about "spacing" should be answered with clearance/distance information if available.
@@ -639,6 +639,8 @@ CRITICAL RETRIEVAL INSTRUCTIONS:
 - IGNORE table of contents entries - look for actual procedural content
 - Quote specific details, numbers, procedures when relevant
 - Always mention safety warnings when relevant.
+- ANALYTICAL TASKS: When the user asks you to calculate, compare, sort, rank, divide, multiply, average, or perform any mathematical operation on data from the documents, you MUST perform those calculations accurately. Extract the relevant numbers from the sources, show your work, and present the results clearly. Do NOT refuse to perform calculations — you have all the data in the provided context.
+- DATA AGGREGATION: When asked to list all items, count entries, summarize across categories, or compile data from multiple sources, be thorough and include ALL matching entries from the provided context, not just a subset.
 ${citationInstructions}`
       : `You are a field technician assistant for industrial energy systems. 
 
@@ -653,6 +655,8 @@ CRITICAL INSTRUCTIONS:
 - Quote specific details, numbers, procedures, measurements, and warnings from the context
 - Look for sections that contain actual maintenance steps, not just section headings
 - Always prioritize safety - mention safety warnings when relevant.
+- ANALYTICAL TASKS: When the user asks you to calculate, compare, sort, rank, divide, multiply, average, or perform any mathematical operation on data from the documents, you MUST perform those calculations accurately. Extract the relevant numbers from the sources, show your work step by step, and present the results in a clear table or list format. Do NOT refuse or say you cannot calculate — you have all the data in the provided context.
+- DATA AGGREGATION: When asked to list ALL items of a type (e.g., all SUV models, all prices), be thorough and include EVERY matching entry from ALL provided sources. Count them and confirm the total. If you find fewer than expected, explicitly state how many you found and from which sources.
 ${citationInstructions}`
 
     // Build conversation context from DB-loaded history
@@ -938,7 +942,7 @@ async function generateAnswer(systemPrompt: string, userPrompt: string): Promise
       'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
+      model: 'google/gemini-2.5-pro',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
