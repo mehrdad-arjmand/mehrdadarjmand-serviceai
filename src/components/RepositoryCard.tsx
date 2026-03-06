@@ -969,7 +969,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           </div>
 
           {/* Buttons row */}
-          <div className="py-6 px-8 flex items-center justify-center gap-3">
+          <div className="py-6 px-8 flex flex-wrap items-center justify-center gap-3">
             <input ref={fileInputRef} type="file" id="file-upload" multiple accept=".pdf,.docx,.txt" className="hidden" onChange={handleFileSelect} />
             <button
               onClick={() => setMetadataOpen(!metadataOpen)}
@@ -982,7 +982,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
               Metadata
             </button>
 
-            <div className="h-6 w-px bg-border mx-1" />
+            <div className="hidden sm:block h-6 w-px bg-border mx-1" />
 
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -1167,7 +1167,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                         <p className="text-sm text-foreground">{doc.embeddedChunks}/{doc.totalChunks}</p>
                       </div>
                     </div>
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       {doc.fileType === 'pdf' ? (
                         <button onClick={() => setViewDoc(doc)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">View</button>
                       ) : (
