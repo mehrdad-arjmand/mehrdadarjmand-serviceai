@@ -481,9 +481,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
     setIsSpeaking(false);
     setFiltersLocked(false);
+    // Clean up any existing recognition before restarting
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (e) {}
+      recognitionRef.current = null;
+    }
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     if (conversationActiveRef.current) {
-      setConversationState("idle");
-      setTimeout(() => { if (conversationActiveRef.current) startConversationListening(); }, 300);
+      setConversationState("listening");
+      // Give the browser time to fully release the mic before restarting
+      setTimeout(() => { if (conversationActiveRef.current) startConversationListening(); }, 500);
     }
   }, [startConversationListening]);
 
@@ -772,7 +779,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                   <div className="flex items-center gap-1">
                     {isConversationMode ?
                   <>
-                        {conversationState === "speaking" && (
+                        {(conversationState === "speaking" || isSpeaking) && (
                           <Button onClick={stopConversationSpeaking} variant="outline" size="icon" className="h-8 w-8 rounded-lg" title="Skip speech">
                             <VolumeX className="h-4 w-4" />
                           </Button>
