@@ -943,7 +943,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
   return data.embedding.values
 }
 
-async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
+async function generateAnswer(systemPrompt: string, userPrompt: string, model: string = 'google/gemini-2.5-flash-lite'): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -951,7 +951,7 @@ async function generateAnswer(systemPrompt: string, userPrompt: string): Promise
       'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.5-pro',
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
