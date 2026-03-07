@@ -32,6 +32,8 @@ interface RAGQueryRequest {
   // Conversation mode
   history?: ConversationMessage[]
   isConversationMode?: boolean
+  // LLM model selection
+  model?: string
 }
 
 // Input validation constants
@@ -278,6 +280,11 @@ Deno.serve(async (req) => {
     }
 
     // Build validated request
+    const validModels = ['google/gemini-2.5-flash-lite', 'google/gemini-3-flash-preview']
+    const requestedModel = typeof rawRequest.model === 'string' && validModels.includes(rawRequest.model) 
+      ? rawRequest.model 
+      : 'google/gemini-2.5-flash-lite'
+
     const request: RAGQueryRequest = {
       question: (rawRequest.question as string).trim().slice(0, MAX_QUESTION_LENGTH),
       projectId: rawRequest.projectId as string | undefined,
@@ -292,7 +299,8 @@ Deno.serve(async (req) => {
       dynamicMetadata: rawRequest.dynamicMetadata as Record<string, string> | undefined,
       accessRole: sanitizeString(rawRequest.accessRole as string | undefined),
       history: rawRequest.history ? (rawRequest.history as ConversationMessage[]).slice(-MAX_HISTORY_LENGTH) : undefined,
-      isConversationMode: rawRequest.isConversationMode as boolean | undefined
+      isConversationMode: rawRequest.isConversationMode as boolean | undefined,
+      model: requestedModel,
     }
 
     const { 
