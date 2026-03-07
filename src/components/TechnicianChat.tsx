@@ -47,6 +47,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const [documentViewer, setDocumentViewer] = useState<{ open: boolean; documentId: string; highlightText: string; filename: string; chunkIndex: number }>({ open: false, documentId: "", highlightText: "", filename: "", chunkIndex: 0 });
   const [isQuerying, setIsQuerying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>("google/gemini-2.5-flash-lite");
   const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const [sidebarOpen, setSidebarOpen] = useState(!isMobileDevice);
   const { toast } = useToast();
@@ -215,10 +217,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if ('speechSynthesis' in window) {window.speechSynthesis.cancel();utteranceQueueRef.current++;}
     setIsSpeaking(false);
+    setSpeakingMessageId(null);
     setConversationState((prev) => prev === "speaking" ? "idle" : prev);
   }, []);
 
-  const speakText = useCallback((text: string, onComplete?: () => void) => {
+  const speakText = useCallback((text: string, onComplete?: () => void, messageId?: string) => {
     if (!('speechSynthesis' in window)) {
       toast({ title: "TTS not supported", description: "Voice playback is not supported in this browser.", variant: "destructive" });
       onComplete?.();return;
@@ -233,6 +236,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const queueId = ++utteranceQueueRef.current;
     let currentIndex = 0;
     setIsSpeaking(true);
+    if (messageId) setSpeakingMessageId(messageId);
     // Chrome workaround: pause/resume every 10s to prevent cutting out after ~15s
     ttsKeepAliveRef.current = setInterval(() => {
       if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
@@ -243,6 +247,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const cleanup = () => {
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
       setIsSpeaking(false);
+      setSpeakingMessageId(null);
     };
     const speakNext = () => {
       if (queueId !== utteranceQueueRef.current) { cleanup(); return; }
@@ -360,7 +365,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }
       const currentSessionId = activeConversationId;
       const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, isConversationMode: true, projectId: projectId || undefined, sessionId: currentSessionId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
+        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, isConversationMode: true, projectId: projectId || undefined, sessionId: currentSessionId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined, model: selectedModel }
       });
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, inputMode: "voice", timestamp: new Date(), sources: data.sources || [] };
@@ -405,7 +410,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }
       const currentSessionId = activeConversationId;
       const { data, error } = await supabase.functions.invoke("rag-query", {
-        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, isConversationMode: false, projectId: projectId || undefined, sessionId: currentSessionId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined }
+        body: { question: text.trim(), documentType: filtersAtSendTime.docType || undefined, uploadDate: filtersAtSendTime.uploadDate || undefined, filterSite: filtersAtSendTime.site || undefined, equipmentType: filtersAtSendTime.equipmentType || undefined, equipmentMake: filtersAtSendTime.equipmentMake || undefined, equipmentModel: filtersAtSendTime.equipmentModel || undefined, isConversationMode: false, projectId: projectId || undefined, sessionId: currentSessionId || undefined, documentIds: filtersAtSendTime.documentIds?.length ? filtersAtSendTime.documentIds : undefined, dynamicMetadata: Object.keys(filtersAtSendTime.dynamicMetadata || {}).length ? filtersAtSendTime.dynamicMetadata : undefined, accessRole: filtersAtSendTime.accessRole || undefined, model: selectedModel }
       });
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, timestamp: new Date(), sources: data.sources || [] };
@@ -693,14 +698,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                               onOpenDocument={(docId, text, fname, chunkIdx) => setDocumentViewer({ open: true, documentId: docId, highlightText: text, filename: fname, chunkIndex: chunkIdx })}
                             />
                           </div>
-                          <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
-                      className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
+                          {!isConversationMode && (
+                            <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => (isSpeaking && speakingMessageId === msg.id) ? stopSpeaking() : speakText(msg.content, undefined, msg.id)}
+                        className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
 
-                            {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
-                          </Button>
+                              {(isSpeaking && speakingMessageId === msg.id) ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
+                            </Button>
+                          )}
                         </div> :
 
                   <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
@@ -789,6 +796,25 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                         Filters{activeFilters.length > 0 && ` (${activeFilters.length})`}
                       </Button>
                   }
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground gap-1.5 rounded-lg hover:text-foreground">
+                          <span className="hidden sm:inline">{selectedModel === "google/gemini-2.5-flash-lite" ? "Flash Lite" : "Gemini 3 Flash"}</span>
+                          <span className="sm:hidden">{selectedModel === "google/gemini-2.5-flash-lite" ? "Lite" : "G3"}</span>
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-56 bg-popover border border-border shadow-lg z-50">
+                        <DropdownMenuItem onClick={() => setSelectedModel("google/gemini-2.5-flash-lite")} className="flex items-center gap-2 text-sm">
+                          {selectedModel === "google/gemini-2.5-flash-lite" && <Check className="h-3.5 w-3.5 flex-shrink-0" />}
+                          <span className={selectedModel !== "google/gemini-2.5-flash-lite" ? "ml-5" : ""}>Gemini 2.5 Flash Lite (default)</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setSelectedModel("google/gemini-3-flash-preview")} className="flex items-center gap-2 text-sm">
+                          {selectedModel === "google/gemini-3-flash-preview" && <Check className="h-3.5 w-3.5 flex-shrink-0" />}
+                          <span className={selectedModel !== "google/gemini-3-flash-preview" ? "ml-5" : ""}>Gemini 3 Flash</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                   <div className="flex items-center gap-1">
                     {isConversationMode ?
