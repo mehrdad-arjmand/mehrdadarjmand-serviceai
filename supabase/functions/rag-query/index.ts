@@ -687,7 +687,7 @@ ${context}
 
 Provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries. REMEMBER: You MUST include inline citations (Source N) for every factual claim. Every sentence with document-derived information needs a citation.`
 
-    const { content: answer, usage } = await generateAnswer(systemPrompt, userPrompt)
+    const { content: answer, usage } = await generateAnswer(systemPrompt, userPrompt, selectedModel)
 
     const executionTimeMs = Date.now() - startTime
 
