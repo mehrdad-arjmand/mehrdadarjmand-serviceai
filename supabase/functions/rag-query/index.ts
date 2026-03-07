@@ -317,7 +317,8 @@ Deno.serve(async (req) => {
       dynamicMetadata,
       accessRole,
       history,
-      isConversationMode
+      isConversationMode,
+      model: selectedModel
     } = request
 
     // Load conversation history from DB if sessionId is provided
