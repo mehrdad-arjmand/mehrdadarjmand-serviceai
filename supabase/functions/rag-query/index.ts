@@ -32,6 +32,8 @@ interface RAGQueryRequest {
   // Conversation mode
   history?: ConversationMessage[]
   isConversationMode?: boolean
+  // LLM model selection
+  model?: string
 }
 
 // Input validation constants
@@ -278,6 +280,11 @@ Deno.serve(async (req) => {
     }
 
     // Build validated request
+    const validModels = ['google/gemini-2.5-flash-lite', 'google/gemini-3-flash-preview']
+    const requestedModel = typeof rawRequest.model === 'string' && validModels.includes(rawRequest.model) 
+      ? rawRequest.model 
+      : 'google/gemini-2.5-flash-lite'
+
     const request: RAGQueryRequest = {
       question: (rawRequest.question as string).trim().slice(0, MAX_QUESTION_LENGTH),
       projectId: rawRequest.projectId as string | undefined,
@@ -292,7 +299,8 @@ Deno.serve(async (req) => {
       dynamicMetadata: rawRequest.dynamicMetadata as Record<string, string> | undefined,
       accessRole: sanitizeString(rawRequest.accessRole as string | undefined),
       history: rawRequest.history ? (rawRequest.history as ConversationMessage[]).slice(-MAX_HISTORY_LENGTH) : undefined,
-      isConversationMode: rawRequest.isConversationMode as boolean | undefined
+      isConversationMode: rawRequest.isConversationMode as boolean | undefined,
+      model: requestedModel,
     }
 
     const { 
@@ -309,7 +317,8 @@ Deno.serve(async (req) => {
       dynamicMetadata,
       accessRole,
       history,
-      isConversationMode
+      isConversationMode,
+      model: selectedModel
     } = request
 
     // Load conversation history from DB if sessionId is provided
@@ -678,7 +687,7 @@ ${context}
 
 Provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries. REMEMBER: You MUST include inline citations (Source N) for every factual claim. Every sentence with document-derived information needs a citation.`
 
-    const { content: answer, usage } = await generateAnswer(systemPrompt, userPrompt)
+    const { content: answer, usage } = await generateAnswer(systemPrompt, userPrompt, selectedModel)
 
     const executionTimeMs = Date.now() - startTime
 
@@ -934,7 +943,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
   return data.embedding.values
 }
 
-async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
+async function generateAnswer(systemPrompt: string, userPrompt: string, model: string = 'google/gemini-2.5-flash-lite'): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -942,7 +951,7 @@ async function generateAnswer(systemPrompt: string, userPrompt: string): Promise
       'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.5-pro',
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
