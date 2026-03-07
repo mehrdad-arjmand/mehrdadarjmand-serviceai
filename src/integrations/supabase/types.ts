@@ -690,6 +690,25 @@ export type Database = {
               text: string
             }[]
           }
+      match_chunks_by_docs: {
+        Args: {
+          doc_ids: string[]
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          chunk_index: number
+          document_id: string
+          equipment: string
+          fault_code: string
+          filename: string
+          id: string
+          similarity: number
+          site: string
+          text: string
+        }[]
+      }
       update_role_permissions:
         | {
             Args: {
