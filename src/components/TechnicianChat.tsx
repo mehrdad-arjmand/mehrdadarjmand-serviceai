@@ -663,10 +663,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           position: 'relative'
         }}>
 
-        {/* Floating tab switcher — top right */}
+        {/* Floating tab switcher — top right, with background on mobile so text scrolls under */}
         {tabSwitcher && (
-          <div style={{ position: 'absolute', top: '12px', right: '16px', zIndex: 10 }}>
-            {tabSwitcher}
+          <div className="absolute top-0 right-0 left-0 sm:left-auto z-10 flex justify-end px-4 py-3 bg-popover sm:bg-transparent pointer-events-none">
+            <div className="pointer-events-auto">
+              {tabSwitcher}
+            </div>
           </div>
         )}
 
