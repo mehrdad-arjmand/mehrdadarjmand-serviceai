@@ -796,6 +796,25 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                         Filters{activeFilters.length > 0 && ` (${activeFilters.length})`}
                       </Button>
                   }
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground gap-1.5 rounded-lg hover:text-foreground">
+                          <span className="hidden sm:inline">{selectedModel === "google/gemini-2.5-flash-lite" ? "Flash Lite" : "Gemini 3 Flash"}</span>
+                          <span className="sm:hidden">{selectedModel === "google/gemini-2.5-flash-lite" ? "Lite" : "G3"}</span>
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-56 bg-popover border border-border shadow-lg z-50">
+                        <DropdownMenuItem onClick={() => setSelectedModel("google/gemini-2.5-flash-lite")} className="flex items-center gap-2 text-sm">
+                          {selectedModel === "google/gemini-2.5-flash-lite" && <Check className="h-3.5 w-3.5 flex-shrink-0" />}
+                          <span className={selectedModel !== "google/gemini-2.5-flash-lite" ? "ml-5" : ""}>Gemini 2.5 Flash Lite (default)</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setSelectedModel("google/gemini-3-flash-preview")} className="flex items-center gap-2 text-sm">
+                          {selectedModel === "google/gemini-3-flash-preview" && <Check className="h-3.5 w-3.5 flex-shrink-0" />}
+                          <span className={selectedModel !== "google/gemini-3-flash-preview" ? "ml-5" : ""}>Gemini 3 Flash</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                   <div className="flex items-center gap-1">
                     {isConversationMode ?
