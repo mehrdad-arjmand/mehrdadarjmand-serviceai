@@ -220,7 +220,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     setConversationState((prev) => prev === "speaking" ? "idle" : prev);
   }, []);
 
-  const speakText = useCallback((text: string, onComplete?: () => void) => {
+  const speakText = useCallback((text: string, onComplete?: () => void, messageId?: string) => {
     if (!('speechSynthesis' in window)) {
       toast({ title: "TTS not supported", description: "Voice playback is not supported in this browser.", variant: "destructive" });
       onComplete?.();return;
