@@ -47,6 +47,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const [documentViewer, setDocumentViewer] = useState<{ open: boolean; documentId: string; highlightText: string; filename: string; chunkIndex: number }>({ open: false, documentId: "", highlightText: "", filename: "", chunkIndex: 0 });
   const [isQuerying, setIsQuerying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>("google/gemini-2.5-flash-lite");
   const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const [sidebarOpen, setSidebarOpen] = useState(!isMobileDevice);
   const { toast } = useToast();
@@ -233,6 +235,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const queueId = ++utteranceQueueRef.current;
     let currentIndex = 0;
     setIsSpeaking(true);
+    if (messageId) setSpeakingMessageId(messageId);
     // Chrome workaround: pause/resume every 10s to prevent cutting out after ~15s
     ttsKeepAliveRef.current = setInterval(() => {
       if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
@@ -243,6 +246,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const cleanup = () => {
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
       setIsSpeaking(false);
+      setSpeakingMessageId(null);
     };
     const speakNext = () => {
       if (queueId !== utteranceQueueRef.current) { cleanup(); return; }
