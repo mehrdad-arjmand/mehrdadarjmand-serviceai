@@ -697,14 +697,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                               onOpenDocument={(docId, text, fname, chunkIdx) => setDocumentViewer({ open: true, documentId: docId, highlightText: text, filename: fname, chunkIndex: chunkIdx })}
                             />
                           </div>
-                          <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => isSpeaking ? stopSpeaking() : speakText(msg.content)}
-                      className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
+                          {!isConversationMode && (
+                            <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => (isSpeaking && speakingMessageId === msg.id) ? stopSpeaking() : speakText(msg.content, undefined, msg.id)}
+                        className="mt-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
 
-                            {isSpeaking ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
-                          </Button>
+                              {(isSpeaking && speakingMessageId === msg.id) ? <><VolumeX className="h-3 w-3 mr-1" />Stop</> : <><Volume2 className="h-3 w-3 mr-1" />Listen</>}
+                            </Button>
+                          )}
                         </div> :
 
                   <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
