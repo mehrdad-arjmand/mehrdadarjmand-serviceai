@@ -427,31 +427,9 @@ Deno.serve(async (req) => {
     // Generate embedding for the query using Lovable AI
     const queryEmbedding = await generateEmbedding(question)
 
-    // Perform vector similarity search with high count to ensure we get diverse results
-    const embeddingStr = `[${queryEmbedding.join(',')}]`
-    
-    const { data: chunks, error: searchError } = await supabase.rpc(
-      'match_chunks',
-      {
-        query_embedding: embeddingStr,
-        match_threshold: 0.15, // Very low threshold
-        match_count: 50, // Get many chunks to ensure we find actual content
-        p_user_id: user.id // Enforce document-level access control within the function
-      }
-    )
-
-    if (searchError) {
-      console.error('Search error:', searchError)
-      return new Response(
-        JSON.stringify({ error: 'Search failed. Please try again.' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    console.log(`Found ${chunks?.length || 0} semantic chunks`)
-
-    // Build project-scoped document ID set
+    // Build project-scoped document ID set FIRST (before vector search)
     let projectDocIds: Set<string> | null = null
+    let projectDocIdArray: string[] = []
     if (requestProjectId) {
       const { data: projectDocs, error: projError } = await supabase
         .from('documents')
@@ -461,22 +439,61 @@ Deno.serve(async (req) => {
       if (projError) {
         console.error('Error fetching project documents:', projError)
       } else {
-        projectDocIds = new Set((projectDocs || []).map((d: any) => d.id))
+        projectDocIdArray = (projectDocs || []).map((d: any) => d.id)
+        projectDocIds = new Set(projectDocIdArray)
         console.log(`Project ${requestProjectId} has ${projectDocIds.size} documents`)
       }
     }
 
-    // Filter chunks by user's accessible documents (RBAC enforcement)
-    let accessFilteredChunks = chunks || []
-    if (accessibleDocIds) {
-      accessFilteredChunks = accessFilteredChunks.filter((chunk: any) => accessibleDocIds.has(chunk.document_id))
-      console.log(`After access filter: ${accessFilteredChunks.length} chunks (from ${chunks?.length || 0})`)
+    // Perform vector similarity search
+    const embeddingStr = `[${queryEmbedding.join(',')}]`
+    let chunks: any[] = []
+    let searchError: any = null
+
+    if (requestProjectId && projectDocIdArray.length > 0) {
+      // Use project-scoped search to avoid cross-project contamination
+      const { data, error } = await supabase.rpc(
+        'match_chunks_by_docs',
+        {
+          query_embedding: embeddingStr,
+          doc_ids: projectDocIdArray,
+          match_threshold: 0.15,
+          match_count: 50,
+        }
+      )
+      chunks = data || []
+      searchError = error
+      console.log(`Project-scoped search found ${chunks.length} chunks`)
+    } else {
+      // No project scope — use global search with user access control
+      const { data, error } = await supabase.rpc(
+        'match_chunks',
+        {
+          query_embedding: embeddingStr,
+          match_threshold: 0.15,
+          match_count: 50,
+          p_user_id: user.id
+        }
+      )
+      chunks = data || []
+      searchError = error
     }
 
-    // Filter chunks by project scope
-    if (projectDocIds) {
-      accessFilteredChunks = accessFilteredChunks.filter((chunk: any) => projectDocIds!.has(chunk.document_id))
-      console.log(`After project filter: ${accessFilteredChunks.length} chunks`)
+    if (searchError) {
+      console.error('Search error:', searchError)
+      return new Response(
+        JSON.stringify({ error: 'Search failed. Please try again.' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log(`Found ${chunks.length} semantic chunks`)
+
+    // Filter chunks by user's accessible documents (RBAC enforcement)
+    let accessFilteredChunks = chunks
+    if (accessibleDocIds) {
+      accessFilteredChunks = accessFilteredChunks.filter((chunk: any) => accessibleDocIds.has(chunk.document_id))
+      console.log(`After access filter: ${accessFilteredChunks.length} chunks (from ${chunks.length})`)
     }
 
     // Apply document filters if provided
