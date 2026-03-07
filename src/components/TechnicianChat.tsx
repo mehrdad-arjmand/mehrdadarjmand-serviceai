@@ -217,6 +217,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if ('speechSynthesis' in window) {window.speechSynthesis.cancel();utteranceQueueRef.current++;}
     setIsSpeaking(false);
+    setSpeakingMessageId(null);
     setConversationState((prev) => prev === "speaking" ? "idle" : prev);
   }, []);
 
