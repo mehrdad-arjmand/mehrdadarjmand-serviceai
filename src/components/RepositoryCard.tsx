@@ -930,7 +930,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           {projects && currentProject && onProjectSwitch ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 w-[228px] px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground">
+                <button className="flex items-center gap-2 max-w-[50vw] sm:w-[228px] px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors text-sm font-medium text-foreground min-w-0">
                   <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   <span className="flex-1 text-left truncate">{currentProject.name}</span>
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
@@ -969,43 +969,43 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           </div>
 
           {/* Buttons row */}
-          <div className="py-6 px-8 flex flex-wrap items-center justify-center gap-3">
+          <div className="py-6 px-8">
             <input ref={fileInputRef} type="file" id="file-upload" multiple accept=".pdf,.docx,.txt" className="hidden" onChange={handleFileSelect} />
-            <button
-              onClick={() => setMetadataOpen(!metadataOpen)}
-              className={cn(
-                "inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border transition-colors",
-                metadataOpen ? "bg-muted border-border text-foreground" : "bg-background border-border text-foreground hover:bg-muted/50"
-              )}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Metadata
-            </button>
-
-            <div className="hidden sm:block h-6 w-px bg-border mx-1" />
-
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
-            >
-              <Upload className="h-4 w-4" />
-              {isUploading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading...</> : "Upload files"}
-            </button>
-            <button
-              onClick={() => setCopiedTextOpen(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
-            >
-              <ClipboardPaste className="h-4 w-4" />
-              Copied text
-            </button>
-            <button
-              onClick={() => setDictateOpen(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
-            >
-              <Mic className="h-4 w-4" />
-              Dictate
-            </button>
+            {/* Mobile: 2x2 grid with equal-width buttons; Desktop: flex row */}
+            <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-center sm:justify-center">
+              <button
+                onClick={() => setMetadataOpen(!metadataOpen)}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border transition-colors",
+                  metadataOpen ? "bg-muted border-border text-foreground" : "bg-background border-border text-foreground hover:bg-muted/50"
+                )}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                Metadata
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
+              >
+                <Upload className="h-4 w-4" />
+                {isUploading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading...</> : "Upload files"}
+              </button>
+              <button
+                onClick={() => setCopiedTextOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
+              >
+                <ClipboardPaste className="h-4 w-4" />
+                Copied text
+              </button>
+              <button
+                onClick={() => setDictateOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
+              >
+                <Mic className="h-4 w-4" />
+                Dictate
+              </button>
+            </div>
           </div>
 
           {/* Metadata panel — dynamic fields from project + Access Role */}
