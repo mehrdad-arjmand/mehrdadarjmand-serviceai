@@ -407,22 +407,22 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
     return { text: rawText, pageCount }
   }
 
-  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending to Gemini.`)
+  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending to Lovable AI for cleaning.`)
 
-  const apiKey = Deno.env.get('GOOGLE_API_KEY')
-  if (!apiKey) {
-    console.warn('GOOGLE_API_KEY not set — regex normalization only')
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!lovableKey) {
+    console.warn('LOVABLE_API_KEY not set — regex normalization only')
     return { text: applyRegexNormalization(pageTexts), pageCount }
   }
 
   try {
-    const cleanedText = await cleanGarbledTextWithGemini(pageTexts, apiKey)
+    const cleanedText = await cleanGarbledText(pageTexts, lovableKey)
     if (cleanedText && cleanedText.length > 50) {
-      console.log(`Gemini cleaned text: ${cleanedText.length} characters`)
+      console.log(`AI cleaned text: ${cleanedText.length} characters`)
       return { text: cleanedText, pageCount }
     }
   } catch (err) {
-    console.error('Gemini cleanup failed:', err)
+    console.error('AI text cleanup failed:', err)
   }
 
   return { text: applyRegexNormalization(pageTexts), pageCount }
