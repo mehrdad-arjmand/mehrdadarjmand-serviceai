@@ -306,14 +306,23 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Phase 1: Extract + chunk all files in parallel
-      await Promise.allSettled(
-        fileDataList.map((fileData, i) => {
+      // Phase 1: Extract + chunk files (parallel for paid, sequential for free)
+      if (apiTier === 'paid') {
+        await Promise.allSettled(
+          fileDataList.map((fileData, i) => {
+            const doc = documents[i]
+            if (!doc) return Promise.resolve()
+            return processFile(fileData, doc)
+          })
+        )
+      } else {
+        // Sequential for free tier to avoid rate limits on text cleaning
+        for (let i = 0; i < fileDataList.length; i++) {
           const doc = documents[i]
-          if (!doc) return Promise.resolve()
-          return processFile(fileData, doc)
-        })
-      )
+          if (!doc) continue
+          await processFile(fileDataList[i], doc)
+        }
+      }
 
       // Phase 2: Trigger embeddings for ALL documents in parallel
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents in parallel...`)
