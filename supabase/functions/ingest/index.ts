@@ -38,56 +38,30 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
-// Semaphore for rate-limiting concurrent Gemini API calls
-class Semaphore {
-  private queue: (() => void)[] = []
-  private current = 0
-  constructor(private max: number) {}
-  async acquire(): Promise<void> {
-    if (this.current < this.max) { this.current++; return; }
-    return new Promise<void>(resolve => this.queue.push(resolve))
+// Helper to call Lovable AI gateway for text cleaning (no rate limit issues)
+async function callLovableAI(prompt: string, apiKey: string): Promise<string> {
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-2.5-flash-lite',
+      messages: [
+        { role: 'system', content: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const errText = await response.text()
+    throw new Error(`Lovable AI error ${response.status}: ${errText.slice(0, 200)}`)
   }
-  release(): void {
-    this.current--
-    const next = this.queue.shift()
-    if (next) { this.current++; next() }
-  }
-}
 
-// Global semaphore: max 2 concurrent Gemini requests to stay under 5/min free tier limit
-const geminiSemaphore = new Semaphore(2)
-
-async function callGeminiWithRetry(url: string, body: object, maxRetries = 3): Promise<any> {
-  await geminiSemaphore.acquire()
-  try {
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-
-      if (response.ok) {
-        return await response.json()
-      }
-
-      if (response.status === 429) {
-        const errorBody = await response.text()
-        // Extract retry delay from error response
-        const retryMatch = errorBody.match(/retryDelay.*?(\d+)s/)
-        const waitSec = retryMatch ? parseInt(retryMatch[1]) + 2 : (attempt + 1) * 20
-        console.log(`Gemini 429 rate limited, waiting ${waitSec}s (attempt ${attempt + 1}/${maxRetries})`)
-        await new Promise(r => setTimeout(r, waitSec * 1000))
-        continue
-      }
-
-      const errorText = await response.text()
-      throw new Error(`Gemini API error ${response.status}: ${errorText.slice(0, 200)}`)
-    }
-    throw new Error('Gemini: max retries exhausted')
-  } finally {
-    geminiSemaphore.release()
-  }
+  const result = await response.json()
+  return result.choices?.[0]?.message?.content?.trim() || ''
 }
 
 Deno.serve(async (req) => {
@@ -433,22 +407,22 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
     return { text: rawText, pageCount }
   }
 
-  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending to Gemini.`)
+  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending to Lovable AI for cleaning.`)
 
-  const apiKey = Deno.env.get('GOOGLE_API_KEY')
-  if (!apiKey) {
-    console.warn('GOOGLE_API_KEY not set — regex normalization only')
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!lovableKey) {
+    console.warn('LOVABLE_API_KEY not set — regex normalization only')
     return { text: applyRegexNormalization(pageTexts), pageCount }
   }
 
   try {
-    const cleanedText = await cleanGarbledTextWithGemini(pageTexts, apiKey)
+    const cleanedText = await cleanGarbledText(pageTexts, lovableKey)
     if (cleanedText && cleanedText.length > 50) {
-      console.log(`Gemini cleaned text: ${cleanedText.length} characters`)
+      console.log(`AI cleaned text: ${cleanedText.length} characters`)
       return { text: cleanedText, pageCount }
     }
   } catch (err) {
-    console.error('Gemini cleanup failed:', err)
+    console.error('AI text cleanup failed:', err)
   }
 
   return { text: applyRegexNormalization(pageTexts), pageCount }
@@ -462,35 +436,25 @@ function applyRegexNormalization(pageTexts: string[]): string {
   return text
 }
 
-async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): Promise<string> {
+async function cleanGarbledText(pageTexts: string[], lovableKey: string): Promise<string> {
   const BATCH_SIZE = 15
   const batches: string[][] = []
   for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
     batches.push(pageTexts.slice(i, i + BATCH_SIZE))
   }
-  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches of up to ${BATCH_SIZE}`)
+  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Lovable AI`)
 
-  // Process batches SEQUENTIALLY through the rate-limited helper (semaphore handles concurrency)
   const cleanedParts: string[] = []
   for (let b = 0; b < batches.length; b++) {
     const batch = batches[b]
     const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
-    console.log(`Gemini batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
+    console.log(`AI batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
 
     try {
-      const result = await callGeminiWithRetry(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          contents: [{
-            parts: [{
-              text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`
-            }],
-          }],
-          generationConfig: { maxOutputTokens: 65536 },
-        }
+      const cleaned = await callLovableAI(
+        `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`,
+        lovableKey
       )
-
-      const cleaned = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
       if (cleaned) {
         console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
         cleanedParts.push(cleaned)
@@ -505,7 +469,7 @@ async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): 
   }
 
   const fullCleaned = cleanedParts.join('\n\n')
-  console.log(`Gemini total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
+  console.log(`AI total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
   return fullCleaned
 }
 
