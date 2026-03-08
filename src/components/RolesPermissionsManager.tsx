@@ -194,6 +194,7 @@ export const RolesPermissionsManager = ({
                 <TableHead className="text-center">Landing<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
                 <TableHead className="text-center">Repository<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
                 <TableHead className="text-center">Assistant<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
+                <TableHead className="text-center w-[100px]">API Tier</TableHead>
                 <TableHead className="text-center w-[80px]">Users</TableHead>
                 <TableHead className="w-[100px]"></TableHead>
               </TableRow>
