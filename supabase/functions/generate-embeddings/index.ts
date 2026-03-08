@@ -8,7 +8,7 @@ const corsHeaders = {
 // Optimized batch sizes
 const BATCH_EMBED_SIZE = 100   // Google batchEmbedContents max
 const CHUNKS_PER_FETCH = 500   // Fetch more chunks per DB round-trip
-const CONCURRENT_API_CALLS = 2 // Parallel batch API calls
+const CONCURRENT_API_CALLS = 1 // Sequential to avoid rate-limit collisions when called per-document
 const MAX_CHUNK_TEXT_LENGTH = 10000
 
 function isValidUUID(value: unknown): value is string {
