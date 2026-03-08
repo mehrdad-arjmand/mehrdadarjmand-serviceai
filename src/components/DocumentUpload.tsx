@@ -103,97 +103,105 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
     }
 
     setIsProcessing(true);
-    const documentIds: string[] = [];
 
     try {
-      // PHASE 1: Extract text and create chunks for all files
-      for (const file of files) {
-        const formData = new FormData();
-        formData.append("file", file);
+      // PHASE 1: Extract text, create docs, and chunk — ALL files in parallel
+      const PARALLEL_EXTRACT = 5; // Limit concurrent extractions to avoid overload
+      const documentIds: string[] = [];
+      const errors: string[] = [];
 
-        const extractResponse = await supabase.functions.invoke(
-          "extract-pdf-text",
-          { body: formData }
-        );
+      for (let i = 0; i < files.length; i += PARALLEL_EXTRACT) {
+        const batch = files.slice(i, i + PARALLEL_EXTRACT);
 
-        if (extractResponse.error) throw extractResponse.error;
+        const results = await Promise.allSettled(
+          batch.map(async (file) => {
+            // Step 1: Extract text
+            const formData = new FormData();
+            formData.append("file", file);
 
-        const { text, pageCount } = extractResponse.data as { text: string; pageCount?: number };
+            const extractResponse = await supabase.functions.invoke(
+              "extract-pdf-text",
+              { body: formData }
+            );
+            if (extractResponse.error) throw extractResponse.error;
 
-        if (!text) {
-          throw new Error("No text could be extracted from this PDF.");
-        }
+            const { text, pageCount } = extractResponse.data as { text: string; pageCount?: number };
+            if (!text) throw new Error(`No text extracted from ${file.name}`);
 
-        // Create document record
-        const { data: document, error: docError } = await supabase
-          .from("documents")
-          .insert({
-            filename: file.name,
-            doc_type: inferDocType(file.name),
-            ingestion_status: 'pending',
-            page_count: pageCount || null,
+            // Step 2: Create document record
+            const { data: document, error: docError } = await supabase
+              .from("documents")
+              .insert({
+                filename: file.name,
+                doc_type: inferDocType(file.name),
+                ingestion_status: 'pending',
+                page_count: pageCount || null,
+              })
+              .select()
+              .single();
+            if (docError) throw docError;
+
+            // Step 3: Process document (chunk text)
+            const processResponse = await supabase.functions.invoke(
+              "process-document",
+              {
+                body: {
+                  documentId: document.id,
+                  filename: file.name,
+                  content: text,
+                  pageCount: pageCount,
+                },
+              }
+            );
+            if (processResponse.error) throw processResponse.error;
+
+            return document.id;
           })
-          .select()
-          .single();
-
-        if (docError) throw docError;
-
-        // Process document - saves chunks without embeddings
-        const processResponse = await supabase.functions.invoke(
-          "process-document",
-          {
-            body: {
-              documentId: document.id,
-              filename: file.name,
-              content: text,
-              pageCount: pageCount,
-            },
-          }
         );
 
-        if (processResponse.error) throw processResponse.error;
-        documentIds.push(document.id);
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            documentIds.push(result.value);
+          } else {
+            errors.push(result.reason?.message || 'Unknown error');
+            console.error("File processing error:", result.reason);
+          }
+        }
+      }
+
+      if (errors.length > 0 && documentIds.length === 0) {
+        throw new Error(errors[0]);
       }
 
       toast({
         title: "Documents uploaded",
-        description: `Processing embeddings for ${files.length} documents...`,
+        description: `Processing embeddings for ${documentIds.length} documents...`,
       });
 
       setFiles([]);
       fetchDocuments();
 
-      // PHASE 2: Generate embeddings in background (in batches to avoid CPU timeout)
-      for (const docId of documentIds) {
-        let complete = false;
-        let attempts = 0;
-        const maxAttempts = 100; // Safety limit
-
-        while (!complete && attempts < maxAttempts) {
-          attempts++;
-          const embedResponse = await supabase.functions.invoke(
-            "generate-embeddings",
-            { body: { documentId: docId } }
-          );
-
-          if (embedResponse.error) {
-            console.error("Embedding error:", embedResponse.error);
-            break;
+      // PHASE 2: Generate embeddings — ALL documents in parallel using full mode
+      await Promise.allSettled(
+        documentIds.map(async (docId) => {
+          try {
+            const embedResponse = await supabase.functions.invoke(
+              "generate-embeddings",
+              { body: { documentId: docId, mode: 'full' } }
+            );
+            if (embedResponse.error) {
+              console.error(`Embedding error for ${docId}:`, embedResponse.error);
+            }
+          } catch (err) {
+            console.error(`Embedding failed for ${docId}:`, err);
           }
-
-          complete = embedResponse.data.complete;
-          
-          if (!complete) {
-            // Small delay between batches
-            await new Promise(r => setTimeout(r, 100));
-          }
-        }
-      }
+        })
+      );
 
       fetchDocuments();
       toast({
         title: "Knowledge base complete",
-        description: `All documents have been fully indexed.`,
+        description: `${documentIds.length} documents fully indexed.${errors.length > 0 ? ` ${errors.length} failed.` : ''}`,
       });
 
     } catch (error: any) {
