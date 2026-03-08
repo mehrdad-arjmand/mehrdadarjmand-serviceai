@@ -231,7 +231,10 @@ Deno.serve(async (req) => {
 
     // Background processing
     const backgroundWork = (async () => {
-      const googleApiKey = Deno.env.get('GOOGLE_API_KEY')
+      // Pick API key based on tier
+      const googleApiKey = apiTier === 'paid'
+        ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
+        : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
 
       const processFile = async (fileData: typeof fileDataList[0], doc: typeof documents[0]) => {
         try {
