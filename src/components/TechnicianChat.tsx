@@ -528,23 +528,17 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       recognitionRef.current = null;
     }
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
+    recognitionStartedRef.current = false;
     if (conversationActiveRef.current) {
       setConversationState("listening");
       setQuestion("");
-      // Retry startConversationListening with increasing delays to handle browser mic lock
-      const tryStart = (attempt: number) => {
-        if (!conversationActiveRef.current) return;
-        if (attempt > 5) {
-          setConversationState("idle");
-          return;
-        }
-        try {
+      // Use longer initial delay to let browser fully release mic after TTS cancel
+      setTimeout(() => {
+        if (conversationActiveRef.current) {
           startConversationListening();
-        } catch (e) {
-          setTimeout(() => tryStart(attempt + 1), 300 * attempt);
         }
-      };
-      setTimeout(() => tryStart(1), 600);
+      }, 800);
     }
   }, [startConversationListening]);
 
