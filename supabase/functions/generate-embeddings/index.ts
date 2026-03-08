@@ -15,37 +15,28 @@ function isValidUUID(value: unknown): value is string {
 }
 
 /**
- * Probe the Google Embedding API to detect free vs paid tier.
- * Sends 3 rapid requests. If all succeed, it's paid tier (high RPM).
- * If any return 429, it's free tier (5 RPM).
+ * Detect API tier by attempting a high-concurrency approach.
+ * Instead of wasting requests on probes, we optimistically try paid-tier
+ * concurrency and gracefully degrade on 429 via the retry logic in batchEmbedTexts.
+ * We do a single quick probe: if it succeeds, assume paid. If 429, free.
  */
 async function detectApiTier(apiKey: string): Promise<'paid' | 'free'> {
-  const testText = 'rate limit probe'
-  const makeRequest = () =>
-    fetch(
+  try {
+    const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          requests: [{ model: 'models/gemini-embedding-001', content: { parts: [{ text: testText }] }, outputDimensionality: 768 }]
+          requests: [{ model: 'models/gemini-embedding-001', content: { parts: [{ text: 'probe' }] }, outputDimensionality: 768 }]
         })
       }
     )
-
-  try {
-    // Fire 3 requests simultaneously — free tier (5 RPM) will 429 on rapid bursts
-    const results = await Promise.all([makeRequest(), makeRequest(), makeRequest()])
-    const statuses = results.map(r => r.status)
-    // Consume bodies
-    await Promise.all(results.map(r => r.text()))
-
-    if (statuses.some(s => s === 429)) {
-      return 'free'
-    }
-    return 'paid'
+    const status = response.status
+    await response.text()
+    return status === 429 ? 'free' : 'paid'
   } catch {
-    return 'free' // default to safe mode
+    return 'free'
   }
 }
 
