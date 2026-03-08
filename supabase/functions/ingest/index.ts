@@ -337,7 +337,31 @@ Deno.serve(async (req) => {
 
           console.log(`Chunks saved for ${fileData.name}, triggering embeddings...`)
 
-          // Trigger embedding generation
+        } catch (err) {
+          console.error(`Error processing ${fileData.name}:`, err)
+          const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+          
+          await supabase
+            .from('documents')
+            .update({ ingestion_status: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
+            .eq('id', doc.id)
+        }
+      }
+
+      // Phase 1: Extract text + chunk ALL documents in parallel (no API rate limits here)
+      await Promise.all(
+        fileDataList.map((fileData, i) => {
+          const doc = documents[i]
+          if (!doc) return Promise.resolve()
+          return processFile(fileData, doc)
+        })
+      )
+
+      // Phase 2: Trigger embeddings SEQUENTIALLY for each document to avoid rate-limit collisions
+      console.log(`All chunking complete. Starting sequential embedding pass for ${documents.length} documents...`)
+      for (const doc of documents) {
+        try {
+          console.log(`Triggering embeddings for document ${doc.id} (${doc.fileName})...`)
           const embRes = await fetch(
             `${supabaseUrl}/functions/v1/generate-embeddings`,
             {
@@ -351,31 +375,15 @@ Deno.serve(async (req) => {
             }
           )
           if (!embRes.ok) {
-            console.error(`Embeddings trigger failed for ${doc.id}: ${embRes.status}`)
+            console.error(`Embeddings failed for ${doc.id}: ${embRes.status}`)
           } else {
-            console.log(`Embeddings triggered for ${doc.id}`)
+            console.log(`Embeddings complete for ${doc.id}`)
           }
           await embRes.text() // consume body
-
         } catch (err) {
-          console.error(`Error processing ${fileData.name}:`, err)
-          const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-          
-          await supabase
-            .from('documents')
-            .update({ ingestion_status: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
-            .eq('id', doc.id)
+          console.error(`Embedding error for ${doc.id}:`, err)
         }
       }
-
-      // Process ALL documents in parallel
-      await Promise.all(
-        fileDataList.map((fileData, i) => {
-          const doc = documents[i]
-          if (!doc) return Promise.resolve()
-          return processFile(fileData, doc)
-        })
-      )
     })()
 
     // Use EdgeRuntime.waitUntil to keep the worker alive for background processing
