@@ -454,6 +454,7 @@ export type Database = {
       }
       role_permissions: {
         Row: {
+          api_tier: string
           assistant_delete: boolean
           assistant_read: boolean
           assistant_write: boolean
@@ -471,6 +472,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          api_tier?: string
           assistant_delete?: boolean
           assistant_read?: boolean
           assistant_write?: boolean
@@ -488,6 +490,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          api_tier?: string
           assistant_delete?: boolean
           assistant_read?: boolean
           assistant_write?: boolean
@@ -600,6 +603,7 @@ export type Database = {
       get_all_roles: {
         Args: never
         Returns: {
+          api_tier: string
           assistant_delete: boolean
           assistant_read: boolean
           assistant_write: boolean
@@ -614,9 +618,11 @@ export type Database = {
           user_count: number
         }[]
       }
+      get_user_api_tier: { Args: { p_user_id: string }; Returns: string }
       get_user_permissions: {
         Args: { p_user_id?: string }
         Returns: {
+          api_tier: string
           assistant_delete: boolean
           assistant_read: boolean
           assistant_write: boolean
@@ -709,38 +715,24 @@ export type Database = {
           text: string
         }[]
       }
-      update_role_permissions:
-        | {
-            Args: {
-              p_assistant_delete?: boolean
-              p_assistant_read?: boolean
-              p_assistant_write?: boolean
-              p_description?: string
-              p_new_role_name?: string
-              p_repository_delete?: boolean
-              p_repository_read?: boolean
-              p_repository_write?: boolean
-              p_role: string
-            }
-            Returns: undefined
-          }
-        | {
-            Args: {
-              p_assistant_delete?: boolean
-              p_assistant_read?: boolean
-              p_assistant_write?: boolean
-              p_description?: string
-              p_landing_delete?: boolean
-              p_landing_read?: boolean
-              p_landing_write?: boolean
-              p_new_role_name?: string
-              p_repository_delete?: boolean
-              p_repository_read?: boolean
-              p_repository_write?: boolean
-              p_role: string
-            }
-            Returns: undefined
-          }
+      update_role_permissions: {
+        Args: {
+          p_api_tier?: string
+          p_assistant_delete?: boolean
+          p_assistant_read?: boolean
+          p_assistant_write?: boolean
+          p_description?: string
+          p_landing_delete?: boolean
+          p_landing_read?: boolean
+          p_landing_write?: boolean
+          p_new_role_name?: string
+          p_repository_delete?: boolean
+          p_repository_read?: boolean
+          p_repository_write?: boolean
+          p_role: string
+        }
+        Returns: undefined
+      }
       user_has_project_access: {
         Args: { p_project_id: string; p_user_id?: string }
         Returns: boolean

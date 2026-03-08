@@ -19,6 +19,9 @@ import { Loader2, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-rea
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import type { RoleWithPermissions } from "@/hooks/useRolesManagement";
 import type { AppRole } from "@/hooks/usePermissions";
 
@@ -60,6 +63,7 @@ export const RolesPermissionsManager = ({
       landing_read: role.landing_read,
       landing_write: role.landing_write,
       landing_delete: role.landing_delete,
+      api_tier: role.api_tier || 'free',
     });
   };
 
@@ -76,6 +80,7 @@ export const RolesPermissionsManager = ({
       landing_read: editForm.landing_read,
       landing_write: editForm.landing_write,
       landing_delete: editForm.landing_delete,
+      api_tier: (editForm as any).api_tier,
     };
     if (editForm.newRoleName && editForm.newRoleName !== editingRole.role) {
       updates.newRoleName = editForm.newRoleName;
@@ -190,6 +195,7 @@ export const RolesPermissionsManager = ({
                 <TableHead className="text-center">Landing<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
                 <TableHead className="text-center">Repository<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
                 <TableHead className="text-center">Assistant<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
+                <TableHead className="text-center w-[100px]">API Tier</TableHead>
                 <TableHead className="text-center w-[80px]">Users</TableHead>
                 <TableHead className="w-[100px]"></TableHead>
               </TableRow>
@@ -221,6 +227,14 @@ export const RolesPermissionsManager = ({
                       {renderPermissionBadge(role.assistant_write)}
                       {renderPermissionBadge(role.assistant_delete)}
                     </div>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Badge
+                      variant={role.api_tier === 'paid' ? "default" : "secondary"}
+                      className={role.api_tier === 'paid' ? "bg-green-500/10 text-green-600 hover:bg-green-500/20" : "bg-muted text-muted-foreground"}
+                    >
+                      {role.api_tier === 'paid' ? 'Paid' : 'Free'}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-center">
                     <div className="flex items-center justify-center gap-1 text-muted-foreground">
@@ -298,6 +312,23 @@ export const RolesPermissionsManager = ({
               "Assistant Permissions", "assistant_read", "assistant_write", "assistant_delete",
               "Read - Access the assistant", "Write - Send messages to assistant", "Delete - Delete conversations"
             )}
+
+            <div className="space-y-3">
+              <Label className="text-base font-medium">API Tier</Label>
+              <p className="text-sm text-muted-foreground">Controls processing speed for document ingestion. Paid tier uses parallel processing; Free tier uses sequential.</p>
+              <Select
+                value={(editForm as any).api_tier || 'free'}
+                onValueChange={(value) => setEditForm(prev => ({ ...prev, api_tier: value }))}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="free">Free API</SelectItem>
+                  <SelectItem value="paid">Paid API</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <DialogFooter>

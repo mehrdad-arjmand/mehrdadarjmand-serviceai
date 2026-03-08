@@ -15,6 +15,7 @@ export interface RoleWithPermissions {
   landing_read: boolean;
   landing_write: boolean;
   landing_delete: boolean;
+  api_tier: string;
   user_count: number;
 }
 
@@ -104,6 +105,7 @@ export function useRolesManagement() {
         p_landing_read: updates.landing_read,
         p_landing_write: updates.landing_write,
         p_landing_delete: updates.landing_delete,
+        p_api_tier: updates.api_tier,
       });
 
       if (error) {
