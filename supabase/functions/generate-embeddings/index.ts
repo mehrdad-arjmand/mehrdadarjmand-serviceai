@@ -5,15 +5,48 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-// Optimized batch sizes
 const BATCH_EMBED_SIZE = 100   // Google batchEmbedContents max
-const CHUNKS_PER_FETCH = 500   // Fetch more chunks per DB round-trip
-const CONCURRENT_API_CALLS = 1 // Sequential to avoid rate-limit collisions when called per-document
+const CHUNKS_PER_FETCH = 500
 const MAX_CHUNK_TEXT_LENGTH = 10000
 
 function isValidUUID(value: unknown): value is string {
   if (typeof value !== 'string') return false
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+/**
+ * Probe the Google Embedding API to detect free vs paid tier.
+ * Sends 3 rapid requests. If all succeed, it's paid tier (high RPM).
+ * If any return 429, it's free tier (5 RPM).
+ */
+async function detectApiTier(apiKey: string): Promise<'paid' | 'free'> {
+  const testText = 'rate limit probe'
+  const makeRequest = () =>
+    fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: [{ model: 'models/gemini-embedding-001', content: { parts: [{ text: testText }] }, outputDimensionality: 768 }]
+        })
+      }
+    )
+
+  try {
+    // Fire 3 requests simultaneously — free tier (5 RPM) will 429 on rapid bursts
+    const results = await Promise.all([makeRequest(), makeRequest(), makeRequest()])
+    const statuses = results.map(r => r.status)
+    // Consume bodies
+    await Promise.all(results.map(r => r.text()))
+
+    if (statuses.some(s => s === 429)) {
+      return 'free'
+    }
+    return 'paid'
+  } catch {
+    return 'free' // default to safe mode
+  }
 }
 
 Deno.serve(async (req) => {
@@ -75,13 +108,18 @@ Deno.serve(async (req) => {
     const apiKey = Deno.env.get('GOOGLE_API_KEY')
     if (!apiKey) throw new Error('GOOGLE_API_KEY is not configured')
 
+    // Detect API tier to set concurrency
+    const tier = await detectApiTier(apiKey)
+    const CONCURRENT_API_CALLS = tier === 'paid' ? 10 : 1
+    const DELAY_BETWEEN_BATCHES_MS = tier === 'paid' ? 0 : 12000 // free: ~5 RPM = 1 every 12s
+
+    console.log(`API tier: ${tier} | concurrency: ${CONCURRENT_API_CALLS} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
 
     let totalProcessed = 0
     let isComplete = false
 
     do {
-      // Fetch a large batch of chunks without embeddings
       const { data: chunks, error: chunksError } = await supabase
         .from('chunks')
         .select('id, text')
@@ -99,7 +137,7 @@ Deno.serve(async (req) => {
         apiBatches.push(chunks.slice(i, i + BATCH_EMBED_SIZE))
       }
 
-      // Process API batches with controlled concurrency
+      // Process with detected concurrency
       for (let i = 0; i < apiBatches.length; i += CONCURRENT_API_CALLS) {
         const concurrentBatches = apiBatches.slice(i, i + CONCURRENT_API_CALLS)
 
@@ -113,7 +151,7 @@ Deno.serve(async (req) => {
 
             const embeddings = await batchEmbedTexts(apiKey, texts)
 
-            // Bulk update: fire all UPDATE queries concurrently
+            // Bulk update
             await Promise.all(
               batch.map((chunk, idx) =>
                 supabase
@@ -129,6 +167,12 @@ Deno.serve(async (req) => {
         )
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
+
+        // On free tier, wait between batch groups to stay under RPM
+        if (DELAY_BETWEEN_BATCHES_MS > 0 && i + CONCURRENT_API_CALLS < apiBatches.length) {
+          console.log(`Free tier: waiting ${DELAY_BETWEEN_BATCHES_MS}ms before next batch...`)
+          await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS))
+        }
       }
 
       // Update document progress
@@ -181,6 +225,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        tier,
         processed: totalProcessed,
         embedded: finalEmbedded || 0,
         total: finalDoc?.total_chunks || 0,
@@ -214,10 +259,10 @@ Deno.serve(async (req) => {
 
 /**
  * Use Google's batchEmbedContents API to embed up to 100 texts in a single call.
- * Falls back to sequential calls on rate-limit with exponential backoff.
+ * Retries with exponential backoff on rate-limit.
  */
 async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<string[]> {
-  const MAX_RETRIES = 3
+  const MAX_RETRIES = 5
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
