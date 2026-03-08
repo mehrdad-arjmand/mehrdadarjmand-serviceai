@@ -187,7 +187,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   useEffect(() => {
     scrollToBottom();
-  }, [chatHistory, scrollToBottom]);
+  }, [chatHistory, isQuerying, scrollToBottom]);
 
   const handleChatScroll = useCallback(() => {
     const el = chatContainerRef.current;
