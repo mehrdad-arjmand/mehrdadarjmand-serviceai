@@ -38,6 +38,58 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
+// Semaphore for rate-limiting concurrent Gemini API calls
+class Semaphore {
+  private queue: (() => void)[] = []
+  private current = 0
+  constructor(private max: number) {}
+  async acquire(): Promise<void> {
+    if (this.current < this.max) { this.current++; return; }
+    return new Promise<void>(resolve => this.queue.push(resolve))
+  }
+  release(): void {
+    this.current--
+    const next = this.queue.shift()
+    if (next) { this.current++; next() }
+  }
+}
+
+// Global semaphore: max 2 concurrent Gemini requests to stay under 5/min free tier limit
+const geminiSemaphore = new Semaphore(2)
+
+async function callGeminiWithRetry(url: string, body: object, maxRetries = 3): Promise<any> {
+  await geminiSemaphore.acquire()
+  try {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      if (response.ok) {
+        return await response.json()
+      }
+
+      if (response.status === 429) {
+        const errorBody = await response.text()
+        // Extract retry delay from error response
+        const retryMatch = errorBody.match(/retryDelay.*?(\d+)s/)
+        const waitSec = retryMatch ? parseInt(retryMatch[1]) + 2 : (attempt + 1) * 20
+        console.log(`Gemini 429 rate limited, waiting ${waitSec}s (attempt ${attempt + 1}/${maxRetries})`)
+        await new Promise(r => setTimeout(r, waitSec * 1000))
+        continue
+      }
+
+      const errorText = await response.text()
+      throw new Error(`Gemini API error ${response.status}: ${errorText.slice(0, 200)}`)
+    }
+    throw new Error('Gemini: max retries exhausted')
+  } finally {
+    geminiSemaphore.release()
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -412,49 +464,40 @@ async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): 
   }
   console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches of up to ${BATCH_SIZE}`)
 
-  const batchPromises = batches.map(async (batch, b) => {
+  // Process batches SEQUENTIALLY through the rate-limited helper (semaphore handles concurrency)
+  const cleanedParts: string[] = []
+  for (let b = 0; b < batches.length; b++) {
+    const batch = batches[b]
     const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
     console.log(`Gemini batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
 
     try {
-      const response = await fetch(
+      const result = await callGeminiWithRetry(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`
-              }],
+          contents: [{
+            parts: [{
+              text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`
             }],
-            generationConfig: { maxOutputTokens: 65536 },
-          }),
+          }],
+          generationConfig: { maxOutputTokens: 65536 },
         }
       )
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error(`Gemini batch ${b + 1} failed (${response.status}): ${errorText}`)
-        return applyRegexNormalization(batch)
-      }
-
-      const result = await response.json()
       const cleaned = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
       if (cleaned) {
         console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
-        return cleaned
+        cleanedParts.push(cleaned)
       } else {
         console.warn(`Batch ${b + 1} returned empty, using regex fallback`)
-        return applyRegexNormalization(batch)
+        cleanedParts.push(applyRegexNormalization(batch))
       }
     } catch (err) {
       console.error(`Batch ${b + 1} error:`, err)
-      return applyRegexNormalization(batch)
+      cleanedParts.push(applyRegexNormalization(batch))
     }
-  })
+  }
 
-  const cleanedParts = await Promise.all(batchPromises)
   const fullCleaned = cleanedParts.join('\n\n')
   console.log(`Gemini total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
   return fullCleaned
