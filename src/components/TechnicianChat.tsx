@@ -365,8 +365,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     };
     recognition.onend = () => {
       recognitionRef.current = null;
-      if (conversationActiveRef.current && !silenceTimerRef.current) {
-        setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 200);
+      // Don't restart if we're currently processing a transcript or a silence timer is pending
+      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
+        setTimeout(() => {if (conversationActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();}, 200);
       }
     };
     try {
