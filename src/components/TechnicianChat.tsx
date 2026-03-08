@@ -561,6 +561,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const handleConversationToggle = () => {
     if (isConversationMode) {
       conversationActiveRef.current = false;
+      isProcessingVoiceRef.current = false;
+      lastSubmittedTranscriptRef.current = "";
       stopListening();
       stopSpeaking();
       setIsConversationMode(false);
