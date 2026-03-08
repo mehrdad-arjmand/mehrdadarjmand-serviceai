@@ -121,6 +121,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const abortCountRef = useRef<number>(0);
   const listeningWatchdogRef = useRef<NodeJS.Timeout | null>(null);
   const recognitionStartedRef = useRef<boolean>(false);
+  const isProcessingVoiceRef = useRef<boolean>(false);
+  const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
 
   useEffect(() => {
@@ -320,8 +322,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
         const transcript = currentTranscriptRef.current.trim();
-        if (transcript && conversationActiveRef.current) {
+        if (transcript && conversationActiveRef.current && !isProcessingVoiceRef.current) {
+          // Prevent duplicate submission of same transcript
+          if (transcript === lastSubmittedTranscriptRef.current) {
+            console.warn('[Voice] Duplicate transcript detected, skipping');
+            return;
+          }
           if (recognitionRef.current) {try {recognitionRef.current.stop();} catch (e) {}recognitionRef.current = null;}
+          isProcessingVoiceRef.current = true;
+          lastSubmittedTranscriptRef.current = transcript;
           setConversationState("processing");
           setQuestion("");
           processConversationMessage(transcript);
@@ -356,8 +365,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     };
     recognition.onend = () => {
       recognitionRef.current = null;
-      if (conversationActiveRef.current && !silenceTimerRef.current) {
-        setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 200);
+      // Don't restart if we're currently processing a transcript or a silence timer is pending
+      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
+        setTimeout(() => {if (conversationActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();}, 200);
       }
     };
     try {
@@ -382,6 +392,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
       toast({ title: "No documents indexed", description: "Please upload and index documents first.", variant: "destructive" });
+      isProcessingVoiceRef.current = false;
       return;
     }
     const filtersAtSendTime = { ...currentFiltersRef.current };
@@ -396,7 +407,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) {
         toast({ title: "Session expired", description: "Please log in again.", variant: "destructive" });
-        setIsQuerying(false); setConversationState("idle"); return;
+        setIsQuerying(false); setConversationState("idle"); isProcessingVoiceRef.current = false; return;
       }
       const currentSessionId = activeConversationId;
       const { data, error } = await supabase.functions.invoke("rag-query", {
@@ -405,20 +416,25 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, inputMode: "voice", timestamp: new Date(), sources: data.sources || [] };
       addMessage(assistantMessage);
+      isProcessingVoiceRef.current = false;
       if (data.answer && conversationActiveRef.current) {
         setConversationState("speaking");
         speakText(data.answer, () => {
           setFiltersLocked(false);
+          lastSubmittedTranscriptRef.current = ""; // Reset dedup after full cycle
           if (conversationActiveRef.current) {setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);}
         });
       } else {
         setFiltersLocked(false);
+        lastSubmittedTranscriptRef.current = "";
         // Restart listening even if answer was empty
         if (conversationActiveRef.current) {setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);}
       }
     } catch (error: any) {
       console.error("Error querying assistant:", error);
       toast({ title: "Error querying assistant", description: error.message || "An unexpected error occurred.", variant: "destructive" });
+      isProcessingVoiceRef.current = false;
+      lastSubmittedTranscriptRef.current = "";
       setFiltersLocked(false);
       if (conversationActiveRef.current) {setConversationState("idle");setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 1000);}
     } finally {setIsQuerying(false);}
@@ -529,6 +545,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     }
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
+    isProcessingVoiceRef.current = false;
+    lastSubmittedTranscriptRef.current = "";
     recognitionStartedRef.current = false;
     if (conversationActiveRef.current) {
       setConversationState("listening");
@@ -545,6 +563,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const handleConversationToggle = () => {
     if (isConversationMode) {
       conversationActiveRef.current = false;
+      isProcessingVoiceRef.current = false;
+      lastSubmittedTranscriptRef.current = "";
       stopListening();
       stopSpeaking();
       setIsConversationMode(false);
