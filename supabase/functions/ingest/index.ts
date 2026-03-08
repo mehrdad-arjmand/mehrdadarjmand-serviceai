@@ -124,6 +124,11 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Get user's API tier from their role
+    const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
+    const apiTier = userApiTier || 'free'
+    console.log(`User API tier: ${apiTier}`)
+
     const contentType = req.headers.get('content-type')
     if (!contentType?.includes('multipart/form-data')) {
       throw new Error('Content-Type must be multipart/form-data')
