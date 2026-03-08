@@ -392,6 +392,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
       toast({ title: "No documents indexed", description: "Please upload and index documents first.", variant: "destructive" });
+      isProcessingVoiceRef.current = false;
       return;
     }
     const filtersAtSendTime = { ...currentFiltersRef.current };
@@ -406,7 +407,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) {
         toast({ title: "Session expired", description: "Please log in again.", variant: "destructive" });
-        setIsQuerying(false); setConversationState("idle"); return;
+        setIsQuerying(false); setConversationState("idle"); isProcessingVoiceRef.current = false; return;
       }
       const currentSessionId = activeConversationId;
       const { data, error } = await supabase.functions.invoke("rag-query", {
@@ -415,20 +416,25 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (error) throw error;
       const assistantMessage: ChatMessage = { id: `assistant-${Date.now()}`, role: "assistant", content: data.answer, inputMode: "voice", timestamp: new Date(), sources: data.sources || [] };
       addMessage(assistantMessage);
+      isProcessingVoiceRef.current = false;
       if (data.answer && conversationActiveRef.current) {
         setConversationState("speaking");
         speakText(data.answer, () => {
           setFiltersLocked(false);
+          lastSubmittedTranscriptRef.current = ""; // Reset dedup after full cycle
           if (conversationActiveRef.current) {setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);}
         });
       } else {
         setFiltersLocked(false);
+        lastSubmittedTranscriptRef.current = "";
         // Restart listening even if answer was empty
         if (conversationActiveRef.current) {setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);}
       }
     } catch (error: any) {
       console.error("Error querying assistant:", error);
       toast({ title: "Error querying assistant", description: error.message || "An unexpected error occurred.", variant: "destructive" });
+      isProcessingVoiceRef.current = false;
+      lastSubmittedTranscriptRef.current = "";
       setFiltersLocked(false);
       if (conversationActiveRef.current) {setConversationState("idle");setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 1000);}
     } finally {setIsQuerying(false);}
