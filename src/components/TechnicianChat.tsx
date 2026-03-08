@@ -545,6 +545,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     }
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
+    isProcessingVoiceRef.current = false;
+    lastSubmittedTranscriptRef.current = "";
     recognitionStartedRef.current = false;
     if (conversationActiveRef.current) {
       setConversationState("listening");
