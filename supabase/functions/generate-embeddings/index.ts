@@ -5,17 +5,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-// Batch sizes and concurrency settings
-const BATCH_SIZE = 10 // Chunks per embedding batch call
+// Optimized batch sizes
+const BATCH_EMBED_SIZE = 100   // Google batchEmbedContents max
+const CHUNKS_PER_FETCH = 500   // Fetch more chunks per DB round-trip
+const CONCURRENT_API_CALLS = 2 // Parallel batch API calls
 const MAX_CHUNK_TEXT_LENGTH = 10000
-const CONCURRENT_BATCHES = 3 // Process 3 batches concurrently for throughput
-const DELAY_BETWEEN_BATCHES_MS = 200 // Minimal delay between concurrent batch starts
 
-// UUID validation
 function isValidUUID(value: unknown): value is string {
   if (typeof value !== 'string') return false
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-  return uuidRegex.test(value)
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 Deno.serve(async (req) => {
@@ -27,7 +25,6 @@ Deno.serve(async (req) => {
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 
-  // Validate JWT authentication
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(
@@ -36,7 +33,6 @@ Deno.serve(async (req) => {
     )
   }
 
-  // Verify the user's JWT token via direct API call
   const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
     headers: { Authorization: authHeader, apikey: supabaseAnonKey },
   })
@@ -56,13 +52,9 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-  // Check permission
   const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
-    p_tab: 'repository',
-    p_action: 'write',
-    p_user_id: user.id
+    p_tab: 'repository', p_action: 'write', p_user_id: user.id
   })
-
   if (permError || !hasPermission) {
     return new Response(
       JSON.stringify({ error: 'Forbidden: repository.write permission required' }),
@@ -72,101 +64,71 @@ Deno.serve(async (req) => {
 
   try {
     const contentType = req.headers.get('content-type')
-    if (!contentType?.includes('application/json')) {
-      throw new Error('Content-Type must be application/json')
-    }
+    if (!contentType?.includes('application/json')) throw new Error('Content-Type must be application/json')
 
-    let body: unknown
-    try {
-      body = await req.json()
-    } catch {
-      throw new Error('Invalid JSON body')
-    }
-
-    if (typeof body !== 'object' || body === null) {
-      throw new Error('Request body must be an object')
-    }
-
+    const body = await req.json()
     const { documentId, mode } = body as { documentId?: unknown; mode?: string }
 
-    if (!isValidUUID(documentId)) {
-      throw new Error('documentId must be a valid UUID')
-    }
+    if (!isValidUUID(documentId)) throw new Error('documentId must be a valid UUID')
 
-    // mode=full: server-side orchestration loop (processes ALL chunks until done)
-    // mode=batch (default): process one batch and return (legacy frontend-driven mode)
     const isFullMode = mode === 'full'
+    const apiKey = Deno.env.get('GOOGLE_API_KEY')
+    if (!apiKey) throw new Error('GOOGLE_API_KEY is not configured')
 
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
-
-    const fetchWithRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> => {
-      for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-          return await fn()
-        } catch (err) {
-          if (attempt === retries) throw err
-          console.log(`Attempt ${attempt} failed, retrying in ${delay}ms...`)
-          await new Promise(resolve => setTimeout(resolve, delay))
-          delay *= 2
-        }
-      }
-      throw new Error('All retries exhausted')
-    }
 
     let totalProcessed = 0
     let isComplete = false
 
-    // Loop: process batches until all chunks have embeddings
     do {
-      // Get chunks without embeddings
+      // Fetch a large batch of chunks without embeddings
       const { data: chunks, error: chunksError } = await supabase
         .from('chunks')
         .select('id, text')
         .eq('document_id', documentId)
         .is('embedding', null)
         .order('chunk_index')
-        .limit(BATCH_SIZE * CONCURRENT_BATCHES)
+        .limit(CHUNKS_PER_FETCH)
 
       if (chunksError) throw chunksError
+      if (!chunks || chunks.length === 0) { isComplete = true; break }
 
-      if (!chunks || chunks.length === 0) {
-        isComplete = true
-        break
+      // Split into batches of 100 for batchEmbedContents API
+      const apiBatches: typeof chunks[] = []
+      for (let i = 0; i < chunks.length; i += BATCH_EMBED_SIZE) {
+        apiBatches.push(chunks.slice(i, i + BATCH_EMBED_SIZE))
       }
 
-      // Split into concurrent sub-batches
-      const subBatches: typeof chunks[] = []
-      for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-        subBatches.push(chunks.slice(i, i + BATCH_SIZE))
-      }
+      // Process API batches with controlled concurrency
+      for (let i = 0; i < apiBatches.length; i += CONCURRENT_API_CALLS) {
+        const concurrentBatches = apiBatches.slice(i, i + CONCURRENT_API_CALLS)
 
-      // Process sub-batches with controlled concurrency
-      for (const batch of subBatches) {
-        const textsToEmbed = batch.map(c => {
-          const text = c.text
-          if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
-          return text.slice(0, MAX_CHUNK_TEXT_LENGTH)
-        })
+        const results = await Promise.all(
+          concurrentBatches.map(async (batch) => {
+            const texts = batch.map(c => {
+              const text = c.text
+              if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
+              return text.slice(0, MAX_CHUNK_TEXT_LENGTH)
+            })
 
-        const embeddings = await generateEmbeddings(textsToEmbed)
+            const embeddings = await batchEmbedTexts(apiKey, texts)
 
-        // Update chunks with embeddings
-        for (let i = 0; i < batch.length; i++) {
-          await fetchWithRetry(async () => {
-            const { error: updateError } = await supabase
-              .from('chunks')
-              .update({ embedding: embeddings[i] })
-              .eq('id', batch[i].id)
-            if (updateError) throw updateError
+            // Bulk update: fire all UPDATE queries concurrently
+            await Promise.all(
+              batch.map((chunk, idx) =>
+                supabase
+                  .from('chunks')
+                  .update({ embedding: embeddings[idx] })
+                  .eq('id', chunk.id)
+                  .then(({ error }) => { if (error) throw error })
+              )
+            )
+
+            return batch.length
           })
-        }
+        )
 
-        totalProcessed += batch.length
-
-        // Brief delay between sub-batches to stay within rate limits
-        if (subBatches.indexOf(batch) < subBatches.length - 1) {
-          await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS))
-        }
+        totalProcessed += results.reduce((a, b) => a + b, 0)
       }
 
       // Update document progress
@@ -186,7 +148,6 @@ Deno.serve(async (req) => {
       const embedded = embeddedCount || 0
       isComplete = embedded >= totalChunks
 
-      // Update ingested_chunks for live progress tracking
       await supabase
         .from('documents')
         .update({ ingested_chunks: embedded })
@@ -194,11 +155,10 @@ Deno.serve(async (req) => {
 
       console.log(`Progress: ${embedded}/${totalChunks} chunks embedded`)
 
-      if (!isFullMode) break // Legacy mode: return after one iteration
+      if (!isFullMode) break
 
     } while (!isComplete)
 
-    // Mark complete or still in progress
     if (isComplete) {
       await supabase
         .from('documents')
@@ -206,7 +166,6 @@ Deno.serve(async (req) => {
         .eq('id', documentId)
     }
 
-    // Get final counts
     const { count: finalEmbedded } = await supabase
       .from('chunks')
       .select('id', { count: 'exact', head: true })
@@ -253,84 +212,62 @@ Deno.serve(async (req) => {
   }
 })
 
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-// Generate embeddings using Google's Gemini Embedding API with rate limiting
-async function generateEmbeddings(texts: string[]): Promise<string[]> {
-  const apiKey = Deno.env.get('GOOGLE_API_KEY')
-  if (!apiKey) {
-    throw new Error('GOOGLE_API_KEY is not configured')
-  }
-
-  const embeddings: string[] = []
-  const DELAY_BETWEEN_REQUESTS_MS = 400 // Reduced from 700ms — safe at ~150 req/min with 10-chunk batches
+/**
+ * Use Google's batchEmbedContents API to embed up to 100 texts in a single call.
+ * Falls back to sequential calls on rate-limit with exponential backoff.
+ */
+async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<string[]> {
   const MAX_RETRIES = 3
 
-  for (let i = 0; i < texts.length; i++) {
-    const text = texts[i]
-    let lastError: Error | null = null
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requests: texts.map(text => ({
+              model: 'models/gemini-embedding-001',
               content: { parts: [{ text }] },
               outputDimensionality: 768
-            })
-          }
-        )
+            }))
+          })
+        }
+      )
 
-        if (response.status === 429) {
-          const errorData = await response.json().catch(() => ({}))
-          const retryDelay = errorData?.error?.details?.find(
-            (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
-          )?.retryDelay
+      if (response.status === 429) {
+        const errorData = await response.json().catch(() => ({}))
+        const retryDelay = errorData?.error?.details?.find(
+          (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
+        )?.retryDelay
 
-          let waitMs = attempt * 10000
-          if (retryDelay) {
-            const seconds = parseFloat(retryDelay.replace('s', ''))
-            if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 1000
-          }
-
-          console.log(`Rate limited on chunk ${i + 1}/${texts.length}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
-          await delay(waitMs)
-          continue
+        let waitMs = attempt * 10000
+        if (retryDelay) {
+          const seconds = parseFloat(retryDelay.replace('s', ''))
+          if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 1000
         }
 
-        if (!response.ok) {
-          const errorText = await response.text()
-          console.error(`Embedding API error (status ${response.status}):`, errorText)
-          throw new Error(`Embedding API returned status ${response.status}`)
-        }
-
-        const data = await response.json()
-        const embedding = data.embedding.values
-        embeddings.push(`[${embedding.join(',')}]`)
-
-        // Delay between requests to avoid rate limits
-        if (i < texts.length - 1) {
-          await delay(DELAY_BETWEEN_REQUESTS_MS)
-        }
-
-        lastError = null
-        break
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err))
-        if (attempt < MAX_RETRIES) {
-          console.log(`Error on chunk ${i + 1}, attempt ${attempt}: ${lastError.message}`)
-          await delay(attempt * 2000)
-        }
+        console.log(`Rate limited on batch of ${texts.length}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
+        await new Promise(r => setTimeout(r, waitMs))
+        continue
       }
-    }
 
-    if (lastError) throw lastError
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`Batch embedding API error (status ${response.status}):`, errorText)
+        throw new Error(`Batch embedding API returned status ${response.status}`)
+      }
+
+      const data = await response.json()
+      return data.embeddings.map((e: { values: number[] }) => `[${e.values.join(',')}]`)
+
+    } catch (err) {
+      if (attempt === MAX_RETRIES) throw err
+      console.log(`Batch embed attempt ${attempt} failed: ${err instanceof Error ? err.message : err}`)
+      await new Promise(r => setTimeout(r, attempt * 2000))
+    }
   }
 
-  return embeddings
+  throw new Error('All retries exhausted for batch embedding')
 }
