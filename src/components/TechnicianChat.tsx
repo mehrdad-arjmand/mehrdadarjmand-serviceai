@@ -781,7 +781,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                           )}
                         </div> :
 
-                  <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
+                  <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block [word-break:break-word] overflow-hidden">
                           {msg.content}
                         </div>
                   }
