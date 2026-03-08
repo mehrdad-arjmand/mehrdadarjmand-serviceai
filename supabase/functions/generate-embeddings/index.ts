@@ -96,15 +96,22 @@ Deno.serve(async (req) => {
     if (!isValidUUID(documentId)) throw new Error('documentId must be a valid UUID')
 
     const isFullMode = mode === 'full'
-    const apiKey = Deno.env.get('GOOGLE_API_KEY')
-    if (!apiKey) throw new Error('GOOGLE_API_KEY is not configured')
 
-    // Detect API tier to set concurrency
-    const tier = await detectApiTier(apiKey)
-    const CONCURRENT_API_CALLS = tier === 'paid' ? 10 : 1
-    const DELAY_BETWEEN_BATCHES_MS = tier === 'paid' ? 0 : 12000 // free: ~5 RPM = 1 every 12s
+    // Get user's API tier from their role
+    const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
+    const apiTier = userApiTier || 'free'
 
-    console.log(`API tier: ${tier} | concurrency: ${CONCURRENT_API_CALLS} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
+    // Pick API key based on tier
+    const apiKey = apiTier === 'paid'
+      ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
+      : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
+    if (!apiKey) throw new Error('No Google API key configured')
+
+    // Set concurrency based on tier (no more probe detection)
+    const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
+    const DELAY_BETWEEN_BATCHES_MS = apiTier === 'paid' ? 0 : 12000
+
+    console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
 
     let totalProcessed = 0
