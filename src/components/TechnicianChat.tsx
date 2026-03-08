@@ -201,6 +201,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     return () => {
       if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
       if (ttsKeepAliveRef.current) {clearInterval(ttsKeepAliveRef.current);ttsKeepAliveRef.current = null;}
+      if (listeningWatchdogRef.current) {clearTimeout(listeningWatchdogRef.current);listeningWatchdogRef.current = null;}
       stopListening();
       stopSpeaking();
     };
