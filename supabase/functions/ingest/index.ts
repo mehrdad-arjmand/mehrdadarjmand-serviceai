@@ -436,35 +436,25 @@ function applyRegexNormalization(pageTexts: string[]): string {
   return text
 }
 
-async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): Promise<string> {
+async function cleanGarbledText(pageTexts: string[], lovableKey: string): Promise<string> {
   const BATCH_SIZE = 15
   const batches: string[][] = []
   for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
     batches.push(pageTexts.slice(i, i + BATCH_SIZE))
   }
-  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches of up to ${BATCH_SIZE}`)
+  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Lovable AI`)
 
-  // Process batches SEQUENTIALLY through the rate-limited helper (semaphore handles concurrency)
   const cleanedParts: string[] = []
   for (let b = 0; b < batches.length; b++) {
     const batch = batches[b]
     const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
-    console.log(`Gemini batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
+    console.log(`AI batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
 
     try {
-      const result = await callGeminiWithRetry(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          contents: [{
-            parts: [{
-              text: `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`
-            }],
-          }],
-          generationConfig: { maxOutputTokens: 65536 },
-        }
+      const cleaned = await callLovableAI(
+        `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`,
+        lovableKey
       )
-
-      const cleaned = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
       if (cleaned) {
         console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
         cleanedParts.push(cleaned)
@@ -479,7 +469,7 @@ async function cleanGarbledTextWithGemini(pageTexts: string[], apiKey: string): 
   }
 
   const fullCleaned = cleanedParts.join('\n\n')
-  console.log(`Gemini total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
+  console.log(`AI total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
   return fullCleaned
 }
 
