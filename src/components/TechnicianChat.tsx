@@ -762,7 +762,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                       </p>
                       {msg.role === "assistant" ?
                   <div className="text-sm text-foreground">
-                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7">
+                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7 overflow-hidden [word-break:break-word]">
                             <MarkdownWithCitations
                               content={msg.content}
                               sources={msg.sources}
