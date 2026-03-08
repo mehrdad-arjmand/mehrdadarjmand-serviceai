@@ -109,8 +109,10 @@ Deno.serve(async (req) => {
 
     // Free tier: sequential batches with retry-on-429 (no artificial delay — the retry logic handles rate limits)
     // Paid tier: parallel batches for max throughput
-    const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
-    const DELAY_BETWEEN_BATCHES_MS = apiTier === 'paid' ? 0 : 1000 // free: small 1s gap, retry handles 429
+    // Free tier: concurrency 2 with retry-on-429 handling rate limits naturally
+    // Paid tier: concurrency 10 for max throughput
+    const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 2
+    const DELAY_BETWEEN_BATCHES_MS = 0 // retry logic in batchEmbedTexts handles 429s
 
     console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
@@ -167,11 +169,6 @@ Deno.serve(async (req) => {
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
 
-        // On free tier, wait between batch groups to stay under RPM
-        if (DELAY_BETWEEN_BATCHES_MS > 0 && i + CONCURRENT_API_CALLS < apiBatches.length) {
-          console.log(`Free tier: waiting ${DELAY_BETWEEN_BATCHES_MS}ms before next batch...`)
-          await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS))
-        }
       }
 
       // Update document progress
