@@ -14,7 +14,6 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
-    // Validate JWT authentication
     const authHeader = req.headers.get('Authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return new Response(
@@ -23,7 +22,6 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Verify the user's JWT token via direct API call
     const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
       headers: { Authorization: authHeader, apikey: supabaseAnonKey },
     })
@@ -49,12 +47,33 @@ Deno.serve(async (req) => {
       throw new Error('No file provided')
     }
 
-    console.log(`Extracting text from PDF: ${file.name}`)
+    console.log(`Extracting text from PDF: ${file.name}, size: ${file.size} bytes`)
 
     const arrayBuffer = await file.arrayBuffer()
-    const { text, pageCount } = await extractTextFromPDF(arrayBuffer)
+    const uint8Array = new Uint8Array(arrayBuffer)
 
-    console.log(`Extracted ${text.length} characters from approximately ${pageCount} pages`)
+    // Use pdfjs-serverless for proper PDF parsing
+    const { getDocumentProxy } = await import('https://esm.sh/unpdf@0.12.0/pdfjs')
+    const pdf = await getDocumentProxy(uint8Array)
+    const pageCount = pdf.numPages
+
+    // Extract text from all pages in parallel
+    const pagePromises: Promise<string>[] = []
+    for (let i = 1; i <= pageCount; i++) {
+      pagePromises.push(
+        pdf.getPage(i).then(async (page: any) => {
+          const textContent = await page.getTextContent()
+          return textContent.items
+            .map((item: any) => item.str)
+            .join(' ')
+        })
+      )
+    }
+
+    const pageTexts = await Promise.all(pagePromises)
+    const text = pageTexts.join('\n\n')
+
+    console.log(`Extracted ${text.length} characters from ${pageCount} pages`)
 
     return new Response(
       JSON.stringify({ 
@@ -80,22 +99,3 @@ Deno.serve(async (req) => {
     )
   }
 })
-
-async function extractTextFromPDF(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
-  const uint8Array = new Uint8Array(arrayBuffer)
-  const decoder = new TextDecoder('utf-8', { fatal: false })
-  let rawText = decoder.decode(uint8Array)
-  
-  // Estimate page count by looking for PDF page markers
-  // Common patterns: /Type /Page, /Count N (for page tree)
-  const pageMatches = rawText.match(/\/Type\s*\/Page[^s]/g)
-  const pageCount = pageMatches ? pageMatches.length : 1
-  
-  // Clean up PDF formatting
-  const text = rawText
-    .replace(/[\x00-\x1F\x7F-\x9F]/g, ' ') // Remove control characters
-    .replace(/\s+/g, ' ') // Normalize whitespace
-    .trim()
-  
-  return { text, pageCount }
-}
