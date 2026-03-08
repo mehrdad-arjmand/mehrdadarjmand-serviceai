@@ -976,33 +976,33 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
               <button
                 onClick={() => setMetadataOpen(!metadataOpen)}
                 className={cn(
-                  "inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border transition-colors",
+                  "inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full text-sm font-medium border transition-colors whitespace-nowrap sm:px-5 sm:gap-2",
                   metadataOpen ? "bg-muted border-border text-foreground" : "bg-background border-border text-foreground hover:bg-muted/50"
                 )}
               >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <SlidersHorizontal className="h-3.5 w-3.5 flex-shrink-0" />
                 Metadata
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50 whitespace-nowrap sm:px-5 sm:gap-2"
               >
-                <Upload className="h-4 w-4" />
+                <Upload className="h-4 w-4 flex-shrink-0" />
                 {isUploading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading...</> : "Upload files"}
               </button>
               <button
                 onClick={() => setCopiedTextOpen(true)}
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors whitespace-nowrap sm:px-5 sm:gap-2"
               >
-                <ClipboardPaste className="h-4 w-4" />
+                <ClipboardPaste className="h-4 w-4 flex-shrink-0" />
                 Copied text
               </button>
               <button
                 onClick={() => setDictateOpen(true)}
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full text-sm font-medium border border-border bg-background text-foreground hover:bg-muted/50 transition-colors whitespace-nowrap sm:px-5 sm:gap-2"
               >
-                <Mic className="h-4 w-4" />
+                <Mic className="h-4 w-4 flex-shrink-0" />
                 Dictate
               </button>
             </div>
