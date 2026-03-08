@@ -322,8 +322,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
         const transcript = currentTranscriptRef.current.trim();
-        if (transcript && conversationActiveRef.current) {
+        if (transcript && conversationActiveRef.current && !isProcessingVoiceRef.current) {
+          // Prevent duplicate submission of same transcript
+          if (transcript === lastSubmittedTranscriptRef.current) {
+            console.warn('[Voice] Duplicate transcript detected, skipping');
+            return;
+          }
           if (recognitionRef.current) {try {recognitionRef.current.stop();} catch (e) {}recognitionRef.current = null;}
+          isProcessingVoiceRef.current = true;
+          lastSubmittedTranscriptRef.current = transcript;
           setConversationState("processing");
           setQuestion("");
           processConversationMessage(transcript);
