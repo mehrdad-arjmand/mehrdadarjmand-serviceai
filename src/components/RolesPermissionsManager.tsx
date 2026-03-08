@@ -311,6 +311,23 @@ export const RolesPermissionsManager = ({
               "Assistant Permissions", "assistant_read", "assistant_write", "assistant_delete",
               "Read - Access the assistant", "Write - Send messages to assistant", "Delete - Delete conversations"
             )}
+
+            <div className="space-y-3">
+              <Label className="text-base font-medium">API Tier</Label>
+              <p className="text-sm text-muted-foreground">Controls processing speed for document ingestion. Paid tier uses parallel processing; Free tier uses sequential.</p>
+              <Select
+                value={(editForm as any).api_tier || 'free'}
+                onValueChange={(value) => setEditForm(prev => ({ ...prev, api_tier: value }))}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="free">Free API</SelectItem>
+                  <SelectItem value="paid">Paid API</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <DialogFooter>
