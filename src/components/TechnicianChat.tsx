@@ -574,7 +574,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
       {/* ── SIDEBAR ─────────────────────────────────────────────────── */}
       {sidebarOpen &&
-      <div
+      <>
+        {/* Mobile overlay backdrop */}
+        {isMobileDevice && (
+          <div
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.4)',
+              zIndex: 29,
+            }}
+          />
+        )}
+        <div
         style={{
           width: '260px',
           flexShrink: 0,
@@ -583,7 +596,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           display: 'flex',
           flexDirection: 'column',
           backgroundColor: 'hsl(var(--sidebar-background))',
-          borderRight: '1px solid hsl(var(--sidebar-border))'
+          borderRight: '1px solid hsl(var(--sidebar-border))',
+          ...(isMobileDevice ? {
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            zIndex: 30,
+          } : {}),
         }}>
 
           {/* Project selector dropdown */}
@@ -628,6 +647,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           canDelete={canDelete} />
 
         </div>
+      </>
       }
 
       {/* Sidebar toggle — always floats outside the sidebar */}
@@ -637,7 +657,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           top: '14px',
           left: sidebarOpen ? '268px' : '14px',
           transition: 'left 0.2s',
-          zIndex: 20
+          zIndex: 31
         }}>
 
         <Button
