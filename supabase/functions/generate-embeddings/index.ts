@@ -169,11 +169,6 @@ Deno.serve(async (req) => {
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
 
-        // On free tier, wait between batch groups to stay under RPM
-        if (DELAY_BETWEEN_BATCHES_MS > 0 && i + CONCURRENT_API_CALLS < apiBatches.length) {
-          console.log(`Free tier: waiting ${DELAY_BETWEEN_BATCHES_MS}ms before next batch...`)
-          await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS))
-        }
       }
 
       // Update document progress
