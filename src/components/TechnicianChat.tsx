@@ -657,7 +657,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           top: '14px',
           left: sidebarOpen ? '268px' : '14px',
           transition: 'left 0.2s',
-          zIndex: 20
+          zIndex: 31
         }}>
 
         <Button
