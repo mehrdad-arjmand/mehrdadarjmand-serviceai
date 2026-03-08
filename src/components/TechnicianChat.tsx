@@ -753,10 +753,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 Start a conversation by asking a question
               </div> :
 
-            <div className="max-w-3xl mx-auto w-full pl-10 pr-8 py-8 space-y-8">
+            <div className="max-w-3xl mx-auto w-full pl-10 pr-8 py-8 space-y-8 break-words overflow-hidden">
                 {chatHistory.map((msg) =>
               <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                    <div className={cn(msg.role === "user" ? "max-w-[75%] text-left" : "w-full text-left")}>
+                    <div className={cn("overflow-hidden", msg.role === "user" ? "max-w-[75%] text-left" : "w-full text-left")}>
                       <p className="text-xs text-muted-foreground mb-1.5 font-medium">
                         {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
                       </p>
