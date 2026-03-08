@@ -220,11 +220,7 @@ Deno.serve(async (req) => {
 
     // Schedule ALL heavy processing in the background
     const backgroundWork = (async () => {
-      for (let i = 0; i < fileDataList.length; i++) {
-        const fileData = fileDataList[i]
-        const doc = documents[i]
-        if (!doc) continue
-
+      const processFile = async (fileData: typeof fileDataList[0], doc: typeof documents[0]) => {
         try {
           let extractedText = ''
           let pageCount = 0
@@ -304,11 +300,10 @@ Deno.serve(async (req) => {
           )
           if (!embRes.ok) {
             console.error(`Embeddings trigger failed for ${doc.id}: ${embRes.status}`)
-            await embRes.text() // consume body
           } else {
             console.log(`Embeddings triggered for ${doc.id}`)
-            await embRes.text() // consume body
           }
+          await embRes.text() // consume body
 
         } catch (err) {
           console.error(`Error processing ${fileData.name}:`, err)
@@ -320,6 +315,15 @@ Deno.serve(async (req) => {
             .eq('id', doc.id)
         }
       }
+
+      // Process ALL documents in parallel
+      await Promise.all(
+        fileDataList.map((fileData, i) => {
+          const doc = documents[i]
+          if (!doc) return Promise.resolve()
+          return processFile(fileData, doc)
+        })
+      )
     })()
 
     // Use EdgeRuntime.waitUntil to keep the worker alive for background processing
