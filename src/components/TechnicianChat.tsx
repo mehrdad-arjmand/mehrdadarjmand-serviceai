@@ -121,6 +121,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const abortCountRef = useRef<number>(0);
   const listeningWatchdogRef = useRef<NodeJS.Timeout | null>(null);
   const recognitionStartedRef = useRef<boolean>(false);
+  const isProcessingVoiceRef = useRef<boolean>(false);
+  const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
 
   useEffect(() => {
