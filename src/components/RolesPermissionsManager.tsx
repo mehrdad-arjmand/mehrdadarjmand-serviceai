@@ -63,6 +63,7 @@ export const RolesPermissionsManager = ({
       landing_read: role.landing_read,
       landing_write: role.landing_write,
       landing_delete: role.landing_delete,
+      api_tier: role.api_tier || 'free',
     });
   };
 
