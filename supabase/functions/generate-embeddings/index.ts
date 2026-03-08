@@ -223,7 +223,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        tier,
+        tier: apiTier,
         processed: totalProcessed,
         embedded: finalEmbedded || 0,
         total: finalDoc?.total_chunks || 0,
