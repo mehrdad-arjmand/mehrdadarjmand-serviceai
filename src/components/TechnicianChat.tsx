@@ -187,7 +187,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   useEffect(() => {
     scrollToBottom();
-  }, [chatHistory, scrollToBottom]);
+  }, [chatHistory, isQuerying, scrollToBottom]);
 
   const handleChatScroll = useCallback(() => {
     const el = chatContainerRef.current;
@@ -753,16 +753,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 Start a conversation by asking a question
               </div> :
 
-            <div className="max-w-3xl mx-auto w-full pl-10 pr-8 py-8 space-y-8">
+            <div className="max-w-3xl mx-auto w-full pl-10 pr-8 py-8 space-y-8 break-words overflow-hidden">
                 {chatHistory.map((msg) =>
               <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                    <div className={cn(msg.role === "user" ? "max-w-[75%] text-left" : "w-full text-left")}>
+                    <div className={cn("overflow-hidden", msg.role === "user" ? "max-w-[75%] text-left" : "w-full text-left")}>
                       <p className="text-xs text-muted-foreground mb-1.5 font-medium">
                         {msg.role === "user" ? getUserLabel(msg) : "Service AI"}
                       </p>
                       {msg.role === "assistant" ?
                   <div className="text-sm text-foreground">
-                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7">
+                          <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight prose-strong:text-foreground prose-li:text-foreground prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-li:my-1 leading-7 overflow-hidden [word-break:break-word]">
                             <MarkdownWithCitations
                               content={msg.content}
                               sources={msg.sources}
@@ -781,7 +781,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                           )}
                         </div> :
 
-                  <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block">
+                  <div className="bg-muted/70 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-foreground leading-7 inline-block [word-break:break-word] overflow-hidden">
                           {msg.content}
                         </div>
                   }
