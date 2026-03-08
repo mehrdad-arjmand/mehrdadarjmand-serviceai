@@ -326,33 +326,39 @@ Deno.serve(async (req) => {
 
       // Phase 2: Trigger embeddings (parallel for paid, sequential for free)
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents (${apiTier} tier)...`)
-      await Promise.allSettled(
-        documents.map(async (doc) => {
-          try {
-            console.log(`Triggering embeddings for document ${doc.id} (${doc.fileName})...`)
-            const embRes = await fetch(
-              `${supabaseUrl}/functions/v1/generate-embeddings`,
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': authHeader!,
-                  'apikey': supabaseAnonKey,
-                },
-                body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
-              }
-            )
-            if (!embRes.ok) {
-              console.error(`Embeddings failed for ${doc.id}: ${embRes.status}`)
-            } else {
-              console.log(`Embeddings complete for ${doc.id}`)
+      const triggerEmbeddings = async (doc: typeof documents[0]) => {
+        try {
+          console.log(`Triggering embeddings for document ${doc.id} (${doc.fileName})...`)
+          const embRes = await fetch(
+            `${supabaseUrl}/functions/v1/generate-embeddings`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': authHeader!,
+                'apikey': supabaseAnonKey,
+              },
+              body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
             }
-            await embRes.text()
-          } catch (err) {
-            console.error(`Embedding error for ${doc.id}:`, err)
+          )
+          if (!embRes.ok) {
+            console.error(`Embeddings failed for ${doc.id}: ${embRes.status}`)
+          } else {
+            console.log(`Embeddings complete for ${doc.id}`)
           }
-        })
-      )
+          await embRes.text()
+        } catch (err) {
+          console.error(`Embedding error for ${doc.id}:`, err)
+        }
+      }
+
+      if (apiTier === 'paid') {
+        await Promise.allSettled(documents.map(triggerEmbeddings))
+      } else {
+        for (const doc of documents) {
+          await triggerEmbeddings(doc)
+        }
+      }
     })()
 
     ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
