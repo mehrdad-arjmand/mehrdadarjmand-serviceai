@@ -306,25 +306,16 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Phase 1: Extract + chunk files (parallel for paid, sequential for free)
-      if (apiTier === 'paid') {
-        await Promise.allSettled(
-          fileDataList.map((fileData, i) => {
-            const doc = documents[i]
-            if (!doc) return Promise.resolve()
-            return processFile(fileData, doc)
-          })
-        )
-      } else {
-        // Sequential for free tier to avoid rate limits on text cleaning
-        for (let i = 0; i < fileDataList.length; i++) {
+      // Phase 1: Extract + chunk all files in parallel (cleaning has its own retry logic)
+      await Promise.allSettled(
+        fileDataList.map((fileData, i) => {
           const doc = documents[i]
-          if (!doc) continue
-          await processFile(fileDataList[i], doc)
-        }
-      }
+          if (!doc) return Promise.resolve()
+          return processFile(fileData, doc)
+        })
+      )
 
-      // Phase 2: Trigger embeddings (parallel for paid, sequential for free)
+      // Phase 2: Trigger embeddings in parallel (generate-embeddings self-throttles with retry-on-429)
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents (${apiTier} tier)...`)
       const triggerEmbeddings = async (doc: typeof documents[0]) => {
         try {
@@ -352,13 +343,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (apiTier === 'paid') {
-        await Promise.allSettled(documents.map(triggerEmbeddings))
-      } else {
-        for (const doc of documents) {
-          await triggerEmbeddings(doc)
-        }
-      }
+      await Promise.allSettled(documents.map(triggerEmbeddings))
     })()
 
     ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
