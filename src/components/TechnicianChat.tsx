@@ -647,6 +647,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           canDelete={canDelete} />
 
         </div>
+      </>
       }
 
       {/* Sidebar toggle — always floats outside the sidebar */}
