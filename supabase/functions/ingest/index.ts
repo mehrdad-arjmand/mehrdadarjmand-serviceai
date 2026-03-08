@@ -329,33 +329,36 @@ Deno.serve(async (req) => {
         await processFile(fileDataList[i], doc)
       }
 
-      // Phase 2: Trigger embeddings SEQUENTIALLY for each document to avoid rate-limit collisions
-      console.log(`All chunking complete. Starting sequential embedding pass for ${documents.length} documents...`)
-      for (const doc of documents) {
-        try {
-          console.log(`Triggering embeddings for document ${doc.id} (${doc.fileName})...`)
-          const embRes = await fetch(
-            `${supabaseUrl}/functions/v1/generate-embeddings`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': authHeader!,
-                'apikey': supabaseAnonKey,
-              },
-              body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
+      // Phase 2: Trigger embeddings for ALL documents in parallel
+      // Each generate-embeddings call auto-detects API tier and adjusts concurrency
+      console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents in parallel...`)
+      await Promise.allSettled(
+        documents.map(async (doc) => {
+          try {
+            console.log(`Triggering embeddings for document ${doc.id} (${doc.fileName})...`)
+            const embRes = await fetch(
+              `${supabaseUrl}/functions/v1/generate-embeddings`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': authHeader!,
+                  'apikey': supabaseAnonKey,
+                },
+                body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
+              }
+            )
+            if (!embRes.ok) {
+              console.error(`Embeddings failed for ${doc.id}: ${embRes.status}`)
+            } else {
+              console.log(`Embeddings complete for ${doc.id}`)
             }
-          )
-          if (!embRes.ok) {
-            console.error(`Embeddings failed for ${doc.id}: ${embRes.status}`)
-          } else {
-            console.log(`Embeddings complete for ${doc.id}`)
+            await embRes.text()
+          } catch (err) {
+            console.error(`Embedding error for ${doc.id}:`, err)
           }
-          await embRes.text() // consume body
-        } catch (err) {
-          console.error(`Embedding error for ${doc.id}:`, err)
-        }
-      }
+        })
+      )
     })()
 
     // Use EdgeRuntime.waitUntil to keep the worker alive for background processing
