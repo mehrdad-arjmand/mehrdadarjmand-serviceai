@@ -454,6 +454,7 @@ export type Database = {
       }
       role_permissions: {
         Row: {
+          api_tier: string
           assistant_delete: boolean
           assistant_read: boolean
           assistant_write: boolean
@@ -471,6 +472,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          api_tier?: string
           assistant_delete?: boolean
           assistant_read?: boolean
           assistant_write?: boolean
@@ -488,6 +490,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          api_tier?: string
           assistant_delete?: boolean
           assistant_read?: boolean
           assistant_write?: boolean
