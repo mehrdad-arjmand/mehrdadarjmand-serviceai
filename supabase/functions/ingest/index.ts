@@ -348,14 +348,12 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Phase 1: Extract text + chunk ALL documents in parallel (no API rate limits here)
-      await Promise.all(
-        fileDataList.map((fileData, i) => {
-          const doc = documents[i]
-          if (!doc) return Promise.resolve()
-          return processFile(fileData, doc)
-        })
-      )
+      // Phase 1: Extract text + chunk documents SEQUENTIALLY (Gemini text cleaning shares the same 5 RPM limit)
+      for (let i = 0; i < fileDataList.length; i++) {
+        const doc = documents[i]
+        if (!doc) continue
+        await processFile(fileDataList[i], doc)
+      }
 
       // Phase 2: Trigger embeddings SEQUENTIALLY for each document to avoid rate-limit collisions
       console.log(`All chunking complete. Starting sequential embedding pass for ${documents.length} documents...`)
