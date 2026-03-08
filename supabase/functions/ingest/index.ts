@@ -324,8 +324,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Phase 2: Trigger embeddings for ALL documents in parallel
-      console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents in parallel...`)
+      // Phase 2: Trigger embeddings (parallel for paid, sequential for free)
+      console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents (${apiTier} tier)...`)
       await Promise.allSettled(
         documents.map(async (doc) => {
           try {
