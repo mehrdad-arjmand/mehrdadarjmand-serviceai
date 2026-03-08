@@ -38,30 +38,35 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
-// Helper to call Lovable AI gateway for text cleaning (no rate limit issues)
-async function callLovableAI(prompt: string, apiKey: string): Promise<string> {
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-lite',
-      messages: [
-        { role: 'system', content: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' },
-        { role: 'user', content: prompt },
-      ],
-    }),
-  })
+// Call Google Gemini API directly for text cleaning
+async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<string> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        systemInstruction: {
+          parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
+        },
+        generationConfig: { temperature: 0.1 }
+      }),
+    }
+  )
+
+  if (response.status === 429) {
+    const errText = await response.text()
+    throw new Error(`Rate limited: ${errText.slice(0, 200)}`)
+  }
 
   if (!response.ok) {
     const errText = await response.text()
-    throw new Error(`Lovable AI error ${response.status}: ${errText.slice(0, 200)}`)
+    throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`)
   }
 
   const result = await response.json()
-  return result.choices?.[0]?.message?.content?.trim() || ''
+  return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
 }
 
 Deno.serve(async (req) => {
@@ -74,7 +79,6 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
-    // Validate JWT authentication
     const authHeader = req.headers.get('Authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return new Response(
@@ -83,7 +87,6 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Verify the user's JWT token via direct API call
     const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
       headers: { Authorization: authHeader, apikey: supabaseAnonKey },
     })
@@ -105,20 +108,15 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Check permission
     const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
-      p_tab: 'repository',
-      p_action: 'write',
-      p_user_id: user.id
+      p_tab: 'repository', p_action: 'write', p_user_id: user.id
     })
-
     if (permError) {
       return new Response(
         JSON.stringify({ error: 'Permission check failed' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-
     if (!hasPermission) {
       return new Response(
         JSON.stringify({ error: 'Forbidden: You do not have permission to upload documents' }),
@@ -126,7 +124,6 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Validate content-type
     const contentType = req.headers.get('content-type')
     if (!contentType?.includes('multipart/form-data')) {
       throw new Error('Content-Type must be multipart/form-data')
@@ -150,28 +147,20 @@ Deno.serve(async (req) => {
     const projectIdRaw = formData.get('projectId')
     const dynamicMetadataRaw = formData.get('dynamicMetadata')
 
-    // Parse dynamic metadata
     let dynamicMetadata: Record<string, string> = {}
     if (dynamicMetadataRaw && typeof dynamicMetadataRaw === 'string') {
-      try {
-        dynamicMetadata = JSON.parse(dynamicMetadataRaw)
-      } catch {
-        console.log('Invalid dynamicMetadata format')
-      }
+      try { dynamicMetadata = JSON.parse(dynamicMetadataRaw) } catch { /* ignore */ }
     }
 
-    // Validate file count
     if (!files || files.length === 0) throw new Error('No files provided')
     if (files.length > MAX_FILES) throw new Error(`Maximum ${MAX_FILES} files allowed per upload`)
 
-    // Validate each file
     for (const file of files) {
       if (!(file instanceof File)) throw new Error('Invalid file format')
       if (file.size > MAX_FILE_SIZE) throw new Error(`File "${file.name}" exceeds maximum size of ${MAX_FILE_SIZE / 1024 / 1024}MB`)
       if (!isAllowedFileType(file.name)) throw new Error(`File "${file.name}" has unsupported type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`)
     }
 
-    // Validate metadata
     if (!isValidMetadata(docType, MAX_METADATA_LENGTH)) throw new Error('docType too long')
     if (!isValidDate(uploadDate)) throw new Error('uploadDate must be YYYY-MM-DD')
     if (!isValidMetadata(site, MAX_METADATA_LENGTH)) throw new Error('site too long')
@@ -179,7 +168,6 @@ Deno.serve(async (req) => {
     if (!isValidMetadata(equipmentMake, MAX_METADATA_LENGTH)) throw new Error('equipmentMake too long')
     if (!isValidMetadata(equipmentModel, MAX_METADATA_LENGTH)) throw new Error('equipmentModel too long')
 
-    // Sanitize metadata
     const sanitizedDocType = sanitizeMetadata(docType) || 'unknown'
     const sanitizedUploadDate = sanitizeMetadata(uploadDate)
     const sanitizedSite = sanitizeMetadata(site)
@@ -191,19 +179,14 @@ Deno.serve(async (req) => {
     if (allowedRolesRaw && typeof allowedRolesRaw === 'string') {
       try {
         const parsed = JSON.parse(allowedRolesRaw)
-        if (Array.isArray(parsed) && parsed.every(r => typeof r === 'string')) {
-          allowedRoles = parsed
-        }
-      } catch {
-        console.log('Invalid allowedRoles format, using default')
-      }
+        if (Array.isArray(parsed) && parsed.every(r => typeof r === 'string')) allowedRoles = parsed
+      } catch { /* ignore */ }
     }
 
     console.log(`Processing ${files.length} files`)
 
-    const documents = []
+    const documents: { id: string; fileName: string; status: string }[] = []
 
-    // Read file data into memory BEFORE returning (we need it for background processing)
     const fileDataList: { name: string; arrayBuffer: ArrayBuffer; fileType: string }[] = []
     for (const file of files) {
       fileDataList.push({
@@ -213,10 +196,8 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Create document records immediately (as "in_progress")
     for (const fileData of fileDataList) {
       const docId = crypto.randomUUID()
-      
       const { error: docError } = await supabase
         .from('documents')
         .insert({
@@ -240,12 +221,13 @@ Deno.serve(async (req) => {
         console.error(`Failed to create document record for ${fileData.name}:`, docError)
         continue
       }
-
       documents.push({ id: docId, fileName: fileData.name, status: 'in_progress' })
     }
 
-    // Schedule ALL heavy processing in the background
+    // Background processing
     const backgroundWork = (async () => {
+      const googleApiKey = Deno.env.get('GOOGLE_API_KEY')
+
       const processFile = async (fileData: typeof fileDataList[0], doc: typeof documents[0]) => {
         try {
           let extractedText = ''
@@ -257,7 +239,7 @@ Deno.serve(async (req) => {
               pageCount = 1
               break
             case 'pdf':
-              const pdfResult = await extractTextFromPdf(fileData.arrayBuffer)
+              const pdfResult = await extractTextFromPdf(fileData.arrayBuffer, googleApiKey)
               extractedText = pdfResult.text
               pageCount = pdfResult.pageCount
               break
@@ -271,10 +253,9 @@ Deno.serve(async (req) => {
 
           console.log(`Extracted ${extractedText.length} chars, ${pageCount} pages from ${fileData.name}`)
 
-          // Chunk the text
           const chunkSize = 800
           const overlapSize = 200
-          const chunks = []
+          const chunks: { document_id: string; chunk_index: number; text: string; equipment: string | null }[] = []
           let chunkIndex = 0
           
           for (let j = 0; j < extractedText.length; j += (chunkSize - overlapSize)) {
@@ -289,13 +270,11 @@ Deno.serve(async (req) => {
             }
           }
 
-          // Update document with page count and total chunks
           await supabase
             .from('documents')
             .update({ page_count: pageCount, total_chunks: chunks.length, ingested_chunks: 0 })
             .eq('id', doc.id)
 
-          // Insert chunks in batches
           const CHUNK_BATCH = 50
           for (let j = 0; j < chunks.length; j += CHUNK_BATCH) {
             const batch = chunks.slice(j, j + CHUNK_BATCH)
@@ -303,18 +282,15 @@ Deno.serve(async (req) => {
             if (chunksError) throw chunksError
           }
 
-          // Update status
           await supabase
             .from('documents')
             .update({ ingested_chunks: chunks.length, ingestion_status: 'processing_embeddings' })
             .eq('id', doc.id)
 
           console.log(`Chunks saved for ${fileData.name}, triggering embeddings...`)
-
         } catch (err) {
           console.error(`Error processing ${fileData.name}:`, err)
           const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-          
           await supabase
             .from('documents')
             .update({ ingestion_status: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
@@ -322,15 +298,16 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Phase 1: Extract text + chunk documents SEQUENTIALLY (Gemini text cleaning shares the same 5 RPM limit)
-      for (let i = 0; i < fileDataList.length; i++) {
-        const doc = documents[i]
-        if (!doc) continue
-        await processFile(fileDataList[i], doc)
-      }
+      // Phase 1: Extract + chunk all files in parallel
+      await Promise.allSettled(
+        fileDataList.map((fileData, i) => {
+          const doc = documents[i]
+          if (!doc) return Promise.resolve()
+          return processFile(fileData, doc)
+        })
+      )
 
       // Phase 2: Trigger embeddings for ALL documents in parallel
-      // Each generate-embeddings call auto-detects API tier and adjusts concurrency
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents in parallel...`)
       await Promise.allSettled(
         documents.map(async (doc) => {
@@ -361,10 +338,8 @@ Deno.serve(async (req) => {
       )
     })()
 
-    // Use EdgeRuntime.waitUntil to keep the worker alive for background processing
     ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
 
-    // Return IMMEDIATELY — client will see status updates via realtime subscription
     return new Response(
       JSON.stringify({ success: true, documents }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -378,7 +353,7 @@ Deno.serve(async (req) => {
   }
 })
 
-async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
+async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: string | null): Promise<{ text: string; pageCount: number }> {
   const { getDocument } = await import('https://esm.sh/pdfjs-serverless@0.2.2')
   const uint8Array = new Uint8Array(arrayBuffer)
   
@@ -410,22 +385,21 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<{ text: str
     return { text: rawText, pageCount }
   }
 
-  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending to Lovable AI for cleaning.`)
+  console.log(`PDF text garbled (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%). Sending to Google API for cleaning.`)
 
-  const lovableKey = Deno.env.get('LOVABLE_API_KEY')
-  if (!lovableKey) {
-    console.warn('LOVABLE_API_KEY not set — regex normalization only')
+  if (!googleApiKey) {
+    console.warn('GOOGLE_API_KEY not set — regex normalization only')
     return { text: applyRegexNormalization(pageTexts), pageCount }
   }
 
   try {
-    const cleanedText = await cleanGarbledText(pageTexts, lovableKey)
+    const cleanedText = await cleanGarbledText(pageTexts, googleApiKey)
     if (cleanedText && cleanedText.length > 50) {
-      console.log(`AI cleaned text: ${cleanedText.length} characters`)
+      console.log(`Google AI cleaned text: ${cleanedText.length} characters`)
       return { text: cleanedText, pageCount }
     }
   } catch (err) {
-    console.error('AI text cleanup failed:', err)
+    console.error('Google AI text cleanup failed:', err)
   }
 
   return { text: applyRegexNormalization(pageTexts), pageCount }
@@ -439,40 +413,40 @@ function applyRegexNormalization(pageTexts: string[]): string {
   return text
 }
 
-async function cleanGarbledText(pageTexts: string[], lovableKey: string): Promise<string> {
+async function cleanGarbledText(pageTexts: string[], googleApiKey: string): Promise<string> {
   const BATCH_SIZE = 15
   const batches: string[][] = []
   for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
     batches.push(pageTexts.slice(i, i + BATCH_SIZE))
   }
-  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Lovable AI`)
+  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Google API`)
 
-  const cleanedParts: string[] = []
-  for (let b = 0; b < batches.length; b++) {
-    const batch = batches[b]
-    const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
-    console.log(`AI batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
+  // Clean all batches in parallel (paid tier handles concurrency)
+  const cleanedParts = await Promise.all(
+    batches.map(async (batch, b) => {
+      const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
+      console.log(`Google AI batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
 
-    try {
-      const cleaned = await callLovableAI(
-        `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`,
-        lovableKey
-      )
-      if (cleaned) {
-        console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
-        cleanedParts.push(cleaned)
-      } else {
+      try {
+        const cleaned = await callGeminiForCleaning(
+          `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`,
+          googleApiKey
+        )
+        if (cleaned) {
+          console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
+          return cleaned
+        }
         console.warn(`Batch ${b + 1} returned empty, using regex fallback`)
-        cleanedParts.push(applyRegexNormalization(batch))
+        return applyRegexNormalization(batch)
+      } catch (err) {
+        console.error(`Batch ${b + 1} error:`, err)
+        return applyRegexNormalization(batch)
       }
-    } catch (err) {
-      console.error(`Batch ${b + 1} error:`, err)
-      cleanedParts.push(applyRegexNormalization(batch))
-    }
-  }
+    })
+  )
 
   const fullCleaned = cleanedParts.join('\n\n')
-  console.log(`AI total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
+  console.log(`Google AI total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
   return fullCleaned
 }
 
