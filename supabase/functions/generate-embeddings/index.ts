@@ -107,9 +107,10 @@ Deno.serve(async (req) => {
       : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
     if (!apiKey) throw new Error('No Google API key configured')
 
-    // Set concurrency based on tier (no more probe detection)
+    // Free tier: sequential batches with retry-on-429 (no artificial delay — the retry logic handles rate limits)
+    // Paid tier: parallel batches for max throughput
     const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
-    const DELAY_BETWEEN_BATCHES_MS = apiTier === 'paid' ? 0 : 12000
+    const DELAY_BETWEEN_BATCHES_MS = apiTier === 'paid' ? 0 : 1000 // free: small 1s gap, retry handles 429
 
     console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
