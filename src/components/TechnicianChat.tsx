@@ -119,6 +119,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const ttsKeepAliveRef = useRef<NodeJS.Timeout | null>(null);
   const currentTranscriptRef = useRef<string>("");
   const abortCountRef = useRef<number>(0);
+  const listeningWatchdogRef = useRef<NodeJS.Timeout | null>(null);
+  const recognitionStartedRef = useRef<boolean>(false);
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
 
   useEffect(() => {
@@ -199,6 +201,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     return () => {
       if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
       if (ttsKeepAliveRef.current) {clearInterval(ttsKeepAliveRef.current);ttsKeepAliveRef.current = null;}
+      if (listeningWatchdogRef.current) {clearTimeout(listeningWatchdogRef.current);listeningWatchdogRef.current = null;}
       stopListening();
       stopSpeaking();
     };
@@ -272,10 +275,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const startConversationListening = useCallback(() => {
     if (!conversationActiveRef.current) return;
     clearSilenceTimer();
+    // Clear any previous watchdog
+    if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
+    recognitionStartedRef.current = false;
+
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({ title: "Speech recognition not supported", description: "Your browser doesn't support speech recognition.", variant: "destructive" });
       return;
     }
+    // Clean up any lingering recognition instance
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (e) {}
+      recognitionRef.current = null;
+    }
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
@@ -284,7 +297,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.lang = 'en-US';
     currentTranscriptRef.current = '';
     let finalTranscript = '';
-    recognition.onstart = () => {setConversationState("listening"); abortCountRef.current = 0;};
+    recognition.onstart = () => {
+      recognitionStartedRef.current = true;
+      setConversationState("listening");
+      abortCountRef.current = 0;
+      // Clear watchdog since we successfully started
+      if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
+    };
     recognition.onresult = (event: any) => {
       clearSilenceTimer();
       let interimText = '';
@@ -341,7 +360,23 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 200);
       }
     };
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (e) {
+      console.error('[Voice] Failed to start recognition:', e);
+      recognitionRef.current = null;
+    }
+    // Watchdog: if onstart doesn't fire within 3s, force restart
+    listeningWatchdogRef.current = setTimeout(() => {
+      if (conversationActiveRef.current && !recognitionStartedRef.current) {
+        console.warn('[Voice] Watchdog: recognition did not start, restarting...');
+        if (recognitionRef.current) {
+          try { recognitionRef.current.abort(); } catch (e) {}
+          recognitionRef.current = null;
+        }
+        setTimeout(() => { if (conversationActiveRef.current) startConversationListening(); }, 500);
+      }
+    }, 3000);
   }, [toast, clearSilenceTimer]);
 
   const processConversationMessage = useCallback(async (text: string) => {
@@ -493,23 +528,17 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       recognitionRef.current = null;
     }
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
+    recognitionStartedRef.current = false;
     if (conversationActiveRef.current) {
       setConversationState("listening");
       setQuestion("");
-      // Retry startConversationListening with increasing delays to handle browser mic lock
-      const tryStart = (attempt: number) => {
-        if (!conversationActiveRef.current) return;
-        if (attempt > 5) {
-          setConversationState("idle");
-          return;
-        }
-        try {
+      // Use longer initial delay to let browser fully release mic after TTS cancel
+      setTimeout(() => {
+        if (conversationActiveRef.current) {
           startConversationListening();
-        } catch (e) {
-          setTimeout(() => tryStart(attempt + 1), 300 * attempt);
         }
-      };
-      setTimeout(() => tryStart(1), 600);
+      }, 800);
     }
   }, [startConversationListening]);
 
