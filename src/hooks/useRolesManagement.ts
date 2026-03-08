@@ -15,6 +15,7 @@ export interface RoleWithPermissions {
   landing_read: boolean;
   landing_write: boolean;
   landing_delete: boolean;
+  api_tier: string;
   user_count: number;
 }
 
