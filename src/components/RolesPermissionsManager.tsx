@@ -19,6 +19,9 @@ import { Loader2, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-rea
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import type { RoleWithPermissions } from "@/hooks/useRolesManagement";
 import type { AppRole } from "@/hooks/usePermissions";
 
