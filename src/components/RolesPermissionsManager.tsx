@@ -228,6 +228,14 @@ export const RolesPermissionsManager = ({
                     </div>
                   </TableCell>
                   <TableCell className="text-center">
+                    <Badge
+                      variant={role.api_tier === 'paid' ? "default" : "secondary"}
+                      className={role.api_tier === 'paid' ? "bg-green-500/10 text-green-600 hover:bg-green-500/20" : "bg-muted text-muted-foreground"}
+                    >
+                      {role.api_tier === 'paid' ? 'Paid' : 'Free'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-center">
                     <div className="flex items-center justify-center gap-1 text-muted-foreground">
                       <Users className="h-3.5 w-3.5" />
                       <span className="text-sm">{role.user_count}</span>
