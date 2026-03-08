@@ -80,6 +80,7 @@ export const RolesPermissionsManager = ({
       landing_read: editForm.landing_read,
       landing_write: editForm.landing_write,
       landing_delete: editForm.landing_delete,
+      api_tier: (editForm as any).api_tier,
     };
     if (editForm.newRoleName && editForm.newRoleName !== editingRole.role) {
       updates.newRoleName = editForm.newRoleName;
