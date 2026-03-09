@@ -6,7 +6,7 @@ const corsHeaders = {
 }
 
 const BATCH_EMBED_SIZE_PAID = 100   // Google batchEmbedContents max
-const BATCH_EMBED_SIZE_FREE = 10    // Small batches to stay well under 30K TPM on free tier
+const BATCH_EMBED_SIZE_FREE = 25    // Small batches to stay under 30K TPM
 const CHUNKS_PER_FETCH = 500
 const MAX_CHUNK_TEXT_LENGTH = 10000
 
