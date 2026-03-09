@@ -132,8 +132,8 @@ Deno.serve(async (req) => {
 
       // Split into batches for batchEmbedContents API (size depends on tier)
       const apiBatches: typeof chunks[] = []
-      for (let i = 0; i < chunks.length; i += effectiveBatchSize) {
-        apiBatches.push(chunks.slice(i, i + effectiveBatchSize))
+      for (let i = 0; i < chunks.length; i += BATCH_EMBED_SIZE) {
+        apiBatches.push(chunks.slice(i, i + BATCH_EMBED_SIZE))
       }
 
       // Process with detected concurrency
@@ -166,11 +166,6 @@ Deno.serve(async (req) => {
         )
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
-
-        // Pace free tier to avoid 429s
-        if (DELAY_BETWEEN_BATCHES_MS > 0 && i + CONCURRENT_API_CALLS < apiBatches.length) {
-          await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS))
-        }
       }
 
       // Update document progress
