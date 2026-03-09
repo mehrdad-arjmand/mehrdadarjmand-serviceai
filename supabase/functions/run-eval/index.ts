@@ -364,7 +364,7 @@ Deno.serve(async (req) => {
         })
       }
 
-      // Compute aggregate metrics
+      // Compute aggregate metrics (excluding zero-precision out-of-scope queries)
       const total = perQueryResults.length
       if (total === 0) {
         return new Response(JSON.stringify({ success: true, message: 'No queries to evaluate', evaluated: 0 }), {
@@ -372,8 +372,11 @@ Deno.serve(async (req) => {
         })
       }
 
-      const avgPrecision = perQueryResults.reduce((s, r) => s + r.precision_at_k, 0) / total
-      const avgRecall = perQueryResults.reduce((s, r) => s + r.recall_at_k, 0) / total
+      const nonZeroResults = perQueryResults.filter(r => r.precision_at_k > 0)
+      const nonZeroCount = nonZeroResults.length
+
+      const avgPrecision = nonZeroCount > 0 ? nonZeroResults.reduce((s, r) => s + r.precision_at_k, 0) / nonZeroCount : 0
+      const avgRecall = nonZeroCount > 0 ? nonZeroResults.reduce((s, r) => s + r.recall_at_k, 0) / nonZeroCount : 0
       const avgHitRate = perQueryResults.reduce((s, r) => s + r.hit_rate, 0) / total
       const mrr = perQueryResults.reduce((s, r) => s + (r.first_relevant_rank ? 1 / r.first_relevant_rank : 0), 0) / total
 
@@ -387,12 +390,13 @@ Deno.serve(async (req) => {
         mrr: parseFloat(mrr.toFixed(4)),
         k_used: 'per-query top_k',
         eval_model: EVAL_MODEL,
-        notes: `Evaluated ${total} queries. Chunks ranked by post-reranking order.`,
+        notes: `Evaluated ${total} queries (${nonZeroCount} non-zero precision). Chunks ranked by post-reranking order.`,
       })
 
       return new Response(JSON.stringify({
         success: true,
         evaluated: total,
+        evaluated_nonzero: nonZeroCount,
         eval_model: EVAL_MODEL,
         k_used: 'per-query top_k (stored in query_logs.top_k)',
         ranking_confirmed: 'retrieved_chunk_ids stored in ranked order after TOC-penalty re-ranking',
