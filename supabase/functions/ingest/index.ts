@@ -38,56 +38,35 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
+// Call Google Gemini API directly for text cleaning
 async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<string> {
-  const MAX_RETRIES = 5;
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            systemInstruction: {
-              parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
-            },
-            generationConfig: { temperature: 0.1 }
-          }),
-        }
-      )
-
-      if (response.status === 429) {
-        const errorData = await response.json().catch(() => ({}))
-        const retryDelay = errorData?.error?.details?.find(
-          (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
-        )?.retryDelay
-
-        let waitMs = attempt * 10000
-        if (retryDelay) {
-          const seconds = parseFloat(retryDelay.replace('s', ''))
-          if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 1000
-        }
-
-        console.log(`Rate limited on cleaning, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
-        await new Promise(r => setTimeout(r, waitMs))
-        continue
-      }
-
-      if (!response.ok) {
-        const errText = await response.text()
-        throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`)
-      }
-
-      const result = await response.json()
-      return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
-    } catch (err) {
-      if (attempt === MAX_RETRIES) throw err
-      console.log(`Cleaning attempt ${attempt} failed: ${err instanceof Error ? err.message : err}`)
-      await new Promise(r => setTimeout(r, attempt * 2000))
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        systemInstruction: {
+          parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
+        },
+        generationConfig: { temperature: 0.1 }
+      }),
     }
+  )
+
+  if (response.status === 429) {
+    const errText = await response.text()
+    throw new Error(`Rate limited: ${errText.slice(0, 200)}`)
   }
-  throw new Error('All retries exhausted for text cleaning')
+
+  if (!response.ok) {
+    const errText = await response.text()
+    throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const result = await response.json()
+  return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
 }
 
 Deno.serve(async (req) => {
@@ -268,7 +247,7 @@ Deno.serve(async (req) => {
               pageCount = 1
               break
             case 'pdf':
-              const pdfResult = await extractTextFromPdf(fileData.arrayBuffer, googleApiKey, apiTier)
+              const pdfResult = await extractTextFromPdf(fileData.arrayBuffer, googleApiKey)
               extractedText = pdfResult.text
               pageCount = pdfResult.pageCount
               break
@@ -327,31 +306,16 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Phase 1: Extract + chunk files (respecting tier concurrency)
-      if (apiTier === 'paid') {
-        // Limit document-level concurrency to avoid overwhelming Gemini even on paid tier
-        const CONCURRENT_DOCS = 3;
-        for (let i = 0; i < fileDataList.length; i += CONCURRENT_DOCS) {
-          const batch = fileDataList.slice(i, i + CONCURRENT_DOCS);
-          await Promise.allSettled(
-            batch.map((fileData, idx) => {
-              const doc = documents[i + idx];
-              if (!doc) return Promise.resolve();
-              return processFile(fileData, doc);
-            })
-          )
-        }
-      } else {
-        // Free tier: sequential to avoid 429s on parallel document cleaning
-        for (let i = 0; i < fileDataList.length; i++) {
-          const doc = documents[i];
-          if (doc) await processFile(fileDataList[i], doc);
-        }
-      }
+      // Phase 1: Extract + chunk all files in parallel (cleaning has its own retry logic)
+      await Promise.allSettled(
+        fileDataList.map((fileData, i) => {
+          const doc = documents[i]
+          if (!doc) return Promise.resolve()
+          return processFile(fileData, doc)
+        })
+      )
 
-      // Phase 2: Trigger embeddings
-      // Paid tier: parallel for max throughput
-      // Free tier: sequential to avoid 504 timeouts from rate-limit retries stacking up
+      // Phase 2: Trigger embeddings in parallel (generate-embeddings self-throttles with retry-on-429)
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents (${apiTier} tier)...`)
       const triggerEmbeddings = async (doc: typeof documents[0]) => {
         try {
@@ -379,15 +343,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (apiTier === 'paid') {
-        // Paid tier: all in parallel
-        await Promise.allSettled(documents.map(triggerEmbeddings))
-      } else {
-        // Free tier: sequential to avoid overlapping rate-limit retries causing 504s
-        for (const doc of documents) {
-          await triggerEmbeddings(doc)
-        }
-      }
+      await Promise.allSettled(documents.map(triggerEmbeddings))
     })()
 
     ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
@@ -405,7 +361,7 @@ Deno.serve(async (req) => {
   }
 })
 
-async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: string | null, apiTier: string = 'free'): Promise<{ text: string; pageCount: number }> {
+async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: string | null): Promise<{ text: string; pageCount: number }> {
   const { getDocument } = await import('https://esm.sh/pdfjs-serverless@0.2.2')
   const uint8Array = new Uint8Array(arrayBuffer)
   
@@ -445,7 +401,7 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
   }
 
   try {
-    const cleanedText = await cleanGarbledText(pageTexts, googleApiKey, apiTier)
+    const cleanedText = await cleanGarbledText(pageTexts, googleApiKey)
     if (cleanedText && cleanedText.length > 50) {
       console.log(`Google AI cleaned text: ${cleanedText.length} characters`)
       return { text: cleanedText, pageCount }
@@ -465,48 +421,17 @@ function applyRegexNormalization(pageTexts: string[]): string {
   return text
 }
 
-async function cleanGarbledText(pageTexts: string[], googleApiKey: string, apiTier: string): Promise<string> {
+async function cleanGarbledText(pageTexts: string[], googleApiKey: string): Promise<string> {
   const BATCH_SIZE = 15
   const batches: string[][] = []
   for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
     batches.push(pageTexts.slice(i, i + BATCH_SIZE))
   }
-  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Google API (${apiTier} tier)`)
+  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Google API`)
 
-  const cleanedParts: string[] = []
-  
-  if (apiTier === 'paid') {
-    const CONCURRENCY = 3;
-    for (let i = 0; i < batches.length; i += CONCURRENCY) {
-      const concurrentBatches = batches.slice(i, i + CONCURRENCY);
-      const results = await Promise.all(
-        concurrentBatches.map(async (batch, idx) => {
-          const b = i + idx;
-          const batchText = batch.map((t, idx2) => `--- PAGE ${b * BATCH_SIZE + idx2 + 1} ---\n${t}`).join('\n\n')
-          console.log(`Google AI batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
-
-          try {
-            const cleaned = await callGeminiForCleaning(
-              `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`,
-              googleApiKey
-            )
-            if (cleaned) {
-              console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
-              return cleaned
-            }
-            console.warn(`Batch ${b + 1} returned empty, using regex fallback`)
-            return applyRegexNormalization(batch)
-          } catch (err) {
-            console.error(`Batch ${b + 1} error:`, err)
-            return applyRegexNormalization(batch)
-          }
-        })
-      )
-      cleanedParts.push(...results)
-    }
-  } else {
-    for (let b = 0; b < batches.length; b++) {
-      const batch = batches[b];
+  // Clean all batches in parallel (paid tier handles concurrency)
+  const cleanedParts = await Promise.all(
+    batches.map(async (batch, b) => {
       const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
       console.log(`Google AI batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
 
@@ -517,19 +442,16 @@ async function cleanGarbledText(pageTexts: string[], googleApiKey: string, apiTi
         )
         if (cleaned) {
           console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
-          cleanedParts.push(cleaned)
-        } else {
-          console.warn(`Batch ${b + 1} returned empty, using regex fallback`)
-          cleanedParts.push(applyRegexNormalization(batch))
+          return cleaned
         }
+        console.warn(`Batch ${b + 1} returned empty, using regex fallback`)
+        return applyRegexNormalization(batch)
       } catch (err) {
         console.error(`Batch ${b + 1} error:`, err)
-        cleanedParts.push(applyRegexNormalization(batch))
+        return applyRegexNormalization(batch)
       }
-      
-      if (b < batches.length - 1) await new Promise(r => setTimeout(r, 2000));
-    }
-  }
+    })
+  )
 
   const fullCleaned = cleanedParts.join('\n\n')
   console.log(`Google AI total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
