@@ -268,7 +268,7 @@ Deno.serve(async (req) => {
               pageCount = 1
               break
             case 'pdf':
-              const pdfResult = await extractTextFromPdf(fileData.arrayBuffer, googleApiKey)
+              const pdfResult = await extractTextFromPdf(fileData.arrayBuffer, googleApiKey, apiTier)
               extractedText = pdfResult.text
               pageCount = pdfResult.pageCount
               break
