@@ -6,9 +6,10 @@ const corsHeaders = {
 }
 
 const BATCH_EMBED_SIZE_PAID = 100   // Google batchEmbedContents max
-const BATCH_EMBED_SIZE_FREE = 100   // Same batch size for free tier (baseline)
+const BATCH_EMBED_SIZE_FREE = 15    // Small batches for free tier to avoid 429s
 const CHUNKS_PER_FETCH = 500
 const MAX_CHUNK_TEXT_LENGTH = 10000
+const FREE_TIER_BATCH_DELAY_MS = 3000  // 3s delay between batches on free tier
 
 function isValidUUID(value: unknown): value is string {
   if (typeof value !== 'string') return false
