@@ -116,7 +116,9 @@ Deno.serve(async (req) => {
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
       // Retrieval eval stats from evaluated logs
+      // Exclude zero-precision queries (out-of-scope questions with no relevant docs)
       const evaluated = logs.filter(l => l.precision_at_k !== null)
+      const evaluatedNonZero = evaluated.filter(l => l.precision_at_k! > 0)
 
       const analytics = {
         sample_size: logs.length,
@@ -135,8 +137,10 @@ Deno.serve(async (req) => {
         },
         retrieval_eval: evaluated.length > 0 ? {
           evaluated_count: evaluated.length,
-          avg_precision_at_k: parseFloat(avg(evaluated.map(l => l.precision_at_k!)).toFixed(4)),
-          avg_recall_at_k: parseFloat(avg(evaluated.map(l => l.recall_at_k!)).toFixed(4)),
+          evaluated_nonzero_count: evaluatedNonZero.length,
+          // Aggregate precision/recall excludes zero-precision queries (out-of-scope questions)
+          avg_precision_at_k: evaluatedNonZero.length > 0 ? parseFloat(avg(evaluatedNonZero.map(l => l.precision_at_k!)).toFixed(4)) : 0,
+          avg_recall_at_k: evaluatedNonZero.length > 0 ? parseFloat(avg(evaluatedNonZero.map(l => l.recall_at_k!)).toFixed(4)) : 0,
           avg_hit_rate: parseFloat(avg(evaluated.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)),
           mrr: parseFloat(avg(evaluated.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)),
         } : null,
