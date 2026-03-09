@@ -80,9 +80,10 @@ async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<st
       )
 
       if (response.status === 429 || response.status === 503) {
-        await response.text() // drain
+        const errBody = await response.text()
+        console.error(`CLEANING ${response.status} RESPONSE BODY (${model}): ${errBody.slice(0, 500)}`)
         if (attempt < MAX_RETRIES) {
-          const waitMs = attempt * 5000 // 5s, 10s backoff
+          const waitMs = attempt * 15000 // 15s, 30s backoff (longer waits)
           console.log(`Cleaning ${response.status} on ${model}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
           await new Promise(r => setTimeout(r, waitMs))
           continue
