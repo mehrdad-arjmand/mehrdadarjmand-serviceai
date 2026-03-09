@@ -132,10 +132,10 @@ Deno.serve(async (req) => {
       if (chunksError) throw chunksError
       if (!chunks || chunks.length === 0) { isComplete = true; break }
 
-      // Split into batches of 100 for batchEmbedContents API
+      // Split into batches for batchEmbedContents API (size depends on tier)
       const apiBatches: typeof chunks[] = []
-      for (let i = 0; i < chunks.length; i += BATCH_EMBED_SIZE) {
-        apiBatches.push(chunks.slice(i, i + BATCH_EMBED_SIZE))
+      for (let i = 0; i < chunks.length; i += effectiveBatchSize) {
+        apiBatches.push(chunks.slice(i, i + effectiveBatchSize))
       }
 
       // Process with detected concurrency
