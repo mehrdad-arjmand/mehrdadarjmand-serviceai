@@ -282,13 +282,13 @@ async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<string[
           (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
         )?.retryDelay
 
-        let waitMs = attempt * 5000  // Start with 5s, increase per attempt
+      let waitMs = 10000 + (attempt * 5000)  // Start at 15s, increase per attempt
         if (retryDelay) {
           const seconds = parseFloat(retryDelay.replace('s', ''))
-          if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 1000
+          if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 2000
         }
-        // Cap wait time at 15s to avoid edge function timeout
-        waitMs = Math.min(waitMs, 15000)
+        // Cap wait time at 30s to give quota time to recover
+        waitMs = Math.min(waitMs, 30000)
 
         console.log(`Rate limited on batch of ${texts.length}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
         await new Promise(r => setTimeout(r, waitMs))
