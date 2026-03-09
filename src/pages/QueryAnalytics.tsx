@@ -15,6 +15,7 @@ interface AnalyticsData {
   cost: { avg: string; p95: string; total: string };
   retrieval_eval: {
     evaluated_count: number;
+    evaluated_nonzero_count: number;
     avg_precision_at_k: number;
     avg_recall_at_k: number;
     avg_hit_rate: number;
@@ -84,11 +85,12 @@ SELECT
   MAX(execution_time_ms) AS max_ms
 FROM query_logs;
 
--- Retrieval quality (evaluated queries only)
+-- Retrieval quality (non-zero precision queries only, excludes out-of-scope)
 SELECT
-  COUNT(*) AS evaluated_queries,
-  AVG(precision_at_k) AS avg_precision,
-  AVG(recall_at_k) AS avg_recall,
+  COUNT(*) FILTER (WHERE precision_at_k > 0) AS evaluated_nonzero,
+  COUNT(*) AS evaluated_total,
+  AVG(precision_at_k) FILTER (WHERE precision_at_k > 0) AS avg_precision,
+  AVG(recall_at_k) FILTER (WHERE precision_at_k > 0) AS avg_recall,
   AVG(hit_rate_at_k) AS avg_hit_rate,
   AVG(CASE WHEN first_relevant_rank IS NOT NULL
     THEN 1.0 / first_relevant_rank ELSE 0 END) AS mrr
@@ -336,7 +338,9 @@ const QueryAnalytics = () => {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Retrieval Quality</CardTitle>
-                  <CardDescription>{analytics.retrieval_eval.evaluated_count} evaluated</CardDescription>
+                  <CardDescription>
+                    {analytics.retrieval_eval.evaluated_nonzero_count} of {analytics.retrieval_eval.evaluated_count} queries (excl. out-of-scope)
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_precision_at_k * 100).toFixed(1)}%</span></div>
