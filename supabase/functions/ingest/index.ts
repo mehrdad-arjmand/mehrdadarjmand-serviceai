@@ -524,7 +524,8 @@ async function cleanGarbledText(pageTexts: string[], googleApiKey: string, apiTi
     try {
       const cleaned = await callGeminiForCleaning(
         `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`,
-        googleApiKey
+        googleApiKey,
+        apiTier
       )
       if (cleaned) {
         console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
