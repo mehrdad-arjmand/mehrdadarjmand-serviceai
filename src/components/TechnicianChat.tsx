@@ -540,7 +540,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     setFiltersLocked(false);
     // Clean up any existing recognition before restarting
     if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
+      try { recognitionRef.current.onend = null; recognitionRef.current.onerror = null; recognitionRef.current.abort(); } catch (e) {}
       recognitionRef.current = null;
     }
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
@@ -548,8 +548,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     isProcessingVoiceRef.current = false;
     lastSubmittedTranscriptRef.current = "";
     recognitionStartedRef.current = false;
+    // Reset abort counter so mute presses don't accumulate toward the 3-abort kill threshold
+    abortCountRef.current = 0;
     if (conversationActiveRef.current) {
-      setConversationState("listening");
+      // Don't set conversationState to "listening" here — let onstart do it
+      // This prevents showing "Listening..." when recognition hasn't actually started
       setQuestion("");
       // Use longer initial delay to let browser fully release mic after TTS cancel
       setTimeout(() => {
