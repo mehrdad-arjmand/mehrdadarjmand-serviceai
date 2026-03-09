@@ -337,7 +337,9 @@ const QueryAnalytics = () => {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Retrieval Quality</CardTitle>
-                  <CardDescription>{analytics.retrieval_eval.evaluated_count} evaluated</CardDescription>
+                  <CardDescription>
+                    {analytics.retrieval_eval.evaluated_nonzero_count} of {analytics.retrieval_eval.evaluated_count} queries (excl. out-of-scope)
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_precision_at_k * 100).toFixed(1)}%</span></div>
