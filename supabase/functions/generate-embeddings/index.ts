@@ -144,6 +144,12 @@ Deno.serve(async (req) => {
         )
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
+
+        // Free tier: add delay between batch groups to stay under rate limits
+        if (apiTier === 'free' && i + CONCURRENT_API_CALLS < apiBatches.length) {
+          console.log(`Free tier: waiting ${FREE_TIER_BATCH_DELAY_MS}ms between embedding batches...`)
+          await new Promise(r => setTimeout(r, FREE_TIER_BATCH_DELAY_MS))
+        }
       }
 
       // Update document progress
