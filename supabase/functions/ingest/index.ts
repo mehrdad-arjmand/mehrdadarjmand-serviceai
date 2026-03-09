@@ -392,7 +392,11 @@ Deno.serve(async (req) => {
         )
       }
 
-      // Phase 2: Trigger embeddings
+      // Phase 2: Trigger embeddings (add delay on free tier to let rate limits reset)
+      if (apiTier === 'free') {
+        console.log('Free tier: waiting 5s before embedding to let rate limits reset...')
+        await new Promise(r => setTimeout(r, 5000))
+      }
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents (${apiTier} tier)...`)
       const triggerEmbeddings = async (doc: typeof documents[0]) => {
         try {
