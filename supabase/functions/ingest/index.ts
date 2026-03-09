@@ -38,13 +38,13 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
-// Call Google Gemini API directly for text cleaning - using flash-lite for speed
+// Call Google Gemini API directly for text cleaning - using 2.0-flash (proven stable)
 async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<string> {
   const MAX_RETRIES = 3
   
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -58,15 +58,15 @@ async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<st
       }
     )
 
-    if (response.status === 429) {
+    if (response.status === 429 || response.status === 503) {
       if (attempt < MAX_RETRIES) {
-        const waitMs = attempt * 2000
-        console.log(`Cleaning rate limited, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
+        const waitMs = response.status === 503 ? attempt * 3000 : attempt * 2000
+        console.log(`Cleaning ${response.status === 503 ? 'service unavailable' : 'rate limited'}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
         await new Promise(r => setTimeout(r, waitMs))
         continue
       }
       const errText = await response.text()
-      throw new Error(`Rate limited: ${errText.slice(0, 200)}`)
+      throw new Error(`API error ${response.status}: ${errText.slice(0, 200)}`)
     }
 
     if (!response.ok) {
@@ -398,7 +398,7 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
   const shortFragments = words.filter(w => w.length <= 3 && /^[a-zA-Z]+$/.test(w) && !commonShortWords.has(w.toLowerCase())).length
   const singleCharRatio = words.length > 0 ? singleCharWords / words.length : 0
   const shortFragRatio = words.length > 0 ? shortFragments / words.length : 0
-  const isGarbled = singleCharRatio > 0.15 || shortFragRatio > 0.30 || rawText.length < 50
+  const isGarbled = singleCharRatio > 0.10 || shortFragRatio > 0.15 || rawText.length < 50
 
   if (!isGarbled) {
     console.log(`PDF text quality OK (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%)`)
