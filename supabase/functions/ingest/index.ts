@@ -38,13 +38,13 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
-// Call Google Gemini API directly for text cleaning - using 2.0-flash (proven stable)
+// Call Google Gemini API directly for text cleaning - using 2.5-flash-lite (fast, cost-effective)
 async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<string> {
   const MAX_RETRIES = 3
   
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
