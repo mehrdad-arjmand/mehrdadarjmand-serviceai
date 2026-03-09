@@ -39,7 +39,7 @@ function isAllowedFileType(fileName: string): boolean {
 }
 
 // Model fallback state: start with flash-8b, switch to flash on quota/rate errors
-const CLEANING_MODELS = ['gemini-2.0-flash-lite', 'gemini-2.0-flash'] as const
+const CLEANING_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'] as const
 let activeCleaningModelIndex = 0
 
 function getActiveCleaningModel(): string {
