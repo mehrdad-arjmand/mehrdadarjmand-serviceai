@@ -59,54 +59,61 @@ function escalateCleaningModel(): boolean {
 async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<string> {
   const MAX_RETRIES = 3
   
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const model = getActiveCleaningModel()
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          systemInstruction: {
-            parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
-          },
-          generationConfig: { temperature: 0.1 }
-        }),
-      }
-    )
+  // Try each model in order, with full retries on each before escalating
+  for (let modelIdx = activeCleaningModelIndex; modelIdx < CLEANING_MODELS.length; modelIdx++) {
+    const model = CLEANING_MODELS[modelIdx]
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            systemInstruction: {
+              parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
+            },
+            generationConfig: { temperature: 0.1 }
+          }),
+        }
+      )
 
-    if (response.status === 429 || response.status === 503) {
-      // Try escalating model before retrying
-      if (escalateCleaningModel()) {
-        console.log(`${model} hit ${response.status}, switched to ${getActiveCleaningModel()}, retrying immediately`)
+      if (response.status === 429 || response.status === 503) {
         await response.text() // drain
-        continue
+        if (attempt < MAX_RETRIES) {
+          const waitMs = attempt * 5000 // 5s, 10s backoff
+          console.log(`Cleaning ${response.status} on ${model}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
+          await new Promise(r => setTimeout(r, waitMs))
+          continue
+        }
+        // All retries exhausted on this model — try next model
+        console.log(`${model} exhausted all ${MAX_RETRIES} retries, escalating...`)
+        break
       }
-      if (attempt < MAX_RETRIES) {
-        const waitMs = response.status === 503 ? attempt * 3000 : attempt * 2000
-        console.log(`Cleaning ${response.status} on ${model}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
-        await new Promise(r => setTimeout(r, waitMs))
-        continue
+
+      if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`Gemini API error ${response.status} (${model}): ${errText.slice(0, 200)}`)
       }
-      const errText = await response.text()
-      throw new Error(`API error ${response.status}: ${errText.slice(0, 200)}`)
-    }
 
-    if (!response.ok) {
-      const errText = await response.text()
-      throw new Error(`Gemini API error ${response.status} (${model}): ${errText.slice(0, 200)}`)
+      const result = await response.json()
+      const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+      if (text) {
+        console.log(`Cleaning succeeded with model: ${model}`)
+        // Update active index so subsequent calls start with the working model
+        activeCleaningModelIndex = modelIdx
+      }
+      return text
     }
-
-    const result = await response.json()
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
-    if (text) {
-      console.log(`Cleaning succeeded with model: ${model}`)
+    
+    // If we broke out of retry loop, escalate
+    if (modelIdx < CLEANING_MODELS.length - 1) {
+      console.log(`Cleaning model escalated from ${model} to ${CLEANING_MODELS[modelIdx + 1]}`)
     }
-    return text
   }
   
-  throw new Error('All cleaning retries exhausted')
+  throw new Error('All cleaning models and retries exhausted')
 }
 
 Deno.serve(async (req) => {
