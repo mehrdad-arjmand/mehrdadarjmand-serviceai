@@ -318,16 +318,29 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Phase 1: Extract + chunk all files in parallel (cleaning has its own retry logic)
-      await Promise.allSettled(
-        fileDataList.map((fileData, i) => {
+      // Phase 1: Extract + chunk files
+      // Free tier: serialize to avoid 429 rate limits; Paid tier: parallel
+      if (apiTier === 'free') {
+        console.log('Free tier: processing files sequentially to respect rate limits...')
+        for (let i = 0; i < fileDataList.length; i++) {
           const doc = documents[i]
-          if (!doc) return Promise.resolve()
-          return processFile(fileData, doc)
-        })
-      )
+          if (!doc) continue
+          await processFile(fileDataList[i], doc)
+          if (i < fileDataList.length - 1) {
+            await new Promise(r => setTimeout(r, 2000)) // 2s gap between files
+          }
+        }
+      } else {
+        await Promise.allSettled(
+          fileDataList.map((fileData, i) => {
+            const doc = documents[i]
+            if (!doc) return Promise.resolve()
+            return processFile(fileData, doc)
+          })
+        )
+      }
 
-      // Phase 2: Trigger embeddings in parallel (generate-embeddings self-throttles with retry-on-429)
+      // Phase 2: Trigger embeddings
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents (${apiTier} tier)...`)
       const triggerEmbeddings = async (doc: typeof documents[0]) => {
         try {
@@ -355,7 +368,16 @@ Deno.serve(async (req) => {
         }
       }
 
-      await Promise.allSettled(documents.map(triggerEmbeddings))
+      // Free tier: sequential embeddings with delay; Paid: parallel
+      if (apiTier === 'free') {
+        console.log('Free tier: triggering embeddings sequentially...')
+        for (const doc of documents) {
+          await triggerEmbeddings(doc)
+          await new Promise(r => setTimeout(r, 1000))
+        }
+      } else {
+        await Promise.allSettled(documents.map(triggerEmbeddings))
+      }
     })()
 
     ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
