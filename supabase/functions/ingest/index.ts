@@ -433,13 +433,13 @@ function applyRegexNormalization(pageTexts: string[]): string {
   return text
 }
 
-async function cleanGarbledText(pageTexts: string[], googleApiKey: string): Promise<string> {
+async function cleanGarbledText(pageTexts: string[], googleApiKey: string, apiTier?: string): Promise<string> {
   const BATCH_SIZE = 15
   const batches: string[][] = []
   for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
     batches.push(pageTexts.slice(i, i + BATCH_SIZE))
   }
-  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Google API`)
+  console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Google API (${apiTier || 'unknown'} tier)`)
 
   // Clean all batches in parallel (paid tier handles concurrency)
   const cleanedParts = await Promise.all(
