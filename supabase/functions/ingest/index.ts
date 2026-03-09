@@ -445,7 +445,7 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
   }
 
   try {
-    const cleanedText = await cleanGarbledText(pageTexts, googleApiKey)
+    const cleanedText = await cleanGarbledText(pageTexts, googleApiKey, apiTier)
     if (cleanedText && cleanedText.length > 50) {
       console.log(`Google AI cleaned text: ${cleanedText.length} characters`)
       return { text: cleanedText, pageCount }
