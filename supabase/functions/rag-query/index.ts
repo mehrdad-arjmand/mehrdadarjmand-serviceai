@@ -617,8 +617,8 @@ Deno.serve(async (req) => {
     // Re-rank chunks: prioritize substantive content over TOC/index entries
     const rankedChunks = rerankChunks(combinedChunks, question)
 
-    // Take top chunks for context
-    const topChunks = rankedChunks.slice(0, 30)
+    // Take top chunks for context (top 10 for more precise retrieval evaluation)
+    const topChunks = rankedChunks.slice(0, 10)
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
       chunk: c.chunk_index,
