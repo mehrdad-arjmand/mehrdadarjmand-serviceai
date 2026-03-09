@@ -38,35 +38,56 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
-// Call Google Gemini API directly for text cleaning
 async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<string> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        systemInstruction: {
-          parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
-        },
-        generationConfig: { temperature: 0.1 }
-      }),
+  const MAX_RETRIES = 5;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            systemInstruction: {
+              parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
+            },
+            generationConfig: { temperature: 0.1 }
+          }),
+        }
+      )
+
+      if (response.status === 429) {
+        const errorData = await response.json().catch(() => ({}))
+        const retryDelay = errorData?.error?.details?.find(
+          (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
+        )?.retryDelay
+
+        let waitMs = attempt * 10000
+        if (retryDelay) {
+          const seconds = parseFloat(retryDelay.replace('s', ''))
+          if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 1000
+        }
+
+        console.log(`Rate limited on cleaning, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
+        await new Promise(r => setTimeout(r, waitMs))
+        continue
+      }
+
+      if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`)
+      }
+
+      const result = await response.json()
+      return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+    } catch (err) {
+      if (attempt === MAX_RETRIES) throw err
+      console.log(`Cleaning attempt ${attempt} failed: ${err instanceof Error ? err.message : err}`)
+      await new Promise(r => setTimeout(r, attempt * 2000))
     }
-  )
-
-  if (response.status === 429) {
-    const errText = await response.text()
-    throw new Error(`Rate limited: ${errText.slice(0, 200)}`)
   }
-
-  if (!response.ok) {
-    const errText = await response.text()
-    throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`)
-  }
-
-  const result = await response.json()
-  return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+  throw new Error('All retries exhausted for text cleaning')
 }
 
 Deno.serve(async (req) => {
