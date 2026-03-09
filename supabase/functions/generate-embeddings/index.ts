@@ -5,7 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-const BATCH_EMBED_SIZE = 100   // Google batchEmbedContents max
+const BATCH_EMBED_SIZE_PAID = 100   // Google batchEmbedContents max
+const BATCH_EMBED_SIZE_FREE = 25    // Small batches to stay under 30K TPM
 const CHUNKS_PER_FETCH = 500
 const MAX_CHUNK_TEXT_LENGTH = 10000
 
@@ -112,6 +113,7 @@ Deno.serve(async (req) => {
     // Free tier: serialize requests (concurrency 1) and let retry logic handle occasional 429s
     // Paid tier: high concurrency for max throughput
     const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
+    const BATCH_EMBED_SIZE = apiTier === 'paid' ? BATCH_EMBED_SIZE_PAID : BATCH_EMBED_SIZE_FREE
     console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | batchSize: ${BATCH_EMBED_SIZE}`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
 
@@ -280,11 +282,13 @@ async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<string[
           (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
         )?.retryDelay
 
-        let waitMs = attempt * 10000
+        let waitMs = attempt * 5000  // Start with 5s, increase per attempt
         if (retryDelay) {
           const seconds = parseFloat(retryDelay.replace('s', ''))
           if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 1000
         }
+        // Cap wait time at 15s to avoid edge function timeout
+        waitMs = Math.min(waitMs, 15000)
 
         console.log(`Rate limited on batch of ${texts.length}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
         await new Promise(r => setTimeout(r, waitMs))
