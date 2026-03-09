@@ -15,31 +15,6 @@ function isValidUUID(value: unknown): value is string {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
-/**
- * Detect API tier by attempting a high-concurrency approach.
- * Instead of wasting requests on probes, we optimistically try paid-tier
- * concurrency and gracefully degrade on 429 via the retry logic in batchEmbedTexts.
- * We do a single quick probe: if it succeeds, assume paid. If 429, free.
- */
-async function detectApiTier(apiKey: string): Promise<'paid' | 'free'> {
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [{ model: 'models/gemini-embedding-001', content: { parts: [{ text: 'probe' }] }, outputDimensionality: 768 }]
-        })
-      }
-    )
-    const status = response.status
-    await response.text()
-    return status === 429 ? 'free' : 'paid'
-  } catch {
-    return 'free'
-  }
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
