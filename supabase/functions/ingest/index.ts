@@ -398,7 +398,7 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
   const shortFragments = words.filter(w => w.length <= 3 && /^[a-zA-Z]+$/.test(w) && !commonShortWords.has(w.toLowerCase())).length
   const singleCharRatio = words.length > 0 ? singleCharWords / words.length : 0
   const shortFragRatio = words.length > 0 ? shortFragments / words.length : 0
-  const isGarbled = singleCharRatio > 0.10 || shortFragRatio > 0.15 || rawText.length < 50
+  const isGarbled = singleCharRatio > 0.15 || shortFragRatio > 0.30 || rawText.length < 50
 
   if (!isGarbled) {
     console.log(`PDF text quality OK (single-char: ${(singleCharRatio * 100).toFixed(1)}%, short-frag: ${(shortFragRatio * 100).toFixed(1)}%)`)
