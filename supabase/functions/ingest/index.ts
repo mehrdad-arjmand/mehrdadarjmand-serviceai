@@ -405,7 +405,7 @@ Deno.serve(async (req) => {
   }
 })
 
-async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: string | null): Promise<{ text: string; pageCount: number }> {
+async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: string | null, apiTier: string = 'free'): Promise<{ text: string; pageCount: number }> {
   const { getDocument } = await import('https://esm.sh/pdfjs-serverless@0.2.2')
   const uint8Array = new Uint8Array(arrayBuffer)
   
