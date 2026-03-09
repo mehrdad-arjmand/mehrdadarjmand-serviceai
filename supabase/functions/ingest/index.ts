@@ -38,13 +38,31 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
-// Call Google Gemini API directly for text cleaning - using 2.5-flash-lite (fast, cost-effective)
+// Model fallback state: start with flash-lite, switch to flash on quota/rate errors
+const CLEANING_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'] as const
+let activeCleaningModelIndex = 0
+
+function getActiveCleaningModel(): string {
+  return CLEANING_MODELS[activeCleaningModelIndex]
+}
+
+function escalateCleaningModel(): boolean {
+  if (activeCleaningModelIndex < CLEANING_MODELS.length - 1) {
+    activeCleaningModelIndex++
+    console.log(`Cleaning model escalated to: ${getActiveCleaningModel()}`)
+    return true
+  }
+  return false
+}
+
+// Call Google Gemini API directly for text cleaning
 async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<string> {
   const MAX_RETRIES = 3
   
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const model = getActiveCleaningModel()
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -59,9 +77,15 @@ async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<st
     )
 
     if (response.status === 429 || response.status === 503) {
+      // Try escalating model before retrying
+      if (escalateCleaningModel()) {
+        console.log(`${model} hit ${response.status}, switched to ${getActiveCleaningModel()}, retrying immediately`)
+        await response.text() // drain
+        continue
+      }
       if (attempt < MAX_RETRIES) {
         const waitMs = response.status === 503 ? attempt * 3000 : attempt * 2000
-        console.log(`Cleaning ${response.status === 503 ? 'service unavailable' : 'rate limited'}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
+        console.log(`Cleaning ${response.status} on ${model}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
         await new Promise(r => setTimeout(r, waitMs))
         continue
       }
@@ -71,11 +95,15 @@ async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<st
 
     if (!response.ok) {
       const errText = await response.text()
-      throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`)
+      throw new Error(`Gemini API error ${response.status} (${model}): ${errText.slice(0, 200)}`)
     }
 
     const result = await response.json()
-    return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+    if (text) {
+      console.log(`Cleaning succeeded with model: ${model}`)
+    }
+    return text
   }
   
   throw new Error('All cleaning retries exhausted')
