@@ -58,15 +58,15 @@ async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<st
       }
     )
 
-    if (response.status === 429) {
+    if (response.status === 429 || response.status === 503) {
       if (attempt < MAX_RETRIES) {
-        const waitMs = attempt * 2000
-        console.log(`Cleaning rate limited, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
+        const waitMs = response.status === 503 ? attempt * 3000 : attempt * 2000
+        console.log(`Cleaning ${response.status === 503 ? 'service unavailable' : 'rate limited'}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
         await new Promise(r => setTimeout(r, waitMs))
         continue
       }
       const errText = await response.text()
-      throw new Error(`Rate limited: ${errText.slice(0, 200)}`)
+      throw new Error(`API error ${response.status}: ${errText.slice(0, 200)}`)
     }
 
     if (!response.ok) {
