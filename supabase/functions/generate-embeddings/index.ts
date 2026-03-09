@@ -113,6 +113,7 @@ Deno.serve(async (req) => {
     // Free tier: serialize requests (concurrency 1) and let retry logic handle occasional 429s
     // Paid tier: high concurrency for max throughput
     const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
+    const BATCH_EMBED_SIZE = apiTier === 'paid' ? BATCH_EMBED_SIZE_PAID : BATCH_EMBED_SIZE_FREE
     console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | batchSize: ${BATCH_EMBED_SIZE}`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
 
