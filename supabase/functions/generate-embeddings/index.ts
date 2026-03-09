@@ -109,12 +109,10 @@ Deno.serve(async (req) => {
 
     // Free tier: small batches with pacing to stay under ~100 chunks/min rate limit
     // Paid tier: large batches with high concurrency for max throughput
+    // Free tier: serialize requests (concurrency 1) and let retry logic handle occasional 429s
+    // Paid tier: high concurrency for max throughput
     const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
-    const FREE_TIER_BATCH_SIZE = 25 // smaller batches to avoid 429s on free tier
-    const DELAY_BETWEEN_BATCHES_MS = apiTier === 'paid' ? 0 : 12000 // 12s gap keeps us under ~125 chunks/min
-
-    const effectiveBatchSize = apiTier === 'paid' ? BATCH_EMBED_SIZE : FREE_TIER_BATCH_SIZE
-    console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | batchSize: ${effectiveBatchSize} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
+    console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | batchSize: ${BATCH_EMBED_SIZE}`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
 
     let totalProcessed = 0
@@ -134,8 +132,8 @@ Deno.serve(async (req) => {
 
       // Split into batches for batchEmbedContents API (size depends on tier)
       const apiBatches: typeof chunks[] = []
-      for (let i = 0; i < chunks.length; i += effectiveBatchSize) {
-        apiBatches.push(chunks.slice(i, i + effectiveBatchSize))
+      for (let i = 0; i < chunks.length; i += BATCH_EMBED_SIZE) {
+        apiBatches.push(chunks.slice(i, i + BATCH_EMBED_SIZE))
       }
 
       // Process with detected concurrency
@@ -168,11 +166,6 @@ Deno.serve(async (req) => {
         )
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
-
-        // Pace free tier to avoid 429s
-        if (DELAY_BETWEEN_BATCHES_MS > 0 && i + CONCURRENT_API_CALLS < apiBatches.length) {
-          await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS))
-        }
       }
 
       // Update document progress
