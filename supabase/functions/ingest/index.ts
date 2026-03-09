@@ -315,7 +315,9 @@ Deno.serve(async (req) => {
         })
       )
 
-      // Phase 2: Trigger embeddings in parallel (generate-embeddings self-throttles with retry-on-429)
+      // Phase 2: Trigger embeddings
+      // Paid tier: parallel for max throughput
+      // Free tier: sequential to avoid 504 timeouts from rate-limit retries stacking up
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents (${apiTier} tier)...`)
       const triggerEmbeddings = async (doc: typeof documents[0]) => {
         try {
@@ -343,7 +345,15 @@ Deno.serve(async (req) => {
         }
       }
 
-      await Promise.allSettled(documents.map(triggerEmbeddings))
+      if (apiTier === 'paid') {
+        // Paid tier: all in parallel
+        await Promise.allSettled(documents.map(triggerEmbeddings))
+      } else {
+        // Free tier: sequential to avoid overlapping rate-limit retries causing 504s
+        for (const doc of documents) {
+          await triggerEmbeddings(doc)
+        }
+      }
     })()
 
     ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
