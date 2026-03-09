@@ -493,29 +493,30 @@ async function cleanGarbledText(pageTexts: string[], googleApiKey: string, apiTi
   }
   console.log(`Cleaning ${pageTexts.length} pages in ${batches.length} batches via Google API (${apiTier || 'unknown'} tier)`)
 
-  // Clean all batches in parallel (paid tier handles concurrency)
-  const cleanedParts = await Promise.all(
-    batches.map(async (batch, b) => {
-      const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
-      console.log(`Google AI batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
+  // Process batches sequentially to avoid burning RPM/RPD on free tier
+  const cleanedParts: string[] = []
+  for (let b = 0; b < batches.length; b++) {
+    const batch = batches[b]
+    const batchText = batch.map((t, idx) => `--- PAGE ${b * BATCH_SIZE + idx + 1} ---\n${t}`).join('\n\n')
+    console.log(`Google AI batch ${b + 1}/${batches.length}: ${batchText.length} chars`)
 
-      try {
-        const cleaned = await callGeminiForCleaning(
-          `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`,
-          googleApiKey
-        )
-        if (cleaned) {
-          console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
-          return cleaned
-        }
+    try {
+      const cleaned = await callGeminiForCleaning(
+        `The following text was extracted from a PDF but has broken word spacing (e.g., "Ins ulat ed glov es" should be "Insulated gloves"). Fix ONLY the broken spacing. Preserve numbers, codes, tables. Return ONLY the corrected text.\n\n${batchText}`,
+        googleApiKey
+      )
+      if (cleaned) {
+        console.log(`Batch ${b + 1} cleaned: ${cleaned.length} chars`)
+        cleanedParts.push(cleaned)
+      } else {
         console.warn(`Batch ${b + 1} returned empty, using regex fallback`)
-        return applyRegexNormalization(batch)
-      } catch (err) {
-        console.error(`Batch ${b + 1} error:`, err)
-        return applyRegexNormalization(batch)
+        cleanedParts.push(applyRegexNormalization(batch))
       }
-    })
-  )
+    } catch (err) {
+      console.error(`Batch ${b + 1} error:`, err)
+      cleanedParts.push(applyRegexNormalization(batch))
+    }
+  }
 
   const fullCleaned = cleanedParts.join('\n\n')
   console.log(`Google AI total cleaned: ${fullCleaned.length} chars from ${batches.length} batches`)
