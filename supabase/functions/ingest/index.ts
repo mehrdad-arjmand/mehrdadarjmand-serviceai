@@ -327,14 +327,27 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Phase 1: Extract + chunk all files in parallel (cleaning has its own retry logic)
-      await Promise.allSettled(
-        fileDataList.map((fileData, i) => {
-          const doc = documents[i]
-          if (!doc) return Promise.resolve()
-          return processFile(fileData, doc)
-        })
-      )
+      // Phase 1: Extract + chunk files (respecting tier concurrency)
+      if (apiTier === 'paid') {
+        // Limit document-level concurrency to avoid overwhelming Gemini even on paid tier
+        const CONCURRENT_DOCS = 3;
+        for (let i = 0; i < fileDataList.length; i += CONCURRENT_DOCS) {
+          const batch = fileDataList.slice(i, i + CONCURRENT_DOCS);
+          await Promise.allSettled(
+            batch.map((fileData, idx) => {
+              const doc = documents[i + idx];
+              if (!doc) return Promise.resolve();
+              return processFile(fileData, doc);
+            })
+          )
+        }
+      } else {
+        // Free tier: sequential to avoid 429s on parallel document cleaning
+        for (let i = 0; i < fileDataList.length; i++) {
+          const doc = documents[i];
+          if (doc) await processFile(fileDataList[i], doc);
+        }
+      }
 
       // Phase 2: Trigger embeddings
       // Paid tier: parallel for max throughput
