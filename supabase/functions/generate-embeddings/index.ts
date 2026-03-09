@@ -113,7 +113,8 @@ Deno.serve(async (req) => {
     const FREE_TIER_BATCH_SIZE = 25 // smaller batches to avoid 429s on free tier
     const DELAY_BETWEEN_BATCHES_MS = apiTier === 'paid' ? 0 : 12000 // 12s gap keeps us under ~125 chunks/min
 
-    console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
+    const effectiveBatchSize = apiTier === 'paid' ? BATCH_EMBED_SIZE : FREE_TIER_BATCH_SIZE
+    console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | batchSize: ${effectiveBatchSize} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
 
     let totalProcessed = 0
