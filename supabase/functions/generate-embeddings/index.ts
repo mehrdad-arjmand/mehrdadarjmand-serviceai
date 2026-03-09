@@ -6,7 +6,7 @@ const corsHeaders = {
 }
 
 const BATCH_EMBED_SIZE_PAID = 100   // Google batchEmbedContents max
-const BATCH_EMBED_SIZE_FREE = 25    // Small batches to stay under 30K TPM
+const BATCH_EMBED_SIZE_FREE = 10    // Small batches to stay well under 30K TPM on free tier
 const CHUNKS_PER_FETCH = 500
 const MAX_CHUNK_TEXT_LENGTH = 10000
 
@@ -168,6 +168,11 @@ Deno.serve(async (req) => {
         )
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
+
+        // Free tier: pace between batches to avoid TPM exhaustion
+        if (apiTier === 'free' && i + CONCURRENT_API_CALLS < apiBatches.length) {
+          await new Promise(r => setTimeout(r, 2000))
+        }
       }
 
       // Update document progress
@@ -282,13 +287,13 @@ async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<string[
           (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
         )?.retryDelay
 
-        let waitMs = attempt * 5000  // Start with 5s, increase per attempt
+      let waitMs = 10000 + (attempt * 5000)  // Start at 15s, increase per attempt
         if (retryDelay) {
           const seconds = parseFloat(retryDelay.replace('s', ''))
-          if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 1000
+          if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 2000
         }
-        // Cap wait time at 15s to avoid edge function timeout
-        waitMs = Math.min(waitMs, 15000)
+        // Cap wait time at 30s to give quota time to recover
+        waitMs = Math.min(waitMs, 30000)
 
         console.log(`Rate limited on batch of ${texts.length}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
         await new Promise(r => setTimeout(r, waitMs))
