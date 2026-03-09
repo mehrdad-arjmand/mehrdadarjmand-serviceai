@@ -168,11 +168,6 @@ Deno.serve(async (req) => {
         )
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
-
-        // Free tier: pace between batches to avoid TPM exhaustion
-        if (apiTier === 'free' && i + CONCURRENT_API_CALLS < apiBatches.length) {
-          await new Promise(r => setTimeout(r, 2000))
-        }
       }
 
       // Update document progress
