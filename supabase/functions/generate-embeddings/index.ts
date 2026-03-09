@@ -169,6 +169,10 @@ Deno.serve(async (req) => {
 
         totalProcessed += results.reduce((a, b) => a + b, 0)
 
+        // Pace free tier to avoid 429s
+        if (DELAY_BETWEEN_BATCHES_MS > 0 && i + CONCURRENT_API_CALLS < apiBatches.length) {
+          await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS))
+        }
       }
 
       // Update document progress
