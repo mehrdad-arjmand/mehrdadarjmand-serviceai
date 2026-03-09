@@ -368,15 +368,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Free tier: sequential embeddings with 15s gap to avoid 429 rate limits; Paid: parallel
+      // Free tier: sequential embeddings; Paid: parallel
       if (apiTier === 'free') {
-        console.log('Free tier: triggering embeddings sequentially with 15s gaps...')
-        for (let i = 0; i < documents.length; i++) {
-          await triggerEmbeddings(documents[i])
-          if (i < documents.length - 1) {
-            console.log(`Waiting 15s before next embedding trigger (${i + 1}/${documents.length})...`)
-            await new Promise(r => setTimeout(r, 15000))
-          }
+        console.log('Free tier: triggering embeddings sequentially...')
+        for (const doc of documents) {
+          await triggerEmbeddings(doc)
         }
       } else {
         await Promise.allSettled(documents.map(triggerEmbeddings))
