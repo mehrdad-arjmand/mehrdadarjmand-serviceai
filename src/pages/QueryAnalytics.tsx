@@ -85,11 +85,12 @@ SELECT
   MAX(execution_time_ms) AS max_ms
 FROM query_logs;
 
--- Retrieval quality (evaluated queries only)
+-- Retrieval quality (non-zero precision queries only, excludes out-of-scope)
 SELECT
-  COUNT(*) AS evaluated_queries,
-  AVG(precision_at_k) AS avg_precision,
-  AVG(recall_at_k) AS avg_recall,
+  COUNT(*) FILTER (WHERE precision_at_k > 0) AS evaluated_nonzero,
+  COUNT(*) AS evaluated_total,
+  AVG(precision_at_k) FILTER (WHERE precision_at_k > 0) AS avg_precision,
+  AVG(recall_at_k) FILTER (WHERE precision_at_k > 0) AS avg_recall,
   AVG(hit_rate_at_k) AS avg_hit_rate,
   AVG(CASE WHEN first_relevant_rank IS NOT NULL
     THEN 1.0 / first_relevant_rank ELSE 0 END) AS mrr
