@@ -261,6 +261,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       utterance.onend = () => {currentIndex++;speakNext();};
       utterance.onerror = (e) => {
         console.error('[TTS] Utterance error:', e);
+        // Always check queueId before continuing — if TTS was cancelled externally, don't call onComplete
+        if (queueId !== utteranceQueueRef.current) { cleanup(); return; }
         // On error, try to continue with next sentence instead of stopping
         if (currentIndex < sentences.length - 1) { currentIndex++; setTimeout(speakNext, 100); }
         else { cleanup(); onComplete?.(); }
