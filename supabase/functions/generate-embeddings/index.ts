@@ -107,12 +107,11 @@ Deno.serve(async (req) => {
       : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
     if (!apiKey) throw new Error('No Google API key configured')
 
-    // Free tier: sequential batches with retry-on-429 (no artificial delay — the retry logic handles rate limits)
-    // Paid tier: parallel batches for max throughput
-    // Free tier: concurrency 2 with retry-on-429 handling rate limits naturally
-    // Paid tier: concurrency 10 for max throughput
-    const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 2
-    const DELAY_BETWEEN_BATCHES_MS = 0 // retry logic in batchEmbedTexts handles 429s
+    // Free tier: small batches with pacing to stay under ~100 chunks/min rate limit
+    // Paid tier: large batches with high concurrency for max throughput
+    const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
+    const FREE_TIER_BATCH_SIZE = 25 // smaller batches to avoid 429s on free tier
+    const DELAY_BETWEEN_BATCHES_MS = apiTier === 'paid' ? 0 : 12000 // 12s gap keeps us under ~125 chunks/min
 
     console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | delay: ${DELAY_BETWEEN_BATCHES_MS}ms`)
     console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
