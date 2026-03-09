@@ -38,83 +38,47 @@ function isAllowedFileType(fileName: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext)
 }
 
-// Model fallback state: start with flash-8b, switch to flash on quota/rate errors
-const CLEANING_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'] as const
-let activeCleaningModelIndex = 0
-
-function getActiveCleaningModel(): string {
-  return CLEANING_MODELS[activeCleaningModelIndex]
-}
-
-function escalateCleaningModel(): boolean {
-  if (activeCleaningModelIndex < CLEANING_MODELS.length - 1) {
-    activeCleaningModelIndex++
-    console.log(`Cleaning model escalated to: ${getActiveCleaningModel()}`)
-    return true
-  }
-  return false
-}
-
 // Call Google Gemini API directly for text cleaning
 async function callGeminiForCleaning(prompt: string, apiKey: string): Promise<string> {
+  const model = 'gemini-2.5-flash-lite'
   const MAX_RETRIES = 3
   
-  // Try each model in order, with full retries on each before escalating
-  for (let modelIdx = activeCleaningModelIndex; modelIdx < CLEANING_MODELS.length; modelIdx++) {
-    const model = CLEANING_MODELS[modelIdx]
-    
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            systemInstruction: {
-              parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
-            },
-            generationConfig: { temperature: 0.1 }
-          }),
-        }
-      )
-
-      if (response.status === 429 || response.status === 503) {
-        const errBody = await response.text()
-        console.error(`CLEANING ${response.status} RESPONSE BODY (${model}): ${errBody.slice(0, 500)}`)
-        if (attempt < MAX_RETRIES) {
-          const waitMs = attempt * 15000 // 15s, 30s backoff (longer waits)
-          console.log(`Cleaning ${response.status} on ${model}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
-          await new Promise(r => setTimeout(r, waitMs))
-          continue
-        }
-        // All retries exhausted on this model — try next model
-        console.log(`${model} exhausted all ${MAX_RETRIES} retries, escalating...`)
-        break
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          systemInstruction: {
+            parts: [{ text: 'You fix broken word spacing in OCR-extracted text. Fix ONLY broken spacing. Do NOT add, remove, summarize, or rephrase. Preserve numbers, codes, tables. Return ONLY the corrected text.' }]
+          },
+          generationConfig: { temperature: 0.1 }
+        }),
       }
+    )
 
-      if (!response.ok) {
-        const errText = await response.text()
-        throw new Error(`Gemini API error ${response.status} (${model}): ${errText.slice(0, 200)}`)
+    if (response.status === 429 || response.status === 503) {
+      if (attempt < MAX_RETRIES) {
+        const waitMs = attempt * 5000 // 5s, 10s backoff
+        console.log(`Cleaning ${response.status}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
+        await new Promise(r => setTimeout(r, waitMs))
+        continue
       }
-
-      const result = await response.json()
-      const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
-      if (text) {
-        console.log(`Cleaning succeeded with model: ${model}`)
-        // Update active index so subsequent calls start with the working model
-        activeCleaningModelIndex = modelIdx
-      }
-      return text
+      throw new Error(`Gemini rate limited after ${MAX_RETRIES} retries`)
     }
-    
-    // If we broke out of retry loop, escalate
-    if (modelIdx < CLEANING_MODELS.length - 1) {
-      console.log(`Cleaning model escalated from ${model} to ${CLEANING_MODELS[modelIdx + 1]}`)
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`)
     }
+
+    const result = await response.json()
+    return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
   }
   
-  throw new Error('All cleaning models and retries exhausted')
+  throw new Error('All retries exhausted')
 }
 
 Deno.serve(async (req) => {
@@ -123,8 +87,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Reset cleaning model to flash-lite at the start of each request
-    activeCleaningModelIndex = 0
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
