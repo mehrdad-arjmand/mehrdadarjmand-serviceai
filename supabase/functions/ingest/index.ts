@@ -398,9 +398,16 @@ Deno.serve(async (req) => {
         await new Promise(r => setTimeout(r, 5000))
       }
       console.log(`All chunking complete. Triggering embeddings for ${documents.length} documents (${apiTier} tier)...`)
+      
+      // Fire-and-forget: don't await the full embedding response.
+      // EdgeRuntime.waitUntil may kill background work before a long embedding call completes.
+      // The generate-embeddings function handles its own error recovery and status updates.
       const triggerEmbeddings = async (doc: typeof documents[0]) => {
         try {
           console.log(`Triggering embeddings for document ${doc.id} (${doc.fileName})...`)
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 5000) // 5s timeout for the trigger
+          
           const embRes = await fetch(
             `${supabaseUrl}/functions/v1/generate-embeddings`,
             {
@@ -411,27 +418,43 @@ Deno.serve(async (req) => {
                 'apikey': supabaseAnonKey,
               },
               body: JSON.stringify({ documentId: doc.id, mode: 'full' }),
+              signal: controller.signal,
             }
           )
+          clearTimeout(timeoutId)
+          
+          // Don't await embRes.text() — just check status and move on
           if (!embRes.ok) {
-            console.error(`Embeddings failed for ${doc.id}: ${embRes.status}`)
+            const errText = await embRes.text().catch(() => 'unknown')
+            console.error(`Embeddings trigger failed for ${doc.id}: ${embRes.status} - ${errText}`)
+            await supabase.from('documents').update({
+              ingestion_status: 'failed',
+              ingestion_error: `Embedding trigger failed: HTTP ${embRes.status}`
+            }).eq('id', doc.id)
           } else {
-            console.log(`Embeddings complete for ${doc.id}`)
+            console.log(`Embeddings triggered successfully for ${doc.id}`)
+            // Response body will be consumed by the runtime, we don't need to wait for it
           }
-          await embRes.text()
         } catch (err) {
-          console.error(`Embedding error for ${doc.id}:`, err)
+          // AbortError means timeout — the embedding function is still running server-side
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            console.log(`Embedding trigger for ${doc.id} timed out (function still running server-side)`)
+          } else {
+            console.error(`Embedding trigger error for ${doc.id}:`, err)
+            await supabase.from('documents').update({
+              ingestion_status: 'failed',
+              ingestion_error: `Embedding trigger error: ${err instanceof Error ? err.message : 'Unknown'}`
+            }).eq('id', doc.id)
+          }
         }
       }
 
-      // Free tier: sequential embeddings; Paid: parallel
-      if (apiTier === 'free') {
-        console.log('Free tier: triggering embeddings sequentially...')
-        for (const doc of documents) {
-          await triggerEmbeddings(doc)
+      // Sequential for both tiers — avoids overwhelming the API
+      for (let i = 0; i < documents.length; i++) {
+        await triggerEmbeddings(documents[i])
+        if (i < documents.length - 1 && apiTier === 'free') {
+          await new Promise(r => setTimeout(r, 2000)) // 2s gap between docs for free tier
         }
-      } else {
-        await Promise.allSettled(documents.map(triggerEmbeddings))
       }
     })()
 
