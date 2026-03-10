@@ -857,7 +857,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 rows={3}
                 disabled={isQuerying || isConversationMode}
                 onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) {e.preventDefault();handleSend();}}}
-                className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-10 px-4 text-sm leading-relaxed" />
+                className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-14 px-4 text-sm leading-relaxed" />
 
                 <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
                   <div className="flex items-center gap-1">

@@ -5,11 +5,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-const BATCH_EMBED_SIZE_PAID = 100   // Google batchEmbedContents max
-const BATCH_EMBED_SIZE_FREE = 15    // Small batches for free tier to avoid 429s
+const BATCH_EMBED_SIZE_PAID = 100
+const BATCH_EMBED_SIZE_FREE = 10    // Reduced from 15 to stay well under 100 RPM
 const CHUNKS_PER_FETCH = 500
 const MAX_CHUNK_TEXT_LENGTH = 10000
-const FREE_TIER_BATCH_DELAY_MS = 3000  // 3s delay between batches on free tier
+const FREE_TIER_BATCH_DELAY_MS = 4000  // 4s delay between batches on free tier
+const FREE_TIER_DOC_DELAY_MS = 5000    // 5s delay between documents on free tier
 
 function isValidUUID(value: unknown): value is string {
   if (typeof value !== 'string') return false
@@ -68,9 +69,19 @@ Deno.serve(async (req) => {
     if (!contentType?.includes('application/json')) throw new Error('Content-Type must be application/json')
 
     const body = await req.json()
-    const { documentId, mode } = body as { documentId?: unknown; mode?: string }
+    const { documentId, documentIds, mode } = body as { documentId?: unknown; documentIds?: unknown[]; mode?: string }
 
-    if (!isValidUUID(documentId)) throw new Error('documentId must be a valid UUID')
+    // Support both single documentId and batch documentIds
+    const docIds: string[] = []
+    if (Array.isArray(documentIds)) {
+      for (const id of documentIds) {
+        if (isValidUUID(id)) docIds.push(id)
+      }
+    }
+    if (isValidUUID(documentId) && !docIds.includes(documentId)) {
+      docIds.push(documentId)
+    }
+    if (docIds.length === 0) throw new Error('documentId or documentIds must contain valid UUIDs')
 
     const isFullMode = mode === 'full'
 
@@ -84,149 +95,165 @@ Deno.serve(async (req) => {
       : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
     if (!apiKey) throw new Error('No Google API key configured')
 
-    // Free tier: small batches with pacing to stay under ~100 chunks/min rate limit
-    // Paid tier: large batches with high concurrency for max throughput
-    // Free tier: serialize requests (concurrency 1) and let retry logic handle occasional 429s
-    // Paid tier: high concurrency for max throughput
     const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
     const BATCH_EMBED_SIZE = apiTier === 'paid' ? BATCH_EMBED_SIZE_PAID : BATCH_EMBED_SIZE_FREE
-    console.log(`API tier: ${apiTier} (from role) | concurrency: ${CONCURRENT_API_CALLS} | batchSize: ${BATCH_EMBED_SIZE}`)
-    console.log(`Generating embeddings for document ${documentId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
+    console.log(`API tier: ${apiTier} | concurrency: ${CONCURRENT_API_CALLS} | batchSize: ${BATCH_EMBED_SIZE} | documents: ${docIds.length}`)
 
-    let totalProcessed = 0
-    let isComplete = false
+    const results: { documentId: string; processed: number; embedded: number; total: number; complete: boolean }[] = []
 
-    do {
-      const { data: chunks, error: chunksError } = await supabase
-        .from('chunks')
-        .select('id, text')
-        .eq('document_id', documentId)
-        .is('embedding', null)
-        .order('chunk_index')
-        .limit(CHUNKS_PER_FETCH)
+    // Process documents SEQUENTIALLY to avoid RPM competition
+    for (let docIndex = 0; docIndex < docIds.length; docIndex++) {
+      const currentDocId = docIds[docIndex]
+      console.log(`[${docIndex + 1}/${docIds.length}] Generating embeddings for document ${currentDocId}, mode=${isFullMode ? 'full' : 'batch'}, user=${user.id}`)
 
-      if (chunksError) throw chunksError
-      if (!chunks || chunks.length === 0) { isComplete = true; break }
-
-      // Split into batches for batchEmbedContents API (size depends on tier)
-      const apiBatches: typeof chunks[] = []
-      for (let i = 0; i < chunks.length; i += BATCH_EMBED_SIZE) {
-        apiBatches.push(chunks.slice(i, i + BATCH_EMBED_SIZE))
+      // Add delay between documents on free tier to let RPM window reset
+      if (apiTier === 'free' && docIndex > 0) {
+        console.log(`Free tier: waiting ${FREE_TIER_DOC_DELAY_MS}ms between documents...`)
+        await new Promise(r => setTimeout(r, FREE_TIER_DOC_DELAY_MS))
       }
 
-      // Process with detected concurrency
-      for (let i = 0; i < apiBatches.length; i += CONCURRENT_API_CALLS) {
-        const concurrentBatches = apiBatches.slice(i, i + CONCURRENT_API_CALLS)
+      let totalProcessed = 0
+      let isComplete = false
 
-        const results = await Promise.all(
-          concurrentBatches.map(async (batch) => {
-            const texts = batch.map(c => {
-              const text = c.text
-              if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
-              return text.slice(0, MAX_CHUNK_TEXT_LENGTH)
-            })
+      try {
+        do {
+          const { data: chunks, error: chunksError } = await supabase
+            .from('chunks')
+            .select('id, text')
+            .eq('document_id', currentDocId)
+            .is('embedding', null)
+            .order('chunk_index')
+            .limit(CHUNKS_PER_FETCH)
 
-            const embeddings = await batchEmbedTexts(apiKey, texts)
+          if (chunksError) throw chunksError
+          if (!chunks || chunks.length === 0) { isComplete = true; break }
 
-            // Bulk update
-            await Promise.all(
-              batch.map((chunk, idx) =>
-                supabase
-                  .from('chunks')
-                  .update({ embedding: embeddings[idx] })
-                  .eq('id', chunk.id)
-                  .then(({ error }) => { if (error) throw error })
-              )
+          const apiBatches: typeof chunks[] = []
+          for (let i = 0; i < chunks.length; i += BATCH_EMBED_SIZE) {
+            apiBatches.push(chunks.slice(i, i + BATCH_EMBED_SIZE))
+          }
+
+          // Process batches with configured concurrency (1 for free, 10 for paid)
+          for (let i = 0; i < apiBatches.length; i += CONCURRENT_API_CALLS) {
+            const concurrentBatches = apiBatches.slice(i, i + CONCURRENT_API_CALLS)
+
+            const batchResults = await Promise.all(
+              concurrentBatches.map(async (batch) => {
+                const texts = batch.map(c => {
+                  const text = c.text
+                  if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
+                  return text.slice(0, MAX_CHUNK_TEXT_LENGTH)
+                })
+
+                const embeddings = await batchEmbedTexts(apiKey, texts)
+
+                await Promise.all(
+                  batch.map((chunk, idx) =>
+                    supabase
+                      .from('chunks')
+                      .update({ embedding: embeddings[idx] })
+                      .eq('id', chunk.id)
+                      .then(({ error }) => { if (error) throw error })
+                  )
+                )
+
+                return batch.length
+              })
             )
 
-            return batch.length
-          })
-        )
+            totalProcessed += batchResults.reduce((a, b) => a + b, 0)
 
-        totalProcessed += results.reduce((a, b) => a + b, 0)
+            // Free tier: add delay between batch groups to stay under rate limits
+            if (apiTier === 'free' && i + CONCURRENT_API_CALLS < apiBatches.length) {
+              console.log(`Free tier: waiting ${FREE_TIER_BATCH_DELAY_MS}ms between embedding batches...`)
+              await new Promise(r => setTimeout(r, FREE_TIER_BATCH_DELAY_MS))
+            }
+          }
 
-        // Free tier: add delay between batch groups to stay under rate limits
-        if (apiTier === 'free' && i + CONCURRENT_API_CALLS < apiBatches.length) {
-          console.log(`Free tier: waiting ${FREE_TIER_BATCH_DELAY_MS}ms between embedding batches...`)
-          await new Promise(r => setTimeout(r, FREE_TIER_BATCH_DELAY_MS))
+          // Update document progress
+          const { count: embeddedCount } = await supabase
+            .from('chunks')
+            .select('id', { count: 'exact', head: true })
+            .eq('document_id', currentDocId)
+            .not('embedding', 'is', null)
+
+          const { data: doc } = await supabase
+            .from('documents')
+            .select('total_chunks')
+            .eq('id', currentDocId)
+            .single()
+
+          const totalChunks = doc?.total_chunks || 0
+          const embedded = embeddedCount || 0
+          isComplete = embedded >= totalChunks
+
+          await supabase
+            .from('documents')
+            .update({ ingested_chunks: embedded })
+            .eq('id', currentDocId)
+
+          console.log(`Progress: ${embedded}/${totalChunks} chunks embedded for ${currentDocId}`)
+
+          if (!isFullMode) break
+
+        } while (!isComplete)
+
+        if (isComplete) {
+          await supabase
+            .from('documents')
+            .update({ ingestion_status: 'complete' })
+            .eq('id', currentDocId)
         }
+
+        const { count: finalEmbedded } = await supabase
+          .from('chunks')
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', currentDocId)
+          .not('embedding', 'is', null)
+
+        const { data: finalDoc } = await supabase
+          .from('documents')
+          .select('total_chunks')
+          .eq('id', currentDocId)
+          .single()
+
+        results.push({
+          documentId: currentDocId,
+          processed: totalProcessed,
+          embedded: finalEmbedded || 0,
+          total: finalDoc?.total_chunks || 0,
+          complete: isComplete,
+        })
+      } catch (docError) {
+        console.error(`Error embedding document ${currentDocId}:`, docError)
+        await supabase
+          .from('documents')
+          .update({
+            ingestion_status: 'failed',
+            ingestion_error: docError instanceof Error ? docError.message.slice(0, 1000) : 'Unknown error'
+          })
+          .eq('id', currentDocId)
+
+        results.push({
+          documentId: currentDocId,
+          processed: totalProcessed,
+          embedded: 0,
+          total: 0,
+          complete: false,
+        })
       }
-
-      // Update document progress
-      const { count: embeddedCount } = await supabase
-        .from('chunks')
-        .select('id', { count: 'exact', head: true })
-        .eq('document_id', documentId)
-        .not('embedding', 'is', null)
-
-      const { data: doc } = await supabase
-        .from('documents')
-        .select('total_chunks')
-        .eq('id', documentId)
-        .single()
-
-      const totalChunks = doc?.total_chunks || 0
-      const embedded = embeddedCount || 0
-      isComplete = embedded >= totalChunks
-
-      await supabase
-        .from('documents')
-        .update({ ingested_chunks: embedded })
-        .eq('id', documentId)
-
-      console.log(`Progress: ${embedded}/${totalChunks} chunks embedded`)
-
-      if (!isFullMode) break
-
-    } while (!isComplete)
-
-    if (isComplete) {
-      await supabase
-        .from('documents')
-        .update({ ingestion_status: 'complete' })
-        .eq('id', documentId)
     }
-
-    const { count: finalEmbedded } = await supabase
-      .from('chunks')
-      .select('id', { count: 'exact', head: true })
-      .eq('document_id', documentId)
-      .not('embedding', 'is', null)
-
-    const { data: finalDoc } = await supabase
-      .from('documents')
-      .select('total_chunks')
-      .eq('id', documentId)
-      .single()
 
     return new Response(
       JSON.stringify({
         success: true,
         tier: apiTier,
-        processed: totalProcessed,
-        embedded: finalEmbedded || 0,
-        total: finalDoc?.total_chunks || 0,
-        complete: isComplete,
+        documents: results,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
     console.error('Error generating embeddings:', error)
-
-    try {
-      const bodyClone = await req.clone().json()
-      const documentId = bodyClone?.documentId
-      if (isValidUUID(documentId)) {
-        await supabase
-          .from('documents')
-          .update({
-            ingestion_status: 'failed',
-            ingestion_error: error instanceof Error ? error.message.slice(0, 1000) : 'Unknown error'
-          })
-          .eq('id', documentId)
-      }
-    } catch {}
-
     return new Response(
       JSON.stringify({ success: false, error: 'Embedding generation failed. Please try again.' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
@@ -264,12 +291,11 @@ async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<string[
           (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
         )?.retryDelay
 
-      let waitMs = attempt * 15000  // 15s, 30s, 45s, 60s, 75s
+        let waitMs = attempt * 15000  // 15s, 30s, 45s, 60s, 75s
         if (retryDelay) {
           const seconds = parseFloat(retryDelay.replace('s', ''))
           if (!isNaN(seconds)) waitMs = Math.ceil(seconds * 1000) + 1000
         }
-        // Cap wait time at 60s (baseline)
         waitMs = Math.min(waitMs, 60000)
 
         console.log(`Rate limited on batch of ${texts.length}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
