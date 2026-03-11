@@ -879,7 +879,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       activeFilters.push({ key: field, label: `${field}: ${filterValues[field]}`, clear: () => setFilterValues(prev => { const n = { ...prev }; delete n[field]; return n; }) });
     }
   });
-  if (filterRole) activeFilters.push({ key: 'role', label: `Role: ${filterRole}`, clear: () => setFilterRole("") });
+  
   if (filterDocumentIds.length > 0) {
     const docLabel = filterDocumentIds.length === 1 ? (documents.find(d => d.id === filterDocumentIds[0])?.fileName || '1 document') : `${filterDocumentIds.length} documents`;
     activeFilters.push({ key: 'documents', label: `Documents: ${docLabel}`, clear: () => setFilterDocumentIds([]) });
