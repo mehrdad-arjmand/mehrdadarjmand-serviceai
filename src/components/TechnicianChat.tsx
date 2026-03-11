@@ -859,7 +859,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) {e.preventDefault();handleSend();}}}
                 className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-14 px-4 text-sm leading-relaxed" />
 
-                <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
+                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 bg-popover rounded-b-xl">
                   <div className="flex items-center gap-1">
                     {hasDocuments &&
                   <Button
