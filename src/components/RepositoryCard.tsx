@@ -1142,7 +1142,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                   options={fieldOptions[field] || []}
                 />
               ))}
-              <InlineSelect label="Access Role" value={filterRole} onChange={v => { setFilterRole(v); setVisibleCount(10); }} options={availableRoles.map(r => r.role)} />
+              
               <DocumentMultiSelect label="Documents" selectedIds={filterDocumentIds} documents={docItems} onChange={ids => { setFilterDocumentIds(ids); setVisibleCount(10); }} />
             </div>
           </div>
