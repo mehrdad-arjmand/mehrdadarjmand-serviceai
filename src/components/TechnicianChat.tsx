@@ -857,9 +857,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 rows={3}
                 disabled={isQuerying || isConversationMode}
                 onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) {e.preventDefault();handleSend();}}}
-                className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-14 px-4 text-sm leading-relaxed" />
+                className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-14 px-4 text-sm leading-relaxed"
+                onInput={(e) => {
+                  const el = e.currentTarget;
+                  // Auto-scroll textarea so cursor stays above the bottom bar
+                  requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+                }} />
 
-                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 bg-popover rounded-b-xl">
+                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 bg-background rounded-b-xl border-t border-border/40">
                   <div className="flex items-center gap-1">
                     {hasDocuments &&
                   <Button
