@@ -1068,7 +1068,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                       onAddNew={v => handleAddOption(field, v)}
                     />
                   ))}
-                  <RoleSelect label="Access Role" selectedRoles={selectedRoles} availableRoles={availableRoles} onChange={setSelectedRoles} />
+                  
                 </div>
               </div>
             </>
