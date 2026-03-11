@@ -1263,7 +1263,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                 options={fieldOptions[field] || []}
               />
             ))}
-            <RoleSelect label="Access Role" selectedRoles={editSelectedRoles} availableRoles={availableRoles} onChange={setEditSelectedRoles} />
+            
           </div>
           <DialogFooter>
             <button onClick={() => setEditTarget(null)} className="px-5 py-2 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Cancel</button>

@@ -6,11 +6,11 @@ const corsHeaders = {
 }
 
 const BATCH_EMBED_SIZE_PAID = 100
-const BATCH_EMBED_SIZE_FREE = 5      // 5 chunks per API call to stay well under 100 RPM and 30K TPM
+const BATCH_EMBED_SIZE_FREE = 3      // 3 chunks per API call — stays under 30K TPM (3 × 6000 ≈ 18K tokens)
 const CHUNKS_PER_FETCH = 500
-const MAX_CHUNK_TEXT_LENGTH = 8000    // Reduced to help stay under TPM limits
-const FREE_TIER_BATCH_DELAY_MS = 8000  // 8s delay between batches — ensures RPM resets
-const FREE_TIER_DOC_DELAY_MS = 10000   // 10s delay between documents on free tier
+const MAX_CHUNK_TEXT_LENGTH = 6000    // Reduced to stay well under 30K TPM per batch
+const FREE_TIER_BATCH_DELAY_MS = 4000  // 4s delay between batches — 3 chunks/batch keeps RPM low enough
+const FREE_TIER_DOC_DELAY_MS = 6000    // 6s delay between documents on free tier
 
 function isValidUUID(value: unknown): value is string {
   if (typeof value !== 'string') return false
