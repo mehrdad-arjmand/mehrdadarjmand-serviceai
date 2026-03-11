@@ -879,7 +879,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       activeFilters.push({ key: field, label: `${field}: ${filterValues[field]}`, clear: () => setFilterValues(prev => { const n = { ...prev }; delete n[field]; return n; }) });
     }
   });
-  if (filterRole) activeFilters.push({ key: 'role', label: `Role: ${filterRole}`, clear: () => setFilterRole("") });
+  
   if (filterDocumentIds.length > 0) {
     const docLabel = filterDocumentIds.length === 1 ? (documents.find(d => d.id === filterDocumentIds[0])?.fileName || '1 document') : `${filterDocumentIds.length} documents`;
     activeFilters.push({ key: 'documents', label: `Documents: ${docLabel}`, clear: () => setFilterDocumentIds([]) });
@@ -956,8 +956,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
   };
 
-  // Compute grid columns based on field count + Access Role + Documents
-  const metadataFieldCount = projectFields.length + 2; // +1 for Access Role, +1 for Documents
+  // Compute grid columns based on field count + Documents
+  const metadataFieldCount = projectFields.length + 1; // +1 for Documents
   const gridCols = metadataFieldCount <= 2 ? 2 : 3;
 
   return (
@@ -1068,7 +1068,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                       onAddNew={v => handleAddOption(field, v)}
                     />
                   ))}
-                  <RoleSelect label="Access Role" selectedRoles={selectedRoles} availableRoles={availableRoles} onChange={setSelectedRoles} />
+                  
                 </div>
               </div>
             </>
@@ -1142,7 +1142,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                   options={fieldOptions[field] || []}
                 />
               ))}
-              <InlineSelect label="Access Role" value={filterRole} onChange={v => { setFilterRole(v); setVisibleCount(10); }} options={availableRoles.map(r => r.role)} />
+              
               <DocumentMultiSelect label="Documents" selectedIds={filterDocumentIds} documents={docItems} onChange={ids => { setFilterDocumentIds(ids); setVisibleCount(10); }} />
             </div>
           </div>
@@ -1263,7 +1263,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                 options={fieldOptions[field] || []}
               />
             ))}
-            <RoleSelect label="Access Role" selectedRoles={editSelectedRoles} availableRoles={availableRoles} onChange={setEditSelectedRoles} />
+            
           </div>
           <DialogFooter>
             <button onClick={() => setEditTarget(null)} className="px-5 py-2 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Cancel</button>

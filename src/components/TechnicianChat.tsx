@@ -115,11 +115,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const conversationActiveRef = useRef(false);
   const dictationActiveRef = useRef(false);
   const dictationPartsRef = useRef<string[]>([]);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const ttsKeepAliveRef = useRef<NodeJS.Timeout | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentTranscriptRef = useRef<string>("");
   const abortCountRef = useRef<number>(0);
-  const listeningWatchdogRef = useRef<NodeJS.Timeout | null>(null);
+  const listeningWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionStartedRef = useRef<boolean>(false);
   const isProcessingVoiceRef = useRef<boolean>(false);
   const lastSubmittedTranscriptRef = useRef<string>("");
@@ -857,9 +857,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 rows={3}
                 disabled={isQuerying || isConversationMode}
                 onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !isConversationMode && hasText) {e.preventDefault();handleSend();}}}
-                className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-14 px-4 text-sm leading-relaxed" />
+                className="resize-none border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pt-3 pb-14 px-4 text-sm leading-relaxed"
+                onInput={(e) => {
+                  const el = e.currentTarget;
+                  // Auto-scroll textarea so cursor stays above the bottom bar
+                  requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+                }} />
 
-                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 bg-popover rounded-b-xl">
+                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 bg-background rounded-b-xl border-t border-border/40">
                   <div className="flex items-center gap-1">
                     {hasDocuments &&
                   <Button
@@ -987,35 +992,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 );
               })}
 
-              {/* Default: Access Role */}
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Access Role</p>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button className="w-full flex items-center justify-between h-10 border border-border rounded-lg px-3 text-sm bg-background hover:bg-muted/40 transition-colors text-left" disabled={filtersLocked}>
-                      <span className={currentFilters.accessRole ? "text-foreground" : "text-muted-foreground"}>{currentFilters.accessRole || "All"}</span>
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-56 p-0 z-50 bg-background border border-border shadow-lg" align="start">
-                    <Command>
-                      <CommandList>
-                        <CommandGroup>
-                          <CommandItem onSelect={() => updateCurrentFilters({ ...currentFilters, accessRole: "" })} className="text-sm">
-                            <Check className={cn("mr-2 h-3.5 w-3.5", !currentFilters.accessRole ? "opacity-100" : "opacity-0")} />
-                            All
-                          </CommandItem>
-                          {availableRoles.map(role => (
-                            <CommandItem key={role.role} onSelect={() => updateCurrentFilters({ ...currentFilters, accessRole: role.role })} className="text-sm">
-                              <Check className={cn("mr-2 h-3.5 w-3.5", currentFilters.accessRole === role.role ? "opacity-100" : "opacity-0")} />
-                              {role.displayName || role.role}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
 
               {/* Default: Documents multi-select */}
               <div>
