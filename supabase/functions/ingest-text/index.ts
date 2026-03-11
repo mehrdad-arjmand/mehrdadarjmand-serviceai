@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
           if (error) throw error
         }
 
-        await supabase.from('documents').update({ ingested_chunks: chunks.length, ingestion_status: 'processing_embeddings' }).eq('id', docId)
+        await supabase.from('documents').update({ ingested_chunks: 0, ingestion_status: 'processing_embeddings' }).eq('id', docId)
 
         // Trigger embeddings
         const embRes = await fetch(`${supabaseUrl}/functions/v1/generate-embeddings`, {
