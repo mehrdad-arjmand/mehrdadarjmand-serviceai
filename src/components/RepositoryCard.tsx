@@ -956,8 +956,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
   };
 
-  // Compute grid columns based on field count + Access Role + Documents
-  const metadataFieldCount = projectFields.length + 2; // +1 for Access Role, +1 for Documents
+  // Compute grid columns based on field count + Documents
+  const metadataFieldCount = projectFields.length + 1; // +1 for Documents
   const gridCols = metadataFieldCount <= 2 ? 2 : 3;
 
   return (
