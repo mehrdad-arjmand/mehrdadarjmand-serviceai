@@ -992,35 +992,6 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                 );
               })}
 
-              {/* Default: Access Role */}
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">Access Role</p>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button className="w-full flex items-center justify-between h-10 border border-border rounded-lg px-3 text-sm bg-background hover:bg-muted/40 transition-colors text-left" disabled={filtersLocked}>
-                      <span className={currentFilters.accessRole ? "text-foreground" : "text-muted-foreground"}>{currentFilters.accessRole || "All"}</span>
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-56 p-0 z-50 bg-background border border-border shadow-lg" align="start">
-                    <Command>
-                      <CommandList>
-                        <CommandGroup>
-                          <CommandItem onSelect={() => updateCurrentFilters({ ...currentFilters, accessRole: "" })} className="text-sm">
-                            <Check className={cn("mr-2 h-3.5 w-3.5", !currentFilters.accessRole ? "opacity-100" : "opacity-0")} />
-                            All
-                          </CommandItem>
-                          {availableRoles.map(role => (
-                            <CommandItem key={role.role} onSelect={() => updateCurrentFilters({ ...currentFilters, accessRole: role.role })} className="text-sm">
-                              <Check className={cn("mr-2 h-3.5 w-3.5", currentFilters.accessRole === role.role ? "opacity-100" : "opacity-0")} />
-                              {role.displayName || role.role}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
 
               {/* Default: Documents multi-select */}
               <div>
