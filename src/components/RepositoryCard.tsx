@@ -439,53 +439,27 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const documentsRef = useRef(documents);
   documentsRef.current = documents;
 
-  // Track when documents enter processing_embeddings to detect stuck ones
-  const embeddingStartTimesRef = useRef<Record<string, number>>({});
-  const autoRetryInProgressRef = useRef<Set<string>>(new Set());
-
   useEffect(() => {
     fetchDocuments();
     const docsChannel = supabase.channel('repository-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).subscribe();
     const chunksChannel = supabase.channel('repository-chunks').on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments).subscribe();
+
     const poll = setInterval(async () => {
       const docs = documentsRef.current;
-      const stuckDocs = docs.filter(d => d.ingestionStatus === 'processing_embeddings');
-      
-      if (stuckDocs.length > 0 || docs.some(d => d.ingestionStatus === 'in_progress')) {
+      const hasActiveIngestion = docs.some(
+        d => d.ingestionStatus === 'in_progress' || d.ingestionStatus === 'processing_embeddings'
+      );
+
+      if (hasActiveIngestion) {
         fetchDocuments();
       }
-
-      // Auto-retry: if a document has been at 'processing_embeddings' with 0 embedded chunks for 60s+
-      for (const doc of stuckDocs) {
-        if (!embeddingStartTimesRef.current[doc.id]) {
-          embeddingStartTimesRef.current[doc.id] = Date.now();
-        }
-        const elapsed = Date.now() - embeddingStartTimesRef.current[doc.id];
-        if (elapsed > 60000 && doc.embeddedChunks === 0 && !autoRetryInProgressRef.current.has(doc.id)) {
-          console.log(`Auto-retrying embeddings for stuck document ${doc.id} (${doc.fileName})`);
-          autoRetryInProgressRef.current.add(doc.id);
-          try {
-            await supabase.functions.invoke('generate-embeddings', {
-              body: { documentId: doc.id, mode: 'full' }
-            });
-          } catch (err) {
-            console.error(`Auto-retry failed for ${doc.id}:`, err);
-          } finally {
-            autoRetryInProgressRef.current.delete(doc.id);
-            delete embeddingStartTimesRef.current[doc.id];
-            fetchDocuments();
-          }
-        }
-      }
-
-      // Clean up tracking for completed documents
-      for (const id of Object.keys(embeddingStartTimesRef.current)) {
-        if (!stuckDocs.find(d => d.id === id)) {
-          delete embeddingStartTimesRef.current[id];
-        }
-      }
     }, 5000);
-    return () => { supabase.removeChannel(docsChannel); supabase.removeChannel(chunksChannel); clearInterval(poll); };
+
+    return () => {
+      supabase.removeChannel(docsChannel);
+      supabase.removeChannel(chunksChannel);
+      clearInterval(poll);
+    };
   }, [projectId]);
 
   // ── Add new dropdown option ──
