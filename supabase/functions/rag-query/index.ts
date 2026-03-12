@@ -321,11 +321,13 @@ Deno.serve(async (req) => {
       model: selectedModel
     } = request
 
-    // Load conversation history from DB if sessionId is provided
+    // Load conversation history ONLY in conversation mode.
+    // This prevents stale prior answers from contaminating retrieval-grounded responses
+    // after documents are updated/re-indexed.
     let conversationHistory: ConversationMessage[] = []
     let sessionSummary: string | null = null
     
-    if (sessionId) {
+    if (isConversationMode && sessionId) {
       try {
         // Load session summary
         const { data: sessionData } = await supabase
@@ -410,7 +412,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.error('Error loading session history:', e)
       }
-    } else if (history && history.length > 0) {
+    } else if (isConversationMode && history && history.length > 0) {
       // Fallback: use client-sent history if no sessionId
       conversationHistory = history.slice(-12)
     }
