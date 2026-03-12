@@ -6,11 +6,11 @@ const corsHeaders = {
 }
 
 const BATCH_EMBED_SIZE_PAID = 100
-const BATCH_EMBED_SIZE_FREE = 3      // 3 chunks per API call — stays under 30K TPM (3 × 6000 ≈ 18K tokens)
+const BATCH_EMBED_SIZE_FREE = 5       // Faster throughput while staying stable after duplicate-trigger removal
 const CHUNKS_PER_FETCH = 500
-const MAX_CHUNK_TEXT_LENGTH = 6000    // Reduced to stay well under 30K TPM per batch
-const FREE_TIER_BATCH_DELAY_MS = 4000  // 4s delay between batches — 3 chunks/batch keeps RPM low enough
-const FREE_TIER_DOC_DELAY_MS = 6000    // 6s delay between documents on free tier
+const MAX_CHUNK_TEXT_LENGTH = 6000    // Safety cap; ingestion currently creates ~800-char chunks
+const FREE_TIER_BATCH_DELAY_MS = 3500 // Balanced delay to reduce 429s while improving total runtime
+const FREE_TIER_DOC_DELAY_MS = 4000   // Short cooldown between documents
 
 function isValidUUID(value: unknown): value is string {
   if (typeof value !== 'string') return false
