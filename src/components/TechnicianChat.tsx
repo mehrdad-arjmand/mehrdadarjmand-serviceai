@@ -864,7 +864,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                   requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
                 }} />
 
-                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 bg-background rounded-b-xl border-t border-border/40">
+                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 bg-background rounded-b-xl">
                   <div className="flex items-center gap-1">
                     {hasDocuments &&
                   <Button
