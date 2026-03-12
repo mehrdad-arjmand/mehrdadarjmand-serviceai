@@ -356,7 +356,7 @@ Deno.serve(async (req) => {
 
           await supabase
             .from('documents')
-            .update({ ingested_chunks: chunks.length, ingestion_status: 'processing_embeddings' })
+            .update({ ingested_chunks: 0, ingestion_status: 'processing_embeddings' })
             .eq('id', doc.id)
 
           console.log(`Chunks saved for ${fileData.name}, triggering embeddings...`)
