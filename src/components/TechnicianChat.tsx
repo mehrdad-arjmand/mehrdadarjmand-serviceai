@@ -288,7 +288,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const startConversationListening = useCallback(() => {
     if (!conversationActiveRef.current) return;
+
+    // Hard guard: never reactivate microphone while TTS is active/speaking
+    if (isTtsActiveRef.current || ('speechSynthesis' in window && window.speechSynthesis.speaking)) {
+      if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
+      restartListeningTimerRef.current = setTimeout(() => {
+        if (conversationActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();
+      }, 300);
+      return;
+    }
+
     clearSilenceTimer();
+    if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     // Clear any previous watchdog
     if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
     recognitionStartedRef.current = false;
@@ -359,7 +370,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
         recognitionRef.current = null;
-        setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);
+        setTimeout(() => {
+          if (conversationActiveRef.current && !isTtsActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();
+        }, 300);
       } else if (event.error === 'aborted') {
         recognitionRef.current = null;
         abortCountRef.current++;
@@ -372,14 +385,17 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         return;
       } else if (conversationActiveRef.current) {
         recognitionRef.current = null;
-        setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 500);
+        setTimeout(() => {
+          if (conversationActiveRef.current && !isTtsActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();
+        }, 500);
       } else {recognitionRef.current = null;}
     };
     recognition.onend = () => {
       recognitionRef.current = null;
-      // Don't restart if we're currently processing a transcript or a silence timer is pending
-      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
-        setTimeout(() => {if (conversationActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();}, 200);
+      // Never restart while TTS is active/speaking; this prevents mobile echo loops
+      const speechIsActive = isTtsActiveRef.current || ('speechSynthesis' in window && window.speechSynthesis.speaking);
+      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current && !speechIsActive) {
+        setTimeout(() => {if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isTtsActiveRef.current) startConversationListening();}, 200);
       }
     };
     try {
@@ -396,7 +412,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           try { recognitionRef.current.abort(); } catch (e) {}
           recognitionRef.current = null;
         }
-        setTimeout(() => { if (conversationActiveRef.current) startConversationListening(); }, 500);
+        setTimeout(() => { if (conversationActiveRef.current && !isTtsActiveRef.current) startConversationListening(); }, 500);
       }
     }, 3000);
   }, [toast, clearSilenceTimer]);
