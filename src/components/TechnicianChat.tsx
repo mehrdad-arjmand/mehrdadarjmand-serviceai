@@ -206,6 +206,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
       if (ttsKeepAliveRef.current) {clearInterval(ttsKeepAliveRef.current);ttsKeepAliveRef.current = null;}
       if (listeningWatchdogRef.current) {clearTimeout(listeningWatchdogRef.current);listeningWatchdogRef.current = null;}
+      if (restartListeningTimerRef.current) {clearTimeout(restartListeningTimerRef.current);restartListeningTimerRef.current = null;}
+      isTtsActiveRef.current = false;
       stopListening();
       stopSpeaking();
     };
@@ -222,7 +224,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const stopSpeaking = useCallback(() => {
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
+    if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if ('speechSynthesis' in window) {window.speechSynthesis.cancel();utteranceQueueRef.current++;}
+    isTtsActiveRef.current = false;
     setIsSpeaking(false);
     setSpeakingMessageId(null);
     setConversationState((prev) => prev === "speaking" ? "idle" : prev);
@@ -230,18 +234,21 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const speakText = useCallback((text: string, onComplete?: () => void, messageId?: string) => {
     if (!('speechSynthesis' in window)) {
+      isTtsActiveRef.current = false;
       toast({ title: "TTS not supported", description: "Voice playback is not supported in this browser.", variant: "destructive" });
       onComplete?.();return;
     }
     window.speechSynthesis.cancel();
+    if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     // Clear any existing keepAlive
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     const cleanText = renderAnswerForSpeech(text);
     const sentences = splitIntoSentences(cleanText);
-    if (sentences.length === 0) {onComplete?.();return;}
+    if (sentences.length === 0) {isTtsActiveRef.current = false; onComplete?.();return;}
     if (!selectedVoiceRef.current) {selectedVoiceRef.current = selectBestVoice();}
     const queueId = ++utteranceQueueRef.current;
     let currentIndex = 0;
+    isTtsActiveRef.current = true;
     setIsSpeaking(true);
     if (messageId) setSpeakingMessageId(messageId);
     // Chrome workaround: pause/resume every 10s to prevent cutting out after ~15s
@@ -253,6 +260,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     }, 10000);
     const cleanup = () => {
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
+      isTtsActiveRef.current = false;
       setIsSpeaking(false);
       setSpeakingMessageId(null);
     };
