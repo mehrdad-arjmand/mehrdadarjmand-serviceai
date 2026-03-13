@@ -117,11 +117,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const dictationPartsRef = useRef<string[]>([]);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const restartListeningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentTranscriptRef = useRef<string>("");
   const abortCountRef = useRef<number>(0);
   const listeningWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionStartedRef = useRef<boolean>(false);
   const isProcessingVoiceRef = useRef<boolean>(false);
+  const isTtsActiveRef = useRef<boolean>(false);
   const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
 
@@ -204,6 +206,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
       if (ttsKeepAliveRef.current) {clearInterval(ttsKeepAliveRef.current);ttsKeepAliveRef.current = null;}
       if (listeningWatchdogRef.current) {clearTimeout(listeningWatchdogRef.current);listeningWatchdogRef.current = null;}
+      if (restartListeningTimerRef.current) {clearTimeout(restartListeningTimerRef.current);restartListeningTimerRef.current = null;}
+      isTtsActiveRef.current = false;
       stopListening();
       stopSpeaking();
     };
@@ -220,7 +224,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const stopSpeaking = useCallback(() => {
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
+    if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if ('speechSynthesis' in window) {window.speechSynthesis.cancel();utteranceQueueRef.current++;}
+    isTtsActiveRef.current = false;
     setIsSpeaking(false);
     setSpeakingMessageId(null);
     setConversationState((prev) => prev === "speaking" ? "idle" : prev);
@@ -228,18 +234,21 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const speakText = useCallback((text: string, onComplete?: () => void, messageId?: string) => {
     if (!('speechSynthesis' in window)) {
+      isTtsActiveRef.current = false;
       toast({ title: "TTS not supported", description: "Voice playback is not supported in this browser.", variant: "destructive" });
       onComplete?.();return;
     }
     window.speechSynthesis.cancel();
+    if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     // Clear any existing keepAlive
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     const cleanText = renderAnswerForSpeech(text);
     const sentences = splitIntoSentences(cleanText);
-    if (sentences.length === 0) {onComplete?.();return;}
+    if (sentences.length === 0) {isTtsActiveRef.current = false; onComplete?.();return;}
     if (!selectedVoiceRef.current) {selectedVoiceRef.current = selectBestVoice();}
     const queueId = ++utteranceQueueRef.current;
     let currentIndex = 0;
+    isTtsActiveRef.current = true;
     setIsSpeaking(true);
     if (messageId) setSpeakingMessageId(messageId);
     // Chrome workaround: pause/resume every 10s to prevent cutting out after ~15s
@@ -251,6 +260,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     }, 10000);
     const cleanup = () => {
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
+      isTtsActiveRef.current = false;
       setIsSpeaking(false);
       setSpeakingMessageId(null);
     };
@@ -278,7 +288,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const startConversationListening = useCallback(() => {
     if (!conversationActiveRef.current) return;
+
+    // Hard guard: never reactivate microphone while TTS is active/speaking
+    if (isTtsActiveRef.current || ('speechSynthesis' in window && window.speechSynthesis.speaking)) {
+      if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
+      restartListeningTimerRef.current = setTimeout(() => {
+        if (conversationActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();
+      }, 300);
+      return;
+    }
+
     clearSilenceTimer();
+    if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     // Clear any previous watchdog
     if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
     recognitionStartedRef.current = false;
@@ -349,7 +370,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
         recognitionRef.current = null;
-        setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);
+        setTimeout(() => {
+          if (conversationActiveRef.current && !isTtsActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();
+        }, 300);
       } else if (event.error === 'aborted') {
         recognitionRef.current = null;
         abortCountRef.current++;
@@ -362,14 +385,17 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         return;
       } else if (conversationActiveRef.current) {
         recognitionRef.current = null;
-        setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 500);
+        setTimeout(() => {
+          if (conversationActiveRef.current && !isTtsActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();
+        }, 500);
       } else {recognitionRef.current = null;}
     };
     recognition.onend = () => {
       recognitionRef.current = null;
-      // Don't restart if we're currently processing a transcript or a silence timer is pending
-      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
-        setTimeout(() => {if (conversationActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();}, 200);
+      // Never restart while TTS is active/speaking; this prevents mobile echo loops
+      const speechIsActive = isTtsActiveRef.current || ('speechSynthesis' in window && window.speechSynthesis.speaking);
+      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current && !speechIsActive) {
+        setTimeout(() => {if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isTtsActiveRef.current) startConversationListening();}, 200);
       }
     };
     try {
@@ -386,7 +412,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           try { recognitionRef.current.abort(); } catch (e) {}
           recognitionRef.current = null;
         }
-        setTimeout(() => { if (conversationActiveRef.current) startConversationListening(); }, 500);
+        setTimeout(() => { if (conversationActiveRef.current && !isTtsActiveRef.current) startConversationListening(); }, 500);
       }
     }, 3000);
   }, [toast, clearSilenceTimer]);
@@ -536,7 +562,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const stopConversationSpeaking = useCallback(() => {
     // Stop TTS but stay in conversation mode — restart listening
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
+    if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
+    isTtsActiveRef.current = false;
     setIsSpeaking(false);
     setIsQuerying(false);
     setFiltersLocked(false);

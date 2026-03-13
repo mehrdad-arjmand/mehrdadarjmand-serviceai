@@ -616,8 +616,24 @@ Deno.serve(async (req) => {
       accessibleDocIds,
       projectDocIds
     )
+
+    // If a specific document is selected and semantic+keyword retrieval is empty,
+    // fall back to direct chunk retrieval so recently re-ingested docs remain answerable
+    let retrievalChunks = combinedChunks
+    if (retrievalChunks.length === 0 && filterDocumentIds && filterDocumentIds.length > 0) {
+      retrievalChunks = await fetchDocScopedFallbackChunks(
+        supabase,
+        question,
+        filterDocumentIds,
+        accessibleDocIds,
+        projectDocIds,
+        equipmentType
+      )
+      console.log(`Document-scoped fallback returned ${retrievalChunks.length} chunks`)
+    }
+
     // Re-rank chunks: prioritize substantive content over TOC/index entries
-    const rankedChunks = rerankChunks(combinedChunks, question)
+    const rankedChunks = rerankChunks(retrievalChunks, question)
 
     // Take top chunks for context (top 10 for more precise retrieval evaluation)
     const topChunks = rankedChunks.slice(0, 10)
@@ -931,6 +947,61 @@ async function enrichWithKeywordFallback(
   } catch (error) {
     console.error('Keyword fallback search unexpected error:', error)
     return initialChunks
+  }
+}
+
+async function fetchDocScopedFallbackChunks(
+  supabase: any,
+  question: string,
+  documentIds: string[],
+  accessibleDocIds?: Set<string> | null,
+  projectDocIds?: Set<string> | null,
+  equipmentType?: string
+): Promise<any[]> {
+  try {
+    const broadIntent = /(summar|overview|task|action|todo|list)/i.test(question)
+    const tokens = (question.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
+      (word) => word.length >= 4 && !STOP_WORDS.has(word)
+    )
+
+    const { data, error } = await supabase
+      .from('chunks')
+      .select('id, document_id, chunk_index, text, site, equipment, fault_code, documents!inner(filename)')
+      .in('document_id', documentIds)
+      .order('chunk_index', { ascending: true })
+      .limit(120)
+
+    if (error || !data) {
+      console.error('Document-scoped fallback query error:', error)
+      return []
+    }
+
+    const perDocCount = new Map<string, number>()
+    const filtered = data.filter((row: any) => {
+      if (accessibleDocIds && !accessibleDocIds.has(row.document_id)) return false
+      if (projectDocIds && !projectDocIds.has(row.document_id)) return false
+      if (equipmentType && row.equipment !== equipmentType) return false
+
+      if (broadIntent) {
+        const current = perDocCount.get(row.document_id) || 0
+        if (current >= 6) return false
+        perDocCount.set(row.document_id, current + 1)
+        return true
+      }
+
+      if (tokens.length === 0) return true
+      const text = String(row.text || '').toLowerCase()
+      return tokens.some(token => text.includes(token))
+    }).slice(0, 30)
+
+    return filtered.map((row: any) => ({
+      ...row,
+      similarity: 0.35,
+      filename: row.documents?.filename ?? 'Unknown',
+    }))
+  } catch (error) {
+    console.error('Document-scoped fallback failed:', error)
+    return []
   }
 }
 
