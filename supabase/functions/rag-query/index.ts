@@ -616,8 +616,24 @@ Deno.serve(async (req) => {
       accessibleDocIds,
       projectDocIds
     )
+
+    // If a specific document is selected and semantic+keyword retrieval is empty,
+    // fall back to direct chunk retrieval so recently re-ingested docs remain answerable
+    let retrievalChunks = combinedChunks
+    if (retrievalChunks.length === 0 && filterDocumentIds && filterDocumentIds.length > 0) {
+      retrievalChunks = await fetchDocScopedFallbackChunks(
+        supabase,
+        question,
+        filterDocumentIds,
+        accessibleDocIds,
+        projectDocIds,
+        equipmentType
+      )
+      console.log(`Document-scoped fallback returned ${retrievalChunks.length} chunks`)
+    }
+
     // Re-rank chunks: prioritize substantive content over TOC/index entries
-    const rankedChunks = rerankChunks(combinedChunks, question)
+    const rankedChunks = rerankChunks(retrievalChunks, question)
 
     // Take top chunks for context (top 10 for more precise retrieval evaluation)
     const topChunks = rankedChunks.slice(0, 10)
