@@ -562,7 +562,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const stopConversationSpeaking = useCallback(() => {
     // Stop TTS but stay in conversation mode — restart listening
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
+    if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
+    isTtsActiveRef.current = false;
     setIsSpeaking(false);
     setIsQuerying(false);
     setFiltersLocked(false);
