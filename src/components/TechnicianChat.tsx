@@ -117,11 +117,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const dictationPartsRef = useRef<string[]>([]);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const restartListeningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentTranscriptRef = useRef<string>("");
   const abortCountRef = useRef<number>(0);
   const listeningWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionStartedRef = useRef<boolean>(false);
   const isProcessingVoiceRef = useRef<boolean>(false);
+  const isTtsActiveRef = useRef<boolean>(false);
   const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
 
