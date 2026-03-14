@@ -268,7 +268,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     const cleanText = renderAnswerForSpeech(text);
     const sentences = splitIntoSentences(cleanText);
-    if (sentences.length === 0) {isTtsActiveRef.current = false; onComplete?.();return;}
+    if (sentences.length === 0) {
+      isTtsActiveRef.current = false;
+      markSpeechOutputCooldown();
+      onComplete?.();
+      return;
+    }
     if (!selectedVoiceRef.current) {selectedVoiceRef.current = selectBestVoice();}
     const queueId = ++utteranceQueueRef.current;
     let currentIndex = 0;
@@ -285,6 +290,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const cleanup = () => {
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
       isTtsActiveRef.current = false;
+      markSpeechOutputCooldown();
       setIsSpeaking(false);
       setSpeakingMessageId(null);
     };
