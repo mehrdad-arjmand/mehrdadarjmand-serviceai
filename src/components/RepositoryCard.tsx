@@ -1337,6 +1337,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             <div>
               <Label className="text-sm font-medium">Dictated text</Label>
               <Textarea
+                ref={dictateTextareaRef}
                 value={dictateContent}
                 onChange={e => setDictateContent(e.target.value)}
                 placeholder="Your dictation will appear here..."
