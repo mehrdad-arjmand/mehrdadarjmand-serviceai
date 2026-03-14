@@ -252,6 +252,7 @@ Deno.serve(async (req) => {
     console.log(`Processing ${files.length} files`)
 
     const documents: { id: string; fileName: string; status: string }[] = []
+    const workItems: { fileData: { name: string; arrayBuffer: ArrayBuffer; fileType: string }; doc: { id: string; fileName: string; status: string } }[] = []
 
     const fileDataList: { name: string; arrayBuffer: ArrayBuffer; fileType: string }[] = []
     for (const file of files) {
@@ -287,7 +288,10 @@ Deno.serve(async (req) => {
         console.error(`Failed to create document record for ${fileData.name}:`, docError)
         continue
       }
-      documents.push({ id: docId, fileName: fileData.name, status: 'in_progress' })
+
+      const docRecord = { id: docId, fileName: fileData.name, status: 'in_progress' }
+      documents.push(docRecord)
+      workItems.push({ fileData, doc: docRecord })
     }
 
     // Background processing
