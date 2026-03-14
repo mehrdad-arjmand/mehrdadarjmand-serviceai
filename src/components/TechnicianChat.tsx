@@ -319,11 +319,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const startConversationListening = useCallback(() => {
     if (!conversationActiveRef.current) return;
 
-    // Hard guard: never reactivate microphone while TTS is active/speaking
-    if (isTtsActiveRef.current || ('speechSynthesis' in window && window.speechSynthesis.speaking)) {
+    // Hard guard: never reactivate microphone while speech output is active/cooling down
+    if (isSpeechOutputBlocked()) {
       if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
       restartListeningTimerRef.current = setTimeout(() => {
-        if (conversationActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();
+        if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
       }, 300);
       return;
     }
