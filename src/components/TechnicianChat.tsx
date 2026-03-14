@@ -250,10 +250,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if ('speechSynthesis' in window) {window.speechSynthesis.cancel();utteranceQueueRef.current++;}
     isTtsActiveRef.current = false;
+    markSpeechOutputCooldown();
     setIsSpeaking(false);
     setSpeakingMessageId(null);
     setConversationState((prev) => prev === "speaking" ? "idle" : prev);
-  }, []);
+  }, [markSpeechOutputCooldown]);
 
   const speakText = useCallback((text: string, onComplete?: () => void, messageId?: string) => {
     if (!('speechSynthesis' in window)) {
