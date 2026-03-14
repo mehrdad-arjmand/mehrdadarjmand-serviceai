@@ -344,6 +344,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const [isDictating, setIsDictating] = useState(false);
   const [isInsertingDictation, setIsInsertingDictation] = useState(false);
   const dictateRecognitionRef = useRef<any>(null);
+  const dictateTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Edit content modal state (for txt/docx)
   const [editContentDoc, setEditContentDoc] = useState<Document | null>(null);
@@ -356,6 +357,24 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const editContentTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isDictating) return;
+    const textarea = dictateTextareaRef.current;
+    if (!textarea) return;
+    requestAnimationFrame(() => {
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }, [dictateContent, isDictating]);
+
+  useEffect(() => {
+    if (!isEditContentDictating) return;
+    const textarea = editContentTextareaRef.current;
+    if (!textarea) return;
+    requestAnimationFrame(() => {
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }, [editContentText, isEditContentDictating]);
 
   // ── Fetch project metadata fields ──
   useEffect(() => {
@@ -1318,6 +1337,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             <div>
               <Label className="text-sm font-medium">Dictated text</Label>
               <Textarea
+                ref={dictateTextareaRef}
                 value={dictateContent}
                 onChange={e => setDictateContent(e.target.value)}
                 placeholder="Your dictation will appear here..."

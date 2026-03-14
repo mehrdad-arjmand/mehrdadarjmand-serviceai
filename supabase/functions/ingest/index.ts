@@ -252,6 +252,7 @@ Deno.serve(async (req) => {
     console.log(`Processing ${files.length} files`)
 
     const documents: { id: string; fileName: string; status: string }[] = []
+    const workItems: { fileData: { name: string; arrayBuffer: ArrayBuffer; fileType: string }; doc: { id: string; fileName: string; status: string } }[] = []
 
     const fileDataList: { name: string; arrayBuffer: ArrayBuffer; fileType: string }[] = []
     for (const file of files) {
@@ -287,7 +288,10 @@ Deno.serve(async (req) => {
         console.error(`Failed to create document record for ${fileData.name}:`, docError)
         continue
       }
-      documents.push({ id: docId, fileName: fileData.name, status: 'in_progress' })
+
+      const docRecord = { id: docId, fileName: fileData.name, status: 'in_progress' }
+      documents.push(docRecord)
+      workItems.push({ fileData, doc: docRecord })
     }
 
     // Background processing
@@ -300,7 +304,63 @@ Deno.serve(async (req) => {
         : (googleApiKeyFree || googleApiKeyPaid)
       console.log(`Using API key: ${apiTier === 'paid' ? 'PAID' : 'FREE'} (key ends with: ...${googleApiKey?.slice(-6) || 'NONE'})`)
 
-      const processFile = async (fileData: typeof fileDataList[0], doc: typeof documents[0]) => {
+      const triggerEmbeddings = async (docIds: string[], label: string) => {
+        if (docIds.length === 0) return
+
+        console.log(`Triggering embeddings for ${label}: ${docIds.join(', ')}`)
+
+        try {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 10000) // fire-and-forget handshake only
+
+          const embRes = await fetch(
+            `${supabaseUrl}/functions/v1/generate-embeddings`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': authHeader!,
+                'apikey': supabaseAnonKey,
+              },
+              body: JSON.stringify({ documentIds: docIds, mode: 'full' }),
+              signal: controller.signal,
+            }
+          )
+          clearTimeout(timeoutId)
+
+          if (!embRes.ok) {
+            const errText = await embRes.text().catch(() => 'unknown')
+            console.error(`Embeddings trigger failed for ${label}: ${embRes.status} - ${errText}`)
+            for (const docId of docIds) {
+              await supabase.from('documents').update({
+                ingestion_status: 'failed',
+                ingestion_error: `Embedding trigger failed: HTTP ${embRes.status}`
+              }).eq('id', docId)
+            }
+            return
+          }
+
+          console.log(`Embeddings trigger accepted for ${label}`)
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            console.log(`Embeddings trigger timed out for ${label}, continuing (function running server-side)`)
+            return
+          }
+
+          console.error(`Embeddings trigger error for ${label}:`, err)
+          for (const docId of docIds) {
+            await supabase.from('documents').update({
+              ingestion_status: 'failed',
+              ingestion_error: `Embedding trigger error: ${err instanceof Error ? err.message : 'Unknown'}`
+            }).eq('id', docId)
+          }
+        }
+      }
+
+      const processFile = async (
+        fileData: { name: string; arrayBuffer: ArrayBuffer; fileType: string },
+        doc: { id: string; fileName: string; status: string }
+      ): Promise<boolean> => {
         try {
           let extractedText = ''
           let pageCount = 0
@@ -310,11 +370,12 @@ Deno.serve(async (req) => {
               extractedText = new TextDecoder('utf-8').decode(fileData.arrayBuffer)
               pageCount = 1
               break
-            case 'pdf':
+            case 'pdf': {
               const pdfResult = await extractTextFromPdf(fileData.arrayBuffer, googleApiKey, apiTier)
               extractedText = pdfResult.text
               pageCount = pdfResult.pageCount
               break
+            }
             case 'docx':
               extractedText = await extractTextFromDocx(fileData.arrayBuffer)
               pageCount = Math.ceil(extractedText.length / 3000)
@@ -329,7 +390,7 @@ Deno.serve(async (req) => {
           const overlapSize = 200
           const chunks: { document_id: string; chunk_index: number; text: string; equipment: string | null }[] = []
           let chunkIndex = 0
-          
+
           for (let j = 0; j < extractedText.length; j += (chunkSize - overlapSize)) {
             const chunkText = extractedText.slice(j, j + chunkSize)
             if (chunkText.trim().length > 0) {
@@ -359,7 +420,8 @@ Deno.serve(async (req) => {
             .update({ ingested_chunks: 0, ingestion_status: 'processing_embeddings' })
             .eq('id', doc.id)
 
-          console.log(`Chunks saved for ${fileData.name}, triggering embeddings...`)
+          console.log(`Chunks saved for ${fileData.name}`)
+          return true
         } catch (err) {
           console.error(`Error processing ${fileData.name}:`, err)
           const errorMsg = err instanceof Error ? err.message : 'Unknown error'
@@ -367,85 +429,37 @@ Deno.serve(async (req) => {
             .from('documents')
             .update({ ingestion_status: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
             .eq('id', doc.id)
+          return false
         }
       }
 
-      // Phase 1: Extract + chunk files
-      // Free tier: serialize to avoid 429 rate limits; Paid tier: parallel
+      // Free tier: interleave chunking + embeddings per document to spread RPM/TPM usage
       if (apiTier === 'free') {
-        console.log('Free tier: processing files sequentially to respect rate limits...')
-        for (let i = 0; i < fileDataList.length; i++) {
-          const doc = documents[i]
-          if (!doc) continue
-          await processFile(fileDataList[i], doc)
-          if (i < fileDataList.length - 1) {
-            await new Promise(r => setTimeout(r, 2000)) // 2s gap between files
+        console.log('Free tier: processing files sequentially with immediate embedding triggers per document...')
+
+        for (let i = 0; i < workItems.length; i++) {
+          const { fileData, doc } = workItems[i]
+          const processed = await processFile(fileData, doc)
+
+          if (processed) {
+            await triggerEmbeddings([doc.id], `document ${doc.fileName}`)
+          }
+
+          if (i < workItems.length - 1) {
+            await new Promise(r => setTimeout(r, 1500))
           }
         }
       } else {
-        await Promise.allSettled(
-          fileDataList.map((fileData, i) => {
-            const doc = documents[i]
-            if (!doc) return Promise.resolve()
-            return processFile(fileData, doc)
-          })
+        const settled = await Promise.allSettled(
+          workItems.map(({ fileData, doc }) => processFile(fileData, doc).then(ok => ({ ok, docId: doc.id })))
         )
-      }
 
-      // Phase 2: Trigger embeddings — single call with ALL document IDs
-      // This ensures sequential processing within one function invocation,
-      // preventing concurrent API calls from competing for RPM quota.
-      if (apiTier === 'free') {
-        console.log('Free tier: waiting 5s before embedding to let rate limits reset...')
-        await new Promise(r => setTimeout(r, 5000))
-      }
-      
-      const docIds = documents.map(d => d.id)
-      console.log(`All chunking complete. Triggering embeddings for ${docIds.length} documents in a single batch call (${apiTier} tier)...`)
-      
-      try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 10000) // 10s to establish connection
-        
-        const embRes = await fetch(
-          `${supabaseUrl}/functions/v1/generate-embeddings`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': authHeader!,
-              'apikey': supabaseAnonKey,
-            },
-            body: JSON.stringify({ documentIds: docIds, mode: 'full' }),
-            signal: controller.signal,
-          }
-        )
-        clearTimeout(timeoutId)
-        
-        if (!embRes.ok) {
-          const errText = await embRes.text().catch(() => 'unknown')
-          console.error(`Batch embeddings trigger failed: ${embRes.status} - ${errText}`)
-          for (const doc of documents) {
-            await supabase.from('documents').update({
-              ingestion_status: 'failed',
-              ingestion_error: `Embedding trigger failed: HTTP ${embRes.status}`
-            }).eq('id', doc.id)
-          }
-        } else {
-          console.log(`Batch embeddings triggered successfully for ${docIds.length} documents`)
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          console.log(`Batch embedding trigger timed out (function still running server-side for ${docIds.length} documents)`)
-        } else {
-          console.error(`Batch embedding trigger error:`, err)
-          for (const doc of documents) {
-            await supabase.from('documents').update({
-              ingestion_status: 'failed',
-              ingestion_error: `Embedding trigger error: ${err instanceof Error ? err.message : 'Unknown'}`
-            }).eq('id', doc.id)
-          }
-        }
+        const readyDocIds = settled
+          .filter((result): result is PromiseFulfilledResult<{ ok: boolean; docId: string }> => result.status === 'fulfilled')
+          .filter(result => result.value.ok)
+          .map(result => result.value.docId)
+
+        await triggerEmbeddings(readyDocIds, `${readyDocIds.length} document(s)`) 
       }
     })()
 
