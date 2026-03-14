@@ -931,6 +931,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
                   </div>
               }
                 <Textarea
+                ref={inputTextareaRef}
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 placeholder={
