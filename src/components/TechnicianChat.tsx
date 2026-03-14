@@ -204,6 +204,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     scrollToBottom();
   }, [chatHistory, isQuerying, scrollToBottom]);
 
+  useEffect(() => {
+    if (!isConversationMode && !isDictating) return;
+    const textarea = inputTextareaRef.current;
+    if (!textarea) return;
+
+    requestAnimationFrame(() => {
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }, [question, isConversationMode, isDictating]);
+
   const handleChatScroll = useCallback(() => {
     const el = chatContainerRef.current;
     if (!el) return;
