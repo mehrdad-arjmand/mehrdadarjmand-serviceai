@@ -358,6 +358,24 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (!isDictating) return;
+    const textarea = dictateTextareaRef.current;
+    if (!textarea) return;
+    requestAnimationFrame(() => {
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }, [dictateContent, isDictating]);
+
+  useEffect(() => {
+    if (!isEditContentDictating) return;
+    const textarea = editContentTextareaRef.current;
+    if (!textarea) return;
+    requestAnimationFrame(() => {
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }, [editContentText, isEditContentDictating]);
+
   // ── Fetch project metadata fields ──
   useEffect(() => {
     const fetchProjectFields = async () => {
