@@ -510,7 +510,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
       setFiltersLocked(false);
-      if (conversationActiveRef.current) {setConversationState("idle");setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 1000);}
+      if (conversationActiveRef.current) {
+        setConversationState("idle");
+        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
+        restartListeningTimerRef.current = setTimeout(() => {
+          if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
+        }, 1000);
+      }
     } finally {setIsQuerying(false);}
   }, [hasDocuments, chatHistory, addMessage, speakText, startConversationListening, toast]);
 
