@@ -344,6 +344,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const [isDictating, setIsDictating] = useState(false);
   const [isInsertingDictation, setIsInsertingDictation] = useState(false);
   const dictateRecognitionRef = useRef<any>(null);
+  const dictateTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Edit content modal state (for txt/docx)
   const [editContentDoc, setEditContentDoc] = useState<Document | null>(null);
