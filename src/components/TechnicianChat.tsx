@@ -451,7 +451,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         }, 500);
       }
     }, 3000);
-  }, [toast, clearSilenceTimer]);
+  }, [toast, clearSilenceTimer, isSpeechOutputBlocked]);
 
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
