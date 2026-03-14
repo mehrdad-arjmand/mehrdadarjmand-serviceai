@@ -486,7 +486,12 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         speakText(data.answer, () => {
           setFiltersLocked(false);
           lastSubmittedTranscriptRef.current = ""; // Reset dedup after full cycle
-          if (conversationActiveRef.current) {setTimeout(() => {if (conversationActiveRef.current) startConversationListening();}, 300);}
+          if (conversationActiveRef.current) {
+            if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
+            restartListeningTimerRef.current = setTimeout(() => {
+              if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
+            }, 300);
+          }
         });
       } else {
         setFiltersLocked(false);
