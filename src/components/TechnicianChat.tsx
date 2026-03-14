@@ -310,7 +310,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       window.speechSynthesis.speak(utterance);
     };
     speakNext();
-  }, [toast]);
+  }, [toast, markSpeechOutputCooldown]);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
