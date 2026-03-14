@@ -400,8 +400,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
         recognitionRef.current = null;
-        setTimeout(() => {
-          if (conversationActiveRef.current && !isTtsActiveRef.current && !isProcessingVoiceRef.current) startConversationListening();
+        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
+        restartListeningTimerRef.current = setTimeout(() => {
+          if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
         }, 300);
       } else if (event.error === 'aborted') {
         recognitionRef.current = null;
