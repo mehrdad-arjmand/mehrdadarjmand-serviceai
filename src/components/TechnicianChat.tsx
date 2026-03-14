@@ -445,7 +445,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           try { recognitionRef.current.abort(); } catch (e) {}
           recognitionRef.current = null;
         }
-        setTimeout(() => { if (conversationActiveRef.current && !isTtsActiveRef.current) startConversationListening(); }, 500);
+        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
+        restartListeningTimerRef.current = setTimeout(() => {
+          if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
+        }, 500);
       }
     }, 3000);
   }, [toast, clearSilenceTimer]);
