@@ -617,6 +617,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
     isTtsActiveRef.current = false;
+    markSpeechOutputCooldown();
     setIsSpeaking(false);
     setIsQuerying(false);
     setFiltersLocked(false);
@@ -637,13 +638,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       // This prevents showing "Listening..." when recognition hasn't actually started
       setQuestion("");
       // Use longer initial delay to let browser fully release mic after TTS cancel
-      setTimeout(() => {
-        if (conversationActiveRef.current) {
+      restartListeningTimerRef.current = setTimeout(() => {
+        if (conversationActiveRef.current && !isSpeechOutputBlocked()) {
           startConversationListening();
         }
       }, 800);
     }
-  }, [startConversationListening]);
+  }, [startConversationListening, markSpeechOutputCooldown, isSpeechOutputBlocked]);
 
   const handleConversationToggle = () => {
     if (isConversationMode) {
