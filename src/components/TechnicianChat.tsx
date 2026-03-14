@@ -518,7 +518,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         }, 1000);
       }
     } finally {setIsQuerying(false);}
-  }, [hasDocuments, chatHistory, addMessage, speakText, startConversationListening, toast]);
+  }, [hasDocuments, chatHistory, addMessage, speakText, startConversationListening, toast, isSpeechOutputBlocked]);
 
   const sendMessage = useCallback(async (text: string, inputMode: "text" | "dictation") => {
     stopListening();
