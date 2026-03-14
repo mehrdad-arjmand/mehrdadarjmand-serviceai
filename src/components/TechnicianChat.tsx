@@ -424,10 +424,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     };
     recognition.onend = () => {
       recognitionRef.current = null;
-      // Never restart while TTS is active/speaking; this prevents mobile echo loops
-      const speechIsActive = isTtsActiveRef.current || ('speechSynthesis' in window && window.speechSynthesis.speaking);
-      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current && !speechIsActive) {
-        setTimeout(() => {if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isTtsActiveRef.current) startConversationListening();}, 200);
+      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) {
+        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
+        restartListeningTimerRef.current = setTimeout(() => {
+          if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
+        }, 200);
       }
     };
     try {
