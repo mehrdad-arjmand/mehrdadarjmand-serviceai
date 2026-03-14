@@ -124,12 +124,25 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const recognitionStartedRef = useRef<boolean>(false);
   const isProcessingVoiceRef = useRef<boolean>(false);
   const isTtsActiveRef = useRef<boolean>(false);
+  const speechOutputCooldownUntilRef = useRef<number>(0);
+  const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
   const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
 
   useEffect(() => {
     currentFiltersRef.current = currentFilters;
   }, [currentFilters]);
+
+  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 1500 : 500), [isMobileDevice]);
+
+  const markSpeechOutputCooldown = useCallback(() => {
+    speechOutputCooldownUntilRef.current = Date.now() + getSpeechRestartCooldownMs();
+  }, [getSpeechRestartCooldownMs]);
+
+  const isSpeechOutputBlocked = useCallback(() => {
+    const synthBusy = 'speechSynthesis' in window && (window.speechSynthesis.speaking || window.speechSynthesis.pending);
+    return isTtsActiveRef.current || synthBusy || Date.now() < speechOutputCooldownUntilRef.current;
+  }, []);
 
   // Dynamic project fields, dropdown options, roles, and document list for filters
   const [projectFields, setProjectFields] = useState<string[]>([]);
