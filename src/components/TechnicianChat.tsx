@@ -662,10 +662,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       conversationActiveRef.current = true;
       setIsConversationMode(true);
       setQuestion("");
-      if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-      restartListeningTimerRef.current = setTimeout(() => {
-        if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-      }, 100);
+      scheduleListeningRestart(100);
     }
   };
 
