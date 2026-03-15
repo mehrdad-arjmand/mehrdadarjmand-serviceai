@@ -755,6 +755,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         else interimT += transcript;
       }
       newDictatedText += finalT;
+      editChangeSourceRef.current = 'dictation';
       setEditContentText(textBefore + newDictatedText + interimT + textAfter);
     };
     recognition.onerror = (event: any) => {

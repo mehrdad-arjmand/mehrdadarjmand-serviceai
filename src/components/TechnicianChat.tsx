@@ -322,20 +322,40 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
   }, []);
 
-  const startConversationListening = useCallback(() => {
+  // ── Centralized mic restart gatekeeper ──
+  // This is the ONLY function that should be called to restart listening.
+  // It prevents echo by polling until TTS is fully done.
+  const scheduleListeningRestart = useCallback((delayMs = 300) => {
+    // Clear any pending scheduled restart
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
+
+    scheduledRestartRef.current = setTimeout(() => {
+      scheduledRestartRef.current = null;
+      if (!conversationActiveRef.current || isProcessingVoiceRef.current) return;
+
+      // If speech output is still active or cooling down, re-schedule
+      if (isSpeechOutputBlocked()) {
+        console.log('[Voice] Gatekeeper: TTS still active/cooling, re-polling in 500ms');
+        scheduleListeningRestart(500);
+        return;
+      }
+
+      startConversationListeningInternal();
+    }, delayMs);
+  }, [isSpeechOutputBlocked]);
+
+  const startConversationListeningInternal = useCallback(() => {
     if (!conversationActiveRef.current) return;
 
-    // Hard guard: never reactivate microphone while speech output is active/cooling down
+    // Final safety check right before starting
     if (isSpeechOutputBlocked()) {
-      if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-      restartListeningTimerRef.current = setTimeout(() => {
-        if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
-      }, 300);
+      scheduleListeningRestart(500);
       return;
     }
 
     clearSilenceTimer();
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     // Clear any previous watchdog
     if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
     recognitionStartedRef.current = false;
