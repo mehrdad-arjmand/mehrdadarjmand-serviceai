@@ -42,7 +42,9 @@ interface RetrievalEvalResult {
   evaluated: number;
   eval_model: string;
   k_used: string;
-  ranking_confirmed: string;
+  ranking_confirmed?: string;
+  scan_k?: number;
+  threshold?: number;
   aggregate: {
     avg_precision_at_k: number;
     avg_recall_at_k: number;
@@ -52,10 +54,15 @@ interface RetrievalEvalResult {
   per_query: Array<{
     query_log_id: string;
     query: string;
-    k: number;
-    total_relevant: number;
+    k?: number;
+    scan_k?: number;
+    original_k?: number;
+    total_relevant?: number;
+    total_relevant_in_scan?: number;
+    relevant_in_top_k?: number;
     precision_at_k: number;
-    recall_at_k: number;
+    recall_at_k?: number;
+    expanded_recall?: number;
     hit_rate: number;
     first_relevant_rank: number | null;
   }>;
