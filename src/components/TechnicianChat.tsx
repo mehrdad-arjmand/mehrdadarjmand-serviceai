@@ -643,13 +643,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       // This prevents showing "Listening..." when recognition hasn't actually started
       setQuestion("");
       // Use longer initial delay to let browser fully release mic after TTS cancel
-      restartListeningTimerRef.current = setTimeout(() => {
-        if (conversationActiveRef.current && !isSpeechOutputBlocked()) {
-          startConversationListening();
-        }
-      }, 800);
+      scheduleListeningRestart(800);
     }
-  }, [startConversationListening, markSpeechOutputCooldown, isSpeechOutputBlocked]);
+  }, [scheduleListeningRestart, markSpeechOutputCooldown, isSpeechOutputBlocked]);
 
   const handleConversationToggle = () => {
     if (isConversationMode) {
