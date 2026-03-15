@@ -133,16 +133,22 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     currentFiltersRef.current = currentFilters;
   }, [currentFilters]);
 
-  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 1500 : 500), [isMobileDevice]);
+  const ttsEndTimestampRef = useRef<number>(0);
+  const scheduledRestartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 2500 : 500), [isMobileDevice]);
 
   const markSpeechOutputCooldown = useCallback(() => {
     speechOutputCooldownUntilRef.current = Date.now() + getSpeechRestartCooldownMs();
+    ttsEndTimestampRef.current = Date.now();
   }, [getSpeechRestartCooldownMs]);
 
   const isSpeechOutputBlocked = useCallback(() => {
     const synthBusy = 'speechSynthesis' in window && (window.speechSynthesis.speaking || window.speechSynthesis.pending);
-    return isTtsActiveRef.current || synthBusy || Date.now() < speechOutputCooldownUntilRef.current;
-  }, []);
+    const cooldownActive = Date.now() < speechOutputCooldownUntilRef.current;
+    const ttsRecentlyEnded = (Date.now() - ttsEndTimestampRef.current) < getSpeechRestartCooldownMs();
+    return isTtsActiveRef.current || synthBusy || cooldownActive || ttsRecentlyEnded;
+  }, [getSpeechRestartCooldownMs]);
 
   // Dynamic project fields, dropdown options, roles, and document list for filters
   const [projectFields, setProjectFields] = useState<string[]>([]);
