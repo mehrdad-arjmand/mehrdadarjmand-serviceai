@@ -509,10 +509,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         lastSubmittedTranscriptRef.current = "";
         // Restart listening even if answer was empty
         if (conversationActiveRef.current) {
-          if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-          restartListeningTimerRef.current = setTimeout(() => {
-            if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-          }, 300);
+          scheduleListeningRestart(300);
         }
       }
     } catch (error: any) {
