@@ -225,6 +225,26 @@ const QueryAnalytics = () => {
     }
   };
 
+  const runExpandedEval = async () => {
+    setLoading("expanded-eval");
+    try {
+      const res = await callEvalFunction("run-expanded-eval", { limit: "30", scan_k: "200", threshold: "0.10" });
+      if (!res) return;
+      const data = await res.json();
+      if (data.success) {
+        setExpandedEval(data);
+        if (data.evaluated > 0) toast.success(`Expanded eval: ${data.evaluated} queries`);
+        else toast.info(data.message || "No queries to evaluate");
+      } else {
+        toast.error(data.error || "Expanded eval failed");
+      }
+    } catch {
+      toast.error("Expanded eval failed");
+    } finally {
+      setLoading(null);
+    }
+  };
+
   const handleCopySQL = async () => {
     await navigator.clipboard.writeText(SQL_REFERENCE);
     setSqlCopied(true);
