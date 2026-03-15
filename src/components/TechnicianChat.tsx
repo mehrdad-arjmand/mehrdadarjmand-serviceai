@@ -501,10 +501,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           setFiltersLocked(false);
           lastSubmittedTranscriptRef.current = ""; // Reset dedup after full cycle
           if (conversationActiveRef.current) {
-            if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-            restartListeningTimerRef.current = setTimeout(() => {
-              if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-            }, 300);
+            scheduleListeningRestart(300);
           }
         });
       } else {
