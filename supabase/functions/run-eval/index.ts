@@ -423,7 +423,170 @@ Deno.serve(async (req) => {
       })
     }
 
-    return new Response(JSON.stringify({ error: 'Unknown action. Use ?action=analytics|export|run-eval|run-retrieval-eval|eval-runs' }), {
+    // ─── ACTION: run-expanded-eval (LLM-judged with expanded scan for true recall) ───
+    if (action === 'run-expanded-eval') {
+      const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50'), 200)
+      const scanK = Math.min(parseInt(url.searchParams.get('scan_k') ?? '200'), 500)
+      const threshold = parseFloat(url.searchParams.get('threshold') ?? '0.10')
+      const skipEvaluated = url.searchParams.get('skip_evaluated') !== 'false'
+
+      // Fetch query logs that have retrieved chunks
+      let query = supabase
+        .from('query_logs')
+        .select('id, query_text, retrieved_chunk_ids, top_k')
+        .not('retrieved_chunk_ids', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+
+      if (skipEvaluated) {
+        query = query.is('evaluated_at', null)
+      }
+
+      const { data: logs, error: logsError } = await query
+      if (logsError) throw logsError
+      if (!logs || logs.length === 0) {
+        return new Response(JSON.stringify({ success: true, message: 'No unevaluated query logs found', evaluated: 0 }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
+
+      console.log(`[Expanded Eval] Evaluating ${logs.length} queries, scan_k=${scanK}, threshold=${threshold}`)
+
+      const perQueryResults: any[] = []
+
+      for (const log of logs) {
+        const originalTopK = log.top_k || 10
+        const originalChunkIds = log.retrieved_chunk_ids || []
+
+        // Step 1: Re-embed the query
+        const embResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${Deno.env.get('GOOGLE_API_KEY')}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: { parts: [{ text: log.query_text }] }, outputDimensionality: 768 })
+          }
+        )
+        const embData = await embResponse.json()
+        const embedding = embData.embedding?.values
+        if (!embedding) {
+          console.error(`[Expanded Eval] Failed to embed query: ${log.query_text.slice(0, 50)}`)
+          continue
+        }
+
+        // Step 2: Retrieve expanded candidate set (top-scanK at low threshold)
+        const embeddingStr = `[${embedding.join(',')}]`
+        const { data: expandedChunks } = await supabase.rpc('match_chunks', {
+          query_embedding: embeddingStr, match_threshold: threshold, match_count: scanK
+        })
+
+        if (!expandedChunks || expandedChunks.length === 0) continue
+
+        // Step 3: LLM-judge each expanded chunk
+        let totalRelevantInScan = 0
+        for (const chunk of expandedChunks) {
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          if (result.relevant) totalRelevantInScan++
+        }
+
+        // Step 4: Count how many of original top-K are relevant
+        // Re-judge only original top-K chunks
+        const originalSet = new Set(originalChunkIds)
+        const originalChunksInExpanded = expandedChunks.filter((c: any) => originalSet.has(c.id))
+
+        let relevantInTopK = 0
+        for (const chunk of originalChunksInExpanded) {
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          if (result.relevant) relevantInTopK++
+        }
+
+        // Step 5: Calculate metrics
+        const precisionAtK = originalChunkIds.length > 0 ? relevantInTopK / Math.min(originalChunkIds.length, originalTopK) : 0
+        const expandedRecall = totalRelevantInScan > 0 ? relevantInTopK / totalRelevantInScan : 0
+        const hitRate = relevantInTopK > 0 ? 1 : 0
+
+        // Find first relevant rank among original chunks
+        let firstRelevantRank: number | null = null
+        for (let i = 0; i < originalChunkIds.length; i++) {
+          const chunk = expandedChunks.find((c: any) => c.id === originalChunkIds[i])
+          if (chunk) {
+            const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+            if (result.relevant) { firstRelevantRank = i + 1; break }
+          }
+        }
+
+        // Step 6: Update query_logs row with expanded metrics
+        await supabase.from('query_logs').update({
+          total_relevant_chunks: totalRelevantInScan,
+          relevant_in_top_k: relevantInTopK,
+          precision_at_k: parseFloat(precisionAtK.toFixed(4)),
+          recall_at_k: parseFloat(expandedRecall.toFixed(4)),
+          hit_rate_at_k: hitRate,
+          first_relevant_rank: firstRelevantRank,
+          eval_model: EVAL_MODEL,
+          evaluated_at: new Date().toISOString(),
+        }).eq('id', log.id)
+
+        perQueryResults.push({
+          query_log_id: log.id,
+          query: log.query_text.slice(0, 100),
+          scan_k: expandedChunks.length,
+          original_k: Math.min(originalChunkIds.length, originalTopK),
+          total_relevant_in_scan: totalRelevantInScan,
+          relevant_in_top_k: relevantInTopK,
+          precision_at_k: parseFloat(precisionAtK.toFixed(4)),
+          expanded_recall: parseFloat(expandedRecall.toFixed(4)),
+          hit_rate: hitRate,
+          first_relevant_rank: firstRelevantRank,
+        })
+      }
+
+      const total = perQueryResults.length
+      if (total === 0) {
+        return new Response(JSON.stringify({ success: true, message: 'No queries to evaluate', evaluated: 0 }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
+
+      const nonZeroResults = perQueryResults.filter(r => r.precision_at_k > 0)
+      const nonZeroCount = nonZeroResults.length
+
+      const avgPrecision = nonZeroCount > 0 ? nonZeroResults.reduce((s, r) => s + r.precision_at_k, 0) / nonZeroCount : 0
+      const avgRecall = total > 0 ? perQueryResults.reduce((s, r) => s + r.expanded_recall, 0) / total : 0
+      const avgHitRate = perQueryResults.reduce((s, r) => s + r.hit_rate, 0) / total
+      const mrr = perQueryResults.reduce((s, r) => s + (r.first_relevant_rank ? 1 / r.first_relevant_rank : 0), 0) / total
+
+      // Store aggregate in eval_runs
+      await supabase.from('eval_runs').insert({
+        created_by: user.id,
+        total_queries: total,
+        avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
+        avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
+        avg_hit_rate_at_k: parseFloat(avgHitRate.toFixed(4)),
+        mrr: parseFloat(mrr.toFixed(4)),
+        k_used: `expanded scan_k=${scanK} threshold=${threshold}`,
+        eval_model: EVAL_MODEL,
+        notes: `Expanded recall eval: ${total} queries, ${nonZeroCount} non-zero precision. scan_k=${scanK}, threshold=${threshold}. Total relevant found via expanded scan used as recall denominator.`,
+      })
+
+      return new Response(JSON.stringify({
+        success: true,
+        evaluated: total,
+        evaluated_nonzero: nonZeroCount,
+        eval_model: EVAL_MODEL,
+        scan_k: scanK,
+        threshold,
+        aggregate: {
+          avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
+          avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
+          avg_hit_rate_at_k: parseFloat(avgHitRate.toFixed(4)),
+          mrr: parseFloat(mrr.toFixed(4)),
+        },
+        per_query: perQueryResults,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    return new Response(JSON.stringify({ error: 'Unknown action. Use ?action=analytics|export|run-eval|run-retrieval-eval|run-expanded-eval|eval-runs' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
