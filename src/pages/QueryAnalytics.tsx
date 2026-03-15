@@ -2,7 +2,7 @@ import { Header } from "@/components/Header";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History, Copy, Check } from "lucide-react";
+import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History, Copy, Check, Scan } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
