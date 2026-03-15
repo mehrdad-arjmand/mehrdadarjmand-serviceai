@@ -367,8 +367,10 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     });
   }, [dictateContent, isDictating]);
 
+  const editChangeSourceRef = useRef<'dictation' | 'manual'>('manual');
+
   useEffect(() => {
-    if (!isEditContentDictating) return;
+    if (!isEditContentDictating || editChangeSourceRef.current !== 'dictation') return;
     const textarea = editContentTextareaRef.current;
     if (!textarea) return;
     requestAnimationFrame(() => {
