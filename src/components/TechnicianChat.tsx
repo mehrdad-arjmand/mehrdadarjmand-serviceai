@@ -520,10 +520,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       setFiltersLocked(false);
       if (conversationActiveRef.current) {
         setConversationState("idle");
-        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-        restartListeningTimerRef.current = setTimeout(() => {
-          if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-        }, 1000);
+        scheduleListeningRestart(1000);
       }
     } finally {setIsQuerying(false);}
   }, [hasDocuments, chatHistory, addMessage, speakText, startConversationListening, toast, isSpeechOutputBlocked]);
