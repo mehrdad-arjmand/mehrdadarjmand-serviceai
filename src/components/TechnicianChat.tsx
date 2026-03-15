@@ -439,10 +439,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         return;
       } else if (conversationActiveRef.current) {
         recognitionRef.current = null;
-        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-        restartListeningTimerRef.current = setTimeout(() => {
-          if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
-        }, 500);
+        scheduleListeningRestart(500);
       } else {recognitionRef.current = null;}
     };
     recognition.onend = () => {
