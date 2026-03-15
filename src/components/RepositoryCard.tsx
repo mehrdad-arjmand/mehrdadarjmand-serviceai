@@ -1408,7 +1408,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                 <Textarea
                   ref={editContentTextareaRef}
                   value={editContentText}
-                  onChange={e => setEditContentText(e.target.value)}
+                  onChange={e => { editChangeSourceRef.current = 'manual'; setEditContentText(e.target.value); }}
                   placeholder="Document content..."
                   className="mt-1.5 min-h-[200px]"
                 />
