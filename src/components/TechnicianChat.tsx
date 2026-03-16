@@ -389,16 +389,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     };
     recognition.onresult = (event: any) => {
       clearSilenceTimer();
+      let reconstructedFinal = '';
       let interimText = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript + ' ';
+          reconstructedFinal += transcript + ' ';
         } else {
           interimText += transcript;
         }
       }
-      const display = (finalTranscript + interimText).trim();
+      finalTranscript = reconstructedFinal;
+      const display = (reconstructedFinal + interimText).trim();
       currentTranscriptRef.current = display;
       setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
