@@ -107,7 +107,6 @@ const QueryAnalytics = () => {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
   const [retrievalEval, setRetrievalEval] = useState<RetrievalEvalResult | null>(null);
-  const [expandedEval, setExpandedEval] = useState<RetrievalEvalResult | null>(null);
   const [evalRuns, setEvalRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
