@@ -394,7 +394,8 @@ const QueryAnalytics = () => {
                   <thead className="bg-muted/50">
                     <tr>
                       <th className="text-left p-3 font-medium text-muted-foreground">Query</th>
-                      <th className="text-right p-3 font-medium text-muted-foreground">K</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Top K</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Top K Eval</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Prec</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Recall</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Hit</th>
