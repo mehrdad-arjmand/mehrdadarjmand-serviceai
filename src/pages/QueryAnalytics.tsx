@@ -406,8 +406,9 @@ const QueryAnalytics = () => {
                       <tr key={i} className="border-t">
                         <td className="p-3 max-w-xs truncate">{r.query}</td>
                         <td className="p-3 text-right font-mono">{r.k}</td>
+                        <td className="p-3 text-right font-mono">{r.top_k_eval ?? '—'}</td>
                         <td className="p-3 text-right font-mono">{(r.precision_at_k * 100).toFixed(1)}%</td>
-                        <td className="p-3 text-right font-mono">{(r.recall_at_k * 100).toFixed(1)}%</td>
+                        <td className="p-3 text-right font-mono">{((r.recall_at_k ?? 0) * 100).toFixed(1)}%</td>
                         <td className="p-3 text-right font-mono">{r.hit_rate ? '✓' : '✗'}</td>
                         <td className="p-3 text-right font-mono">{r.first_relevant_rank ?? '—'}</td>
                       </tr>
