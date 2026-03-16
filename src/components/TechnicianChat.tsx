@@ -576,16 +576,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     let finalTranscript = '';
     recognition.onstart = () => {setIsDictating(true); abortCountRef.current = 0;};
     recognition.onresult = (event: any) => {
+      let reconstructedFinal = '';
       let interimText = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript + ' ';
+          reconstructedFinal += transcript + ' ';
         } else {
           interimText += transcript;
         }
       }
-      setQuestion((finalTranscript + interimText).trim());
+      finalTranscript = reconstructedFinal;
+      setQuestion((reconstructedFinal + interimText).trim());
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
