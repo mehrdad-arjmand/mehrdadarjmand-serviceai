@@ -448,6 +448,73 @@ const QueryAnalytics = () => {
           </Card>
         )}
 
+        {/* Expanded Recall Eval Results */}
+        {expandedEval && expandedEval.evaluated > 0 && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Scan className="h-4 w-4" />Expanded Recall Evaluation
+              </CardTitle>
+              <CardDescription>
+                {expandedEval.evaluated} queries • Model: {expandedEval.eval_model} • Scan K: {expandedEval.scan_k ?? 200} • Threshold: {expandedEval.threshold ?? 0.10}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-8 mb-6">
+                <div>
+                  <p className="text-sm text-muted-foreground">Avg Precision@K</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(expandedEval.aggregate.avg_precision_at_k * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Avg Recall@K (expanded)</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(expandedEval.aggregate.avg_recall_at_k * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Hit Rate@K</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(expandedEval.aggregate.avg_hit_rate_at_k * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">MRR</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{expandedEval.aggregate.mrr.toFixed(4)}</p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Recall denominator: total relevant chunks found in expanded scan (top-{expandedEval.scan_k ?? 200} at threshold {expandedEval.threshold ?? 0.10})
+              </p>
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-3 font-medium text-muted-foreground">Query</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Orig K</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Scanned</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Rel in Scan</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Rel in K</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Prec</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Recall</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">1st Rel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expandedEval.per_query.map((r, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="p-3 max-w-xs truncate">{r.query}</td>
+                        <td className="p-3 text-right font-mono">{r.original_k ?? r.k}</td>
+                        <td className="p-3 text-right font-mono">{r.scan_k ?? '—'}</td>
+                        <td className="p-3 text-right font-mono">{r.total_relevant_in_scan ?? r.total_relevant ?? '—'}</td>
+                        <td className="p-3 text-right font-mono">{r.relevant_in_top_k ?? '—'}</td>
+                        <td className="p-3 text-right font-mono">{(r.precision_at_k * 100).toFixed(1)}%</td>
+                        <td className="p-3 text-right font-mono">{((r.expanded_recall ?? r.recall_at_k ?? 0) * 100).toFixed(1)}%</td>
+                        <td className="p-3 text-right font-mono">{r.first_relevant_rank ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Ground-truth Eval results */}
         {evalResult && (
           <Card className="mb-8">
