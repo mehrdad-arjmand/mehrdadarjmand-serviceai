@@ -2,7 +2,7 @@ import { Header } from "@/components/Header";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History, Copy, Check } from "lucide-react";
+import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History, Copy, Check, Scan } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -42,7 +42,9 @@ interface RetrievalEvalResult {
   evaluated: number;
   eval_model: string;
   k_used: string;
-  ranking_confirmed: string;
+  ranking_confirmed?: string;
+  scan_k?: number;
+  threshold?: number;
   aggregate: {
     avg_precision_at_k: number;
     avg_recall_at_k: number;
@@ -52,10 +54,15 @@ interface RetrievalEvalResult {
   per_query: Array<{
     query_log_id: string;
     query: string;
-    k: number;
-    total_relevant: number;
+    k?: number;
+    scan_k?: number;
+    original_k?: number;
+    total_relevant?: number;
+    total_relevant_in_scan?: number;
+    relevant_in_top_k?: number;
     precision_at_k: number;
-    recall_at_k: number;
+    recall_at_k?: number;
+    expanded_recall?: number;
     hit_rate: number;
     first_relevant_rank: number | null;
   }>;
@@ -105,6 +112,7 @@ const QueryAnalytics = () => {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
   const [retrievalEval, setRetrievalEval] = useState<RetrievalEvalResult | null>(null);
+  const [expandedEval, setExpandedEval] = useState<RetrievalEvalResult | null>(null);
   const [evalRuns, setEvalRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
@@ -217,6 +225,26 @@ const QueryAnalytics = () => {
     }
   };
 
+  const runExpandedEval = async () => {
+    setLoading("expanded-eval");
+    try {
+      const res = await callEvalFunction("run-expanded-eval", { limit: "30", scan_k: "200", threshold: "0.10" });
+      if (!res) return;
+      const data = await res.json();
+      if (data.success) {
+        setExpandedEval(data);
+        if (data.evaluated > 0) toast.success(`Expanded eval: ${data.evaluated} queries`);
+        else toast.info(data.message || "No queries to evaluate");
+      } else {
+        toast.error(data.error || "Expanded eval failed");
+      }
+    } catch {
+      toast.error("Expanded eval failed");
+    } finally {
+      setLoading(null);
+    }
+  };
+
   const handleCopySQL = async () => {
     await navigator.clipboard.writeText(SQL_REFERENCE);
     setSqlCopied(true);
@@ -280,6 +308,10 @@ const QueryAnalytics = () => {
           <Button onClick={runRetrievalEval} variant="outline" disabled className="opacity-50">
             <Target className="h-4 w-4 mr-2" />
             LLM Retrieval Eval
+          </Button>
+          <Button onClick={runExpandedEval} variant="outline" disabled={loading !== null}>
+            {loading === "expanded-eval" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Scan className="h-4 w-4 mr-2" />}
+            Expanded Recall Eval
           </Button>
           <Button onClick={fetchEvalRuns} variant="outline" disabled className="opacity-50">
             <History className="h-4 w-4 mr-2" />
@@ -406,6 +438,73 @@ const QueryAnalytics = () => {
                         <td className="p-3 text-right font-mono">{(r.precision_at_k * 100).toFixed(1)}%</td>
                         <td className="p-3 text-right font-mono">{(r.recall_at_k * 100).toFixed(1)}%</td>
                         <td className="p-3 text-right font-mono">{r.hit_rate ? '✓' : '✗'}</td>
+                        <td className="p-3 text-right font-mono">{r.first_relevant_rank ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Expanded Recall Eval Results */}
+        {expandedEval && expandedEval.evaluated > 0 && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Scan className="h-4 w-4" />Expanded Recall Evaluation
+              </CardTitle>
+              <CardDescription>
+                {expandedEval.evaluated} queries • Model: {expandedEval.eval_model} • Scan K: {expandedEval.scan_k ?? 200} • Threshold: {expandedEval.threshold ?? 0.10}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-8 mb-6">
+                <div>
+                  <p className="text-sm text-muted-foreground">Avg Precision@K</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(expandedEval.aggregate.avg_precision_at_k * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Avg Recall@K (expanded)</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(expandedEval.aggregate.avg_recall_at_k * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Hit Rate@K</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(expandedEval.aggregate.avg_hit_rate_at_k * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">MRR</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{expandedEval.aggregate.mrr.toFixed(4)}</p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Recall denominator: total relevant chunks found in expanded scan (top-{expandedEval.scan_k ?? 200} at threshold {expandedEval.threshold ?? 0.10})
+              </p>
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-3 font-medium text-muted-foreground">Query</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Orig K</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Scanned</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Rel in Scan</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Rel in K</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Prec</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">Recall</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">1st Rel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expandedEval.per_query.map((r, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="p-3 max-w-xs truncate">{r.query}</td>
+                        <td className="p-3 text-right font-mono">{r.original_k ?? r.k}</td>
+                        <td className="p-3 text-right font-mono">{r.scan_k ?? '—'}</td>
+                        <td className="p-3 text-right font-mono">{r.total_relevant_in_scan ?? r.total_relevant ?? '—'}</td>
+                        <td className="p-3 text-right font-mono">{r.relevant_in_top_k ?? '—'}</td>
+                        <td className="p-3 text-right font-mono">{(r.precision_at_k * 100).toFixed(1)}%</td>
+                        <td className="p-3 text-right font-mono">{((r.expanded_recall ?? r.recall_at_k ?? 0) * 100).toFixed(1)}%</td>
                         <td className="p-3 text-right font-mono">{r.first_relevant_rank ?? '—'}</td>
                       </tr>
                     ))}

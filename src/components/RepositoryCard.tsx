@@ -367,8 +367,10 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     });
   }, [dictateContent, isDictating]);
 
+  const editChangeSourceRef = useRef<'dictation' | 'manual'>('manual');
+
   useEffect(() => {
-    if (!isEditContentDictating) return;
+    if (!isEditContentDictating || editChangeSourceRef.current !== 'dictation') return;
     const textarea = editContentTextareaRef.current;
     if (!textarea) return;
     requestAnimationFrame(() => {
@@ -753,6 +755,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         else interimT += transcript;
       }
       newDictatedText += finalT;
+      editChangeSourceRef.current = 'dictation';
       setEditContentText(textBefore + newDictatedText + interimT + textAfter);
     };
     recognition.onerror = (event: any) => {
@@ -1405,7 +1408,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                 <Textarea
                   ref={editContentTextareaRef}
                   value={editContentText}
-                  onChange={e => setEditContentText(e.target.value)}
+                  onChange={e => { editChangeSourceRef.current = 'manual'; setEditContentText(e.target.value); }}
                   placeholder="Document content..."
                   className="mt-1.5 min-h-[200px]"
                 />

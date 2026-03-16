@@ -133,16 +133,22 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     currentFiltersRef.current = currentFilters;
   }, [currentFilters]);
 
-  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 1500 : 500), [isMobileDevice]);
+  const ttsEndTimestampRef = useRef<number>(0);
+  const scheduledRestartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 2500 : 500), [isMobileDevice]);
 
   const markSpeechOutputCooldown = useCallback(() => {
     speechOutputCooldownUntilRef.current = Date.now() + getSpeechRestartCooldownMs();
+    ttsEndTimestampRef.current = Date.now();
   }, [getSpeechRestartCooldownMs]);
 
   const isSpeechOutputBlocked = useCallback(() => {
     const synthBusy = 'speechSynthesis' in window && (window.speechSynthesis.speaking || window.speechSynthesis.pending);
-    return isTtsActiveRef.current || synthBusy || Date.now() < speechOutputCooldownUntilRef.current;
-  }, []);
+    const cooldownActive = Date.now() < speechOutputCooldownUntilRef.current;
+    const ttsRecentlyEnded = (Date.now() - ttsEndTimestampRef.current) < getSpeechRestartCooldownMs();
+    return isTtsActiveRef.current || synthBusy || cooldownActive || ttsRecentlyEnded;
+  }, [getSpeechRestartCooldownMs]);
 
   // Dynamic project fields, dropdown options, roles, and document list for filters
   const [projectFields, setProjectFields] = useState<string[]>([]);
@@ -316,20 +322,40 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
   }, []);
 
-  const startConversationListening = useCallback(() => {
+  // ── Centralized mic restart gatekeeper ──
+  // This is the ONLY function that should be called to restart listening.
+  // It prevents echo by polling until TTS is fully done.
+  const scheduleListeningRestart = useCallback((delayMs = 300) => {
+    // Clear any pending scheduled restart
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
+
+    scheduledRestartRef.current = setTimeout(() => {
+      scheduledRestartRef.current = null;
+      if (!conversationActiveRef.current || isProcessingVoiceRef.current) return;
+
+      // If speech output is still active or cooling down, re-schedule
+      if (isSpeechOutputBlocked()) {
+        console.log('[Voice] Gatekeeper: TTS still active/cooling, re-polling in 500ms');
+        scheduleListeningRestart(500);
+        return;
+      }
+
+      startConversationListeningInternal();
+    }, delayMs);
+  }, [isSpeechOutputBlocked]);
+
+  const startConversationListeningInternal = useCallback(() => {
     if (!conversationActiveRef.current) return;
 
-    // Hard guard: never reactivate microphone while speech output is active/cooling down
+    // Final safety check right before starting
     if (isSpeechOutputBlocked()) {
-      if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-      restartListeningTimerRef.current = setTimeout(() => {
-        if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
-      }, 300);
+      scheduleListeningRestart(500);
       return;
     }
 
     clearSilenceTimer();
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     // Clear any previous watchdog
     if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
     recognitionStartedRef.current = false;
@@ -400,10 +426,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
         recognitionRef.current = null;
-        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-        restartListeningTimerRef.current = setTimeout(() => {
-          if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
-        }, 300);
+        scheduleListeningRestart(300);
       } else if (event.error === 'aborted') {
         recognitionRef.current = null;
         abortCountRef.current++;
@@ -416,19 +439,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         return;
       } else if (conversationActiveRef.current) {
         recognitionRef.current = null;
-        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-        restartListeningTimerRef.current = setTimeout(() => {
-          if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
-        }, 500);
+        scheduleListeningRestart(500);
       } else {recognitionRef.current = null;}
     };
     recognition.onend = () => {
       recognitionRef.current = null;
-      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) {
-        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-        restartListeningTimerRef.current = setTimeout(() => {
-          if (conversationActiveRef.current && !isProcessingVoiceRef.current && !isSpeechOutputBlocked()) startConversationListening();
-        }, 200);
+      if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
+        scheduleListeningRestart(200);
       }
     };
     try {
@@ -445,10 +462,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           try { recognitionRef.current.abort(); } catch (e) {}
           recognitionRef.current = null;
         }
-        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-        restartListeningTimerRef.current = setTimeout(() => {
-          if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-        }, 500);
+        scheduleListeningRestart(500);
       }
     }, 3000);
   }, [toast, clearSilenceTimer, isSpeechOutputBlocked]);
@@ -487,10 +501,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           setFiltersLocked(false);
           lastSubmittedTranscriptRef.current = ""; // Reset dedup after full cycle
           if (conversationActiveRef.current) {
-            if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-            restartListeningTimerRef.current = setTimeout(() => {
-              if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-            }, 300);
+            scheduleListeningRestart(300);
           }
         });
       } else {
@@ -498,10 +509,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         lastSubmittedTranscriptRef.current = "";
         // Restart listening even if answer was empty
         if (conversationActiveRef.current) {
-          if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-          restartListeningTimerRef.current = setTimeout(() => {
-            if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-          }, 300);
+          scheduleListeningRestart(300);
         }
       }
     } catch (error: any) {
@@ -512,13 +520,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       setFiltersLocked(false);
       if (conversationActiveRef.current) {
         setConversationState("idle");
-        if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-        restartListeningTimerRef.current = setTimeout(() => {
-          if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-        }, 1000);
+        scheduleListeningRestart(1000);
       }
     } finally {setIsQuerying(false);}
-  }, [hasDocuments, chatHistory, addMessage, speakText, startConversationListening, toast, isSpeechOutputBlocked]);
+  }, [hasDocuments, chatHistory, addMessage, speakText, scheduleListeningRestart, toast, isSpeechOutputBlocked]);
 
   const sendMessage = useCallback(async (text: string, inputMode: "text" | "dictation") => {
     stopListening();
@@ -638,13 +643,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       // This prevents showing "Listening..." when recognition hasn't actually started
       setQuestion("");
       // Use longer initial delay to let browser fully release mic after TTS cancel
-      restartListeningTimerRef.current = setTimeout(() => {
-        if (conversationActiveRef.current && !isSpeechOutputBlocked()) {
-          startConversationListening();
-        }
-      }, 800);
+      scheduleListeningRestart(800);
     }
-  }, [startConversationListening, markSpeechOutputCooldown, isSpeechOutputBlocked]);
+  }, [scheduleListeningRestart, markSpeechOutputCooldown, isSpeechOutputBlocked]);
 
   const handleConversationToggle = () => {
     if (isConversationMode) {
@@ -661,10 +662,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       conversationActiveRef.current = true;
       setIsConversationMode(true);
       setQuestion("");
-      if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); }
-      restartListeningTimerRef.current = setTimeout(() => {
-        if (conversationActiveRef.current && !isSpeechOutputBlocked()) startConversationListening();
-      }, 100);
+      scheduleListeningRestart(100);
     }
   };
 
