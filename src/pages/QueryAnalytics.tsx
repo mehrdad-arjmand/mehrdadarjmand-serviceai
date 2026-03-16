@@ -284,10 +284,6 @@ const QueryAnalytics = () => {
             <Target className="h-4 w-4 mr-2" />
             LLM Retrieval Eval
           </Button>
-          <Button onClick={runExpandedEval} variant="outline" disabled={loading !== null}>
-            {loading === "expanded-eval" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Scan className="h-4 w-4 mr-2" />}
-            Expanded Recall Eval
-          </Button>
           <Button onClick={fetchEvalRuns} variant="outline" disabled className="opacity-50">
             <History className="h-4 w-4 mr-2" />
             Eval History
