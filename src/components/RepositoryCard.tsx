@@ -769,9 +769,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
       setIsEditContentDictating(false);
+      editDictationCaretRef.current = null;
       editContentRecognitionRef.current = null;
     };
-    recognition.onend = () => { setIsEditContentDictating(false); editContentRecognitionRef.current = null; };
+    recognition.onend = () => {
+      setIsEditContentDictating(false);
+      editDictationCaretRef.current = null;
+      editContentRecognitionRef.current = null;
+    };
     recognition.start();
   }, [toast, editContentText]);
 
@@ -780,6 +785,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       try { editContentRecognitionRef.current.stop(); } catch (e) {}
       editContentRecognitionRef.current = null;
     }
+    editDictationCaretRef.current = null;
     setIsEditContentDictating(false);
   }, []);
 
