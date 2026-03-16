@@ -368,13 +368,17 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   }, [dictateContent, isDictating]);
 
   const editChangeSourceRef = useRef<'dictation' | 'manual'>('manual');
+  const editDictationAnchorRef = useRef(0);
+  const editDictationCaretRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isEditContentDictating || editChangeSourceRef.current !== 'dictation') return;
     const textarea = editContentTextareaRef.current;
-    if (!textarea) return;
+    const caret = editDictationCaretRef.current;
+    if (!textarea || caret === null) return;
     requestAnimationFrame(() => {
-      textarea.scrollTop = textarea.scrollHeight;
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
     });
   }, [editContentText, isEditContentDictating]);
 
@@ -742,6 +746,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.lang = 'en-US';
     const textarea = editContentTextareaRef.current;
     const cursorPos = textarea?.selectionStart ?? editContentText.length;
+    editDictationAnchorRef.current = cursorPos;
+    editDictationCaretRef.current = cursorPos;
     const textBefore = editContentText.slice(0, cursorPos);
     const textAfter = editContentText.slice(cursorPos);
     let newDictatedText = '';
@@ -755,15 +761,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         else interimT += transcript;
       }
       newDictatedText += finalT;
+      const nextText = textBefore + newDictatedText + interimT + textAfter;
+      editDictationCaretRef.current = editDictationAnchorRef.current + newDictatedText.length + interimT.length;
       editChangeSourceRef.current = 'dictation';
-      setEditContentText(textBefore + newDictatedText + interimT + textAfter);
+      setEditContentText(nextText);
     };
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
       setIsEditContentDictating(false);
+      editDictationCaretRef.current = null;
       editContentRecognitionRef.current = null;
     };
-    recognition.onend = () => { setIsEditContentDictating(false); editContentRecognitionRef.current = null; };
+    recognition.onend = () => {
+      setIsEditContentDictating(false);
+      editDictationCaretRef.current = null;
+      editContentRecognitionRef.current = null;
+    };
     recognition.start();
   }, [toast, editContentText]);
 
@@ -772,6 +785,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       try { editContentRecognitionRef.current.stop(); } catch (e) {}
       editContentRecognitionRef.current = null;
     }
+    editDictationCaretRef.current = null;
     setIsEditContentDictating(false);
   }, []);
 
@@ -1408,7 +1422,11 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                 <Textarea
                   ref={editContentTextareaRef}
                   value={editContentText}
-                  onChange={e => { editChangeSourceRef.current = 'manual'; setEditContentText(e.target.value); }}
+                  onChange={e => {
+                    editChangeSourceRef.current = 'manual';
+                    editDictationCaretRef.current = e.target.selectionStart ?? null;
+                    setEditContentText(e.target.value);
+                  }}
                   placeholder="Document content..."
                   className="mt-1.5 min-h-[200px]"
                 />

@@ -244,6 +244,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const stopListening = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     dictationActiveRef.current = false;
     dictationPartsRef.current = [];
     if (recognitionRef.current) {try {recognitionRef.current.stop();} catch (e) {}recognitionRef.current = null;}
@@ -254,6 +255,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const stopSpeaking = useCallback(() => {
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     if ('speechSynthesis' in window) {window.speechSynthesis.cancel();utteranceQueueRef.current++;}
     isTtsActiveRef.current = false;
     markSpeechOutputCooldown();
@@ -387,16 +389,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     };
     recognition.onresult = (event: any) => {
       clearSilenceTimer();
+      let reconstructedFinal = '';
       let interimText = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript + ' ';
+          reconstructedFinal += transcript + ' ';
         } else {
           interimText += transcript;
         }
       }
-      const display = (finalTranscript + interimText).trim();
+      finalTranscript = reconstructedFinal;
+      const display = (reconstructedFinal + interimText).trim();
       currentTranscriptRef.current = display;
       setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
@@ -572,16 +576,18 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     let finalTranscript = '';
     recognition.onstart = () => {setIsDictating(true); abortCountRef.current = 0;};
     recognition.onresult = (event: any) => {
+      let reconstructedFinal = '';
       let interimText = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript + ' ';
+          reconstructedFinal += transcript + ' ';
         } else {
           interimText += transcript;
         }
       }
-      setQuestion((finalTranscript + interimText).trim());
+      finalTranscript = reconstructedFinal;
+      setQuestion((reconstructedFinal + interimText).trim());
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
@@ -652,6 +658,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       conversationActiveRef.current = false;
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
+      if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
       stopListening();
       stopSpeaking();
       setIsConversationMode(false);
