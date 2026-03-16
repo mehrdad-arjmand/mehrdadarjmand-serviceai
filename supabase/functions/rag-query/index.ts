@@ -736,10 +736,12 @@ Provide a clear, concise answer based on the actual procedural content in the co
     }))
 
     // Log to query_logs and trigger background retrieval evaluation
-    const chunkIds = topChunks.map((c: any) => c.id)
-    const similarities = topChunks.map((c: any) => c.similarity ?? 0)
-    const chunkTexts = topChunks.map((c: any) => ({ id: c.id, text: c.text }))
+    const evalChunks = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+    const chunkIds = evalChunks.map((c: any) => c.id)
+    const similarities = evalChunks.map((c: any) => c.similarity ?? 0)
+    const chunkTexts = evalChunks.map((c: any) => ({ id: c.id, text: c.text }))
     const topK = topChunks.length
+    const topKEval = evalChunks.length
 
     const logPayload = {
       user_id: user.id,
@@ -753,6 +755,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
       total_tokens: usage.total_tokens,
       execution_time_ms: executionTimeMs,
       top_k: topK,
+      top_k_eval: topKEval,
       upstream_inference_cost: usage.upstream_inference_cost ?? 0,
     }
 
@@ -773,7 +776,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
         console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
 
         // LLM-based retrieval evaluation
-        await evaluateRetrievalBackground(supabase, inserted.id, question, chunkTexts, topK)
+        await evaluateRetrievalBackground(supabase, inserted.id, question, chunkTexts, topK, topKEval)
       } catch (e) {
         console.error('Background eval error:', e)
       }
