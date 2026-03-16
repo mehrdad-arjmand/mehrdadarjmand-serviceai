@@ -746,6 +746,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.lang = 'en-US';
     const textarea = editContentTextareaRef.current;
     const cursorPos = textarea?.selectionStart ?? editContentText.length;
+    editDictationAnchorRef.current = cursorPos;
+    editDictationCaretRef.current = cursorPos;
     const textBefore = editContentText.slice(0, cursorPos);
     const textAfter = editContentText.slice(cursorPos);
     let newDictatedText = '';
@@ -759,8 +761,10 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         else interimT += transcript;
       }
       newDictatedText += finalT;
+      const nextText = textBefore + newDictatedText + interimT + textAfter;
+      editDictationCaretRef.current = editDictationAnchorRef.current + newDictatedText.length + interimT.length;
       editChangeSourceRef.current = 'dictation';
-      setEditContentText(textBefore + newDictatedText + interimT + textAfter);
+      setEditContentText(nextText);
     };
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
