@@ -658,6 +658,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       conversationActiveRef.current = false;
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
+      if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
       stopListening();
       stopSpeaking();
       setIsConversationMode(false);
