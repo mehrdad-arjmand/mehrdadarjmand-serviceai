@@ -244,6 +244,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
   const stopListening = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     dictationActiveRef.current = false;
     dictationPartsRef.current = [];
     if (recognitionRef.current) {try {recognitionRef.current.stop();} catch (e) {}recognitionRef.current = null;}
@@ -254,6 +255,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const stopSpeaking = useCallback(() => {
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     if ('speechSynthesis' in window) {window.speechSynthesis.cancel();utteranceQueueRef.current++;}
     isTtsActiveRef.current = false;
     markSpeechOutputCooldown();
