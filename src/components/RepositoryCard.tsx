@@ -368,13 +368,17 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   }, [dictateContent, isDictating]);
 
   const editChangeSourceRef = useRef<'dictation' | 'manual'>('manual');
+  const editDictationAnchorRef = useRef(0);
+  const editDictationCaretRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isEditContentDictating || editChangeSourceRef.current !== 'dictation') return;
     const textarea = editContentTextareaRef.current;
-    if (!textarea) return;
+    const caret = editDictationCaretRef.current;
+    if (!textarea || caret === null) return;
     requestAnimationFrame(() => {
-      textarea.scrollTop = textarea.scrollHeight;
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
     });
   }, [editContentText, isEditContentDictating]);
 
