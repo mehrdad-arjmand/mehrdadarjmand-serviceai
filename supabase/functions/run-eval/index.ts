@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
         'retrieved_chunk_ids', 'retrieved_similarities',
         'response_text', 'citations_json',
         'input_tokens', 'output_tokens', 'total_tokens',
-        'execution_time_ms', 'top_k', 'upstream_inference_cost',
+        'execution_time_ms', 'top_k', 'top_k_eval', 'upstream_inference_cost',
         'total_relevant_chunks', 'relevant_in_top_k',
         'precision_at_k', 'recall_at_k', 'hit_rate_at_k',
         'first_relevant_rank', 'relevance_labels',
