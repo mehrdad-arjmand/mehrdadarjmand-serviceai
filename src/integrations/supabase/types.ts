@@ -395,6 +395,7 @@ export type Database = {
           retrieved_chunk_ids: string[] | null
           retrieved_similarities: number[] | null
           top_k: number | null
+          top_k_eval: number | null
           total_relevant_chunks: number | null
           total_tokens: number | null
           upstream_inference_cost: number | null
@@ -420,6 +421,7 @@ export type Database = {
           retrieved_chunk_ids?: string[] | null
           retrieved_similarities?: number[] | null
           top_k?: number | null
+          top_k_eval?: number | null
           total_relevant_chunks?: number | null
           total_tokens?: number | null
           upstream_inference_cost?: number | null
@@ -445,6 +447,7 @@ export type Database = {
           retrieved_chunk_ids?: string[] | null
           retrieved_similarities?: number[] | null
           top_k?: number | null
+          top_k_eval?: number | null
           total_relevant_chunks?: number | null
           total_tokens?: number | null
           upstream_inference_cost?: number | null

@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
         'retrieved_chunk_ids', 'retrieved_similarities',
         'response_text', 'citations_json',
         'input_tokens', 'output_tokens', 'total_tokens',
-        'execution_time_ms', 'top_k', 'upstream_inference_cost',
+        'execution_time_ms', 'top_k', 'top_k_eval', 'upstream_inference_cost',
         'total_relevant_chunks', 'relevant_in_top_k',
         'precision_at_k', 'recall_at_k', 'hit_rate_at_k',
         'first_relevant_rank', 'relevance_labels',
@@ -272,10 +272,9 @@ Deno.serve(async (req) => {
       const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50'), 200)
       const skipEvaluated = url.searchParams.get('skip_evaluated') !== 'false'
 
-      // Fetch query logs that have retrieved chunks
       let query = supabase
         .from('query_logs')
-        .select('id, query_text, retrieved_chunk_ids, top_k')
+        .select('id, query_text, retrieved_chunk_ids, top_k, top_k_eval')
         .not('retrieved_chunk_ids', 'is', null)
         .order('created_at', { ascending: false })
         .limit(limit)
@@ -300,24 +299,23 @@ Deno.serve(async (req) => {
       for (const log of logs) {
         const chunkIds = log.retrieved_chunk_ids || []
         const k = log.top_k || chunkIds.length
+        const topKEval = Math.min(log.top_k_eval ?? chunkIds.length, chunkIds.length, 200)
 
-        if (chunkIds.length === 0) continue
+        if (chunkIds.length === 0 || topKEval === 0) continue
 
-        // Fetch chunk texts
         const { data: chunks } = await supabase
           .from('chunks')
           .select('id, text')
-          .in('id', chunkIds)
+          .in('id', chunkIds.slice(0, topKEval))
 
         if (!chunks || chunks.length === 0) continue
 
-        // Build chunk map preserving rank order
         const chunkMap = new Map(chunks.map(c => [c.id, c.text]))
 
         const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
         let firstRelevantRank: number | null = null
 
-        for (let i = 0; i < Math.min(chunkIds.length, k); i++) {
+        for (let i = 0; i < topKEval; i++) {
           const chunkId = chunkIds[i]
           const chunkText = chunkMap.get(chunkId)
           if (!chunkText) {
@@ -328,19 +326,19 @@ Deno.serve(async (req) => {
           const result = await evaluateChunkRelevance(log.query_text, chunkText)
           labels.push({ chunk_id: chunkId, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
-          if (result.relevant && firstRelevantRank === null) {
+          if (result.relevant && firstRelevantRank === null && i < k) {
             firstRelevantRank = i + 1
           }
         }
 
         const totalRelevant = labels.filter(l => l.relevant).length
-        const relevantInTopK = totalRelevant // we evaluate up to K
-        const precisionAtK = k > 0 ? relevantInTopK / Math.min(chunkIds.length, k) : 0
-        const recallAtK = totalRelevant > 0 ? relevantInTopK / totalRelevant : (totalRelevant === 0 ? 0 : 0)
+        const relevantInTopK = labels.filter(l => l.relevant && l.rank <= k).length
+        const precisionAtK = k > 0 ? relevantInTopK / k : 0
+        const recallAtK = totalRelevant > 0 ? relevantInTopK / totalRelevant : 0
         const hitRate = relevantInTopK > 0 ? 1 : 0
 
-        // Update query_logs row
         await supabase.from('query_logs').update({
+          top_k_eval: topKEval,
           total_relevant_chunks: totalRelevant,
           relevant_in_top_k: relevantInTopK,
           precision_at_k: parseFloat(precisionAtK.toFixed(4)),
@@ -355,8 +353,10 @@ Deno.serve(async (req) => {
         perQueryResults.push({
           query_log_id: log.id,
           query: log.query_text.slice(0, 100),
-          k: Math.min(chunkIds.length, k),
+          k,
+          top_k_eval: topKEval,
           total_relevant: totalRelevant,
+          relevant_in_top_k: relevantInTopK,
           precision_at_k: parseFloat(precisionAtK.toFixed(4)),
           recall_at_k: parseFloat(recallAtK.toFixed(4)),
           hit_rate: hitRate,
@@ -364,7 +364,6 @@ Deno.serve(async (req) => {
         })
       }
 
-      // Compute aggregate metrics (excluding zero-precision out-of-scope queries)
       const total = perQueryResults.length
       if (total === 0) {
         return new Response(JSON.stringify({ success: true, message: 'No queries to evaluate', evaluated: 0 }), {
@@ -372,34 +371,34 @@ Deno.serve(async (req) => {
         })
       }
 
-      const nonZeroResults = perQueryResults.filter(r => r.precision_at_k > 0)
-      const nonZeroCount = nonZeroResults.length
+      const eligibleResults = perQueryResults.filter(r => r.first_relevant_rank !== null)
+      const sumRelevantInTopK = eligibleResults.reduce((sum, r) => sum + (r.relevant_in_top_k ?? 0), 0)
+      const sumTopK = eligibleResults.reduce((sum, r) => sum + (r.k ?? 0), 0)
+      const sumTotalRelevant = eligibleResults.reduce((sum, r) => sum + (r.total_relevant ?? 0), 0)
+      const avgPrecision = sumTopK > 0 ? sumRelevantInTopK / sumTopK : 0
+      const avgRecall = sumTotalRelevant > 0 ? sumRelevantInTopK / sumTotalRelevant : 0
+      const avgHitRate = eligibleResults.length > 0 ? eligibleResults.reduce((s, r) => s + r.hit_rate, 0) / eligibleResults.length : 0
+      const mrr = eligibleResults.length > 0 ? eligibleResults.reduce((s, r) => s + (r.first_relevant_rank ? 1 / r.first_relevant_rank : 0), 0) / eligibleResults.length : 0
 
-      const avgPrecision = nonZeroCount > 0 ? nonZeroResults.reduce((s, r) => s + r.precision_at_k, 0) / nonZeroCount : 0
-      const avgRecall = nonZeroCount > 0 ? nonZeroResults.reduce((s, r) => s + r.recall_at_k, 0) / nonZeroCount : 0
-      const avgHitRate = perQueryResults.reduce((s, r) => s + r.hit_rate, 0) / total
-      const mrr = perQueryResults.reduce((s, r) => s + (r.first_relevant_rank ? 1 / r.first_relevant_rank : 0), 0) / total
-
-      // Store aggregate in eval_runs
       await supabase.from('eval_runs').insert({
         created_by: user.id,
-        total_queries: total,
+        total_queries: eligibleResults.length,
         avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
         avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
         avg_hit_rate_at_k: parseFloat(avgHitRate.toFixed(4)),
         mrr: parseFloat(mrr.toFixed(4)),
         k_used: 'per-query top_k',
         eval_model: EVAL_MODEL,
-        notes: `Evaluated ${total} queries (${nonZeroCount} non-zero precision). Chunks ranked by post-reranking order.`,
+        notes: `Evaluated ${total} queries; aggregates use only rows with first_relevant_rank present.`,
       })
 
       return new Response(JSON.stringify({
         success: true,
         evaluated: total,
-        evaluated_nonzero: nonZeroCount,
+        evaluated_nonzero: eligibleResults.length,
         eval_model: EVAL_MODEL,
-        k_used: 'per-query top_k (stored in query_logs.top_k)',
-        ranking_confirmed: 'retrieved_chunk_ids stored in ranked order after TOC-penalty re-ranking',
+        k_used: 'per-query top_k (top_k_eval stored separately)',
+        ranking_confirmed: 'retrieved_chunk_ids stored in ranked order after re-ranking',
         aggregate: {
           avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),

@@ -736,10 +736,12 @@ Provide a clear, concise answer based on the actual procedural content in the co
     }))
 
     // Log to query_logs and trigger background retrieval evaluation
-    const chunkIds = topChunks.map((c: any) => c.id)
-    const similarities = topChunks.map((c: any) => c.similarity ?? 0)
-    const chunkTexts = topChunks.map((c: any) => ({ id: c.id, text: c.text }))
+    const evalChunks = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+    const chunkIds = evalChunks.map((c: any) => c.id)
+    const similarities = evalChunks.map((c: any) => c.similarity ?? 0)
+    const chunkTexts = evalChunks.map((c: any) => ({ id: c.id, text: c.text }))
     const topK = topChunks.length
+    const topKEval = evalChunks.length
 
     const logPayload = {
       user_id: user.id,
@@ -753,6 +755,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
       total_tokens: usage.total_tokens,
       execution_time_ms: executionTimeMs,
       top_k: topK,
+      top_k_eval: topKEval,
       upstream_inference_cost: usage.upstream_inference_cost ?? 0,
     }
 
@@ -773,7 +776,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
         console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
 
         // LLM-based retrieval evaluation
-        await evaluateRetrievalBackground(supabase, inserted.id, question, chunkTexts, topK)
+        await evaluateRetrievalBackground(supabase, inserted.id, question, chunkTexts, topK, topKEval)
       } catch (e) {
         console.error('Background eval error:', e)
       }
@@ -1138,28 +1141,30 @@ async function evaluateRetrievalBackground(
   queryLogId: string,
   queryText: string,
   chunkTexts: { id: string; text: string }[],
-  topK: number
+  topK: number,
+  topKEval: number
 ) {
   const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
   let firstRelevantRank: number | null = null
 
-  for (let i = 0; i < chunkTexts.length; i++) {
+  for (let i = 0; i < Math.min(chunkTexts.length, topKEval); i++) {
     const { id: chunkId, text: chunkText } = chunkTexts[i]
     const result = await evaluateChunkRelevance(queryText, chunkText)
     labels.push({ chunk_id: chunkId, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
-    if (result.relevant && firstRelevantRank === null) {
+    if (result.relevant && firstRelevantRank === null && i < topK) {
       firstRelevantRank = i + 1
     }
   }
 
   const totalRelevant = labels.filter(l => l.relevant).length
-  const relevantInTopK = totalRelevant
+  const relevantInTopK = labels.filter(l => l.relevant && l.rank <= topK).length
   const precisionAtK = topK > 0 ? relevantInTopK / topK : 0
   const recallAtK = totalRelevant > 0 ? relevantInTopK / totalRelevant : 0
   const hitRate = relevantInTopK > 0 ? 1 : 0
 
   const { error: updateError } = await supabase.from('query_logs').update({
+    top_k_eval: Math.min(topKEval, labels.length, 200),
     total_relevant_chunks: totalRelevant,
     relevant_in_top_k: relevantInTopK,
     precision_at_k: parseFloat(precisionAtK.toFixed(4)),
@@ -1174,6 +1179,6 @@ async function evaluateRetrievalBackground(
   if (updateError) {
     console.error('Failed to update retrieval eval:', updateError)
   } else {
-    console.log(`Retrieval eval complete for ${queryLogId}: P@K=${precisionAtK.toFixed(3)}, R@K=${recallAtK.toFixed(3)}, HR=${hitRate}, MRR_rank=${firstRelevantRank}`)
+    console.log(`Retrieval eval complete for ${queryLogId}: P@K=${precisionAtK.toFixed(3)}, R@K=${recallAtK.toFixed(3)}, HR=${hitRate}, topKEval=${Math.min(topKEval, labels.length, 200)}`)
   }
 }
