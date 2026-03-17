@@ -15,7 +15,6 @@ interface AnalyticsData {
   cost: { avg: string; p95: string; total: string };
   retrieval_eval: {
     evaluated_count: number;
-    evaluated_nonzero_count: number;
     avg_precision_at_k: number;
     avg_recall_at_k: number;
     avg_hit_rate: number;
@@ -342,7 +341,7 @@ const QueryAnalytics = () => {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Retrieval Quality</CardTitle>
                   <CardDescription>
-                    {analytics.retrieval_eval.evaluated_nonzero_count} of {analytics.retrieval_eval.evaluated_count} queries (excl. out-of-scope)
+                    {analytics.retrieval_eval.evaluated_count} queries with relevant results
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">

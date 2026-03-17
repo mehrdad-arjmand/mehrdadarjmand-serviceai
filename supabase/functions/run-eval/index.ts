@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
     if (action === 'analytics') {
       const { data: logs } = await supabase
         .from('query_logs')
-        .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank')
+        .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k')
         .order('created_at', { ascending: true })
 
       if (!logs || logs.length === 0) {
@@ -115,10 +115,20 @@ Deno.serve(async (req) => {
       }
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
-      // Retrieval eval stats from evaluated logs
-      // Exclude zero-precision queries (out-of-scope questions with no relevant docs)
-      const evaluated = logs.filter(l => l.precision_at_k !== null)
-      const evaluatedNonZero = evaluated.filter(l => l.precision_at_k! > 0)
+      // Retrieval eval: only rows where first_relevant_rank is not null
+      const eligible = logs.filter(l => l.first_relevant_rank !== null && l.first_relevant_rank !== undefined)
+
+      // Precision@K = sum(relevant_in_top_k) / sum(top_k) for eligible rows
+      const sumRelevantInTopK = eligible.reduce((s, l) => s + (l.relevant_in_top_k ?? 0), 0)
+      const sumTopK = eligible.reduce((s, l) => s + (l.top_k ?? 0), 0)
+      const aggPrecision = sumTopK > 0 ? sumRelevantInTopK / sumTopK : 0
+
+      // Recall@K = sum(relevant_in_top_k) / sum(total_relevant_chunks) for eligible rows
+      const sumTotalRelevant = eligible.reduce((s, l) => s + (l.total_relevant_chunks ?? 0), 0)
+      const aggRecall = sumTotalRelevant > 0 ? sumRelevantInTopK / sumTotalRelevant : 0
+
+      const avgHitRate = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)) : 0
+      const mrr = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)) : 0
 
       const analytics = {
         sample_size: logs.length,
@@ -135,14 +145,12 @@ Deno.serve(async (req) => {
           avg: avg(costs).toFixed(6), p95: percentile(costs, 95).toFixed(6),
           total: costs.reduce((s, v) => s + v, 0).toFixed(6),
         },
-        retrieval_eval: evaluated.length > 0 ? {
-          evaluated_count: evaluated.length,
-          evaluated_nonzero_count: evaluatedNonZero.length,
-          // Aggregate precision/recall excludes zero-precision queries (out-of-scope questions)
-          avg_precision_at_k: evaluatedNonZero.length > 0 ? parseFloat(avg(evaluatedNonZero.map(l => l.precision_at_k!)).toFixed(4)) : 0,
-          avg_recall_at_k: evaluatedNonZero.length > 0 ? parseFloat(avg(evaluatedNonZero.map(l => l.recall_at_k!)).toFixed(4)) : 0,
-          avg_hit_rate: parseFloat(avg(evaluated.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)),
-          mrr: parseFloat(avg(evaluated.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)),
+        retrieval_eval: eligible.length > 0 ? {
+          evaluated_count: eligible.length,
+          avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
+          avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
+          avg_hit_rate: avgHitRate,
+          mrr: mrr,
         } : null,
       }
 
