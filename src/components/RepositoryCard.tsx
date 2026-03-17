@@ -16,6 +16,7 @@ import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { ensureTextareaCaretVisible } from "@/lib/textareaCaret";
 import { TabPermissions } from "@/hooks/usePermissions";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -376,9 +377,11 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const textarea = editContentTextareaRef.current;
     const caret = editDictationCaretRef.current;
     if (!textarea || caret === null) return;
+
     requestAnimationFrame(() => {
       textarea.focus();
       textarea.setSelectionRange(caret, caret);
+      ensureTextareaCaretVisible(textarea, caret);
     });
   }, [editContentText, isEditContentDictating]);
 
@@ -753,16 +756,19 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     let newDictatedText = '';
     recognition.onstart = () => setIsEditContentDictating(true);
     recognition.onresult = (event: any) => {
-      let finalT = '';
-      let interimT = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      let reconstructedFinal = '';
+      let interimText = '';
+
+      for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalT += transcript + ' ';
-        else interimT += transcript;
+        if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
+        else interimText += transcript;
       }
-      newDictatedText += finalT;
-      const nextText = textBefore + newDictatedText + interimT + textAfter;
-      editDictationCaretRef.current = editDictationAnchorRef.current + newDictatedText.length + interimT.length;
+
+      newDictatedText = reconstructedFinal;
+      const liveInsertion = `${newDictatedText}${interimText}`;
+      const nextText = textBefore + liveInsertion + textAfter;
+      editDictationCaretRef.current = editDictationAnchorRef.current + liveInsertion.length;
       editChangeSourceRef.current = 'dictation';
       setEditContentText(nextText);
     };
@@ -1426,6 +1432,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                     editChangeSourceRef.current = 'manual';
                     editDictationCaretRef.current = e.target.selectionStart ?? null;
                     setEditContentText(e.target.value);
+                  }}
+                  onSelect={e => {
+                    editDictationCaretRef.current = e.currentTarget.selectionStart ?? null;
                   }}
                   placeholder="Document content..."
                   className="mt-1.5 min-h-[200px]"

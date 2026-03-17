@@ -128,6 +128,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
   const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
+  const processConversationMessageRef = useRef<(text: string) => void>(() => {});
 
   useEffect(() => {
     currentFiltersRef.current = currentFilters;
@@ -252,6 +253,30 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     currentTranscriptRef.current = '';
   }, []);
 
+  const teardownRecognitionForSpeech = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    if (!recognitionRef.current) return;
+
+    try {
+      recognitionRef.current.onresult = null;
+      recognitionRef.current.onerror = null;
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+    } catch (_) {
+      try {
+        recognitionRef.current.abort();
+      } catch (_) {}
+    } finally {
+      recognitionRef.current = null;
+      recognitionStartedRef.current = false;
+      currentTranscriptRef.current = "";
+    }
+  }, []);
+
   const stopSpeaking = useCallback(() => {
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
@@ -270,6 +295,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       toast({ title: "TTS not supported", description: "Voice playback is not supported in this browser.", variant: "destructive" });
       onComplete?.();return;
     }
+
+    markSpeechOutputCooldown();
+    teardownRecognitionForSpeech();
     window.speechSynthesis.cancel();
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     // Clear any existing keepAlive
@@ -318,7 +346,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       window.speechSynthesis.speak(utterance);
     };
     speakNext();
-  }, [toast, markSpeechOutputCooldown]);
+  }, [toast, markSpeechOutputCooldown, teardownRecognitionForSpeech]);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
@@ -366,11 +394,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       toast({ title: "Speech recognition not supported", description: "Your browser doesn't support speech recognition.", variant: "destructive" });
       return;
     }
-    // Clean up any lingering recognition instance
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
-      recognitionRef.current = null;
-    }
+
+    // Clean up any lingering recognition instance before creating a new one.
+    teardownRecognitionForSpeech();
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
@@ -411,28 +437,29 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
             console.warn('[Voice] Duplicate transcript detected, skipping');
             return;
           }
-          if (recognitionRef.current) {try {recognitionRef.current.stop();} catch (e) {}recognitionRef.current = null;}
+          teardownRecognitionForSpeech();
           isProcessingVoiceRef.current = true;
           lastSubmittedTranscriptRef.current = transcript;
           setConversationState("processing");
           setQuestion("");
-          processConversationMessage(transcript);
+          processConversationMessageRef.current(transcript);
         }
       }, SILENCE_THRESHOLD_MS);
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
       clearSilenceTimer();
+      recognitionRef.current = null;
+      recognitionStartedRef.current = false;
+
       if (event.error === 'not-allowed') {
         toast({ title: "Microphone permission denied", description: "Please enable mic access in your browser.", variant: "destructive" });
         conversationActiveRef.current = false;
         setIsConversationMode(false);
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
-        recognitionRef.current = null;
-        scheduleListeningRestart(300);
+        scheduleListeningRestart(isMobileDevice ? 1000 : 300);
       } else if (event.error === 'aborted') {
-        recognitionRef.current = null;
         abortCountRef.current++;
         if (abortCountRef.current >= 3) {
           conversationActiveRef.current = false;
@@ -442,14 +469,14 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         }
         return;
       } else if (conversationActiveRef.current) {
-        recognitionRef.current = null;
-        scheduleListeningRestart(500);
-      } else {recognitionRef.current = null;}
+        scheduleListeningRestart(isMobileDevice ? 1200 : 500);
+      }
     };
     recognition.onend = () => {
       recognitionRef.current = null;
+      recognitionStartedRef.current = false;
       if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
-        scheduleListeningRestart(200);
+        scheduleListeningRestart(isMobileDevice ? 1200 : 200);
       }
     };
     try {
@@ -457,19 +484,17 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     } catch (e) {
       console.error('[Voice] Failed to start recognition:', e);
       recognitionRef.current = null;
+      recognitionStartedRef.current = false;
     }
     // Watchdog: if onstart doesn't fire within 3s, force restart
     listeningWatchdogRef.current = setTimeout(() => {
       if (conversationActiveRef.current && !recognitionStartedRef.current) {
         console.warn('[Voice] Watchdog: recognition did not start, restarting...');
-        if (recognitionRef.current) {
-          try { recognitionRef.current.abort(); } catch (e) {}
-          recognitionRef.current = null;
-        }
-        scheduleListeningRestart(500);
+        teardownRecognitionForSpeech();
+        scheduleListeningRestart(isMobileDevice ? 1200 : 500);
       }
-    }, 3000);
-  }, [toast, clearSilenceTimer, isSpeechOutputBlocked]);
+    }, isMobileDevice ? 4000 : 3000);
+  }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, isMobileDevice]);
 
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
@@ -560,6 +585,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       toast({ title: "Error querying assistant", description: error.message || "An unexpected error occurred.", variant: "destructive" });
     } finally {setIsQuerying(false);setFiltersLocked(false);}
   }, [hasDocuments, chatHistory, addMessage, stopListening, toast]);
+
+  useEffect(() => {
+    processConversationMessageRef.current = processConversationMessage;
+  }, [processConversationMessage]);
 
   const startDictation = useCallback(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
