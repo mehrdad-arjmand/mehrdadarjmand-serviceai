@@ -128,6 +128,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
   const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
+  const processConversationMessageRef = useRef<(text: string) => void>(() => {});
 
   useEffect(() => {
     currentFiltersRef.current = currentFilters;
