@@ -586,6 +586,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     } finally {setIsQuerying(false);setFiltersLocked(false);}
   }, [hasDocuments, chatHistory, addMessage, stopListening, toast]);
 
+  useEffect(() => {
+    processConversationMessageRef.current = processConversationMessage;
+  }, [processConversationMessage]);
+
   const startDictation = useCallback(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({ title: "Speech recognition not supported", description: "Your browser doesn't support speech recognition.", variant: "destructive" });
