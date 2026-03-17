@@ -115,8 +115,8 @@ Deno.serve(async (req) => {
       }
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
-      // Retrieval eval: only rows where first_relevant_rank is not null
-      const eligible = logs.filter(l => l.first_relevant_rank !== null && l.first_relevant_rank !== undefined)
+      // Retrieval eval: only rows where first_relevant_rank is not null AND total_relevant_chunks is not null (properly evaluated)
+      const eligible = logs.filter(l => l.first_relevant_rank !== null && l.first_relevant_rank !== undefined && l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined)
 
       // Precision@K = sum(relevant_in_top_k) / sum(top_k) for eligible rows
       const sumRelevantInTopK = eligible.reduce((s, l) => s + (l.relevant_in_top_k ?? 0), 0)
