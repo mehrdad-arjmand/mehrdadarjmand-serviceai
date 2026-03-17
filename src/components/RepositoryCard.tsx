@@ -377,9 +377,11 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const textarea = editContentTextareaRef.current;
     const caret = editDictationCaretRef.current;
     if (!textarea || caret === null) return;
+
     requestAnimationFrame(() => {
       textarea.focus();
       textarea.setSelectionRange(caret, caret);
+      ensureTextareaCaretVisible(textarea, caret);
     });
   }, [editContentText, isEditContentDictating]);
 

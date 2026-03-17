@@ -252,6 +252,30 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     currentTranscriptRef.current = '';
   }, []);
 
+  const teardownRecognitionForSpeech = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    if (!recognitionRef.current) return;
+
+    try {
+      recognitionRef.current.onresult = null;
+      recognitionRef.current.onerror = null;
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+    } catch (_) {
+      try {
+        recognitionRef.current.abort();
+      } catch (_) {}
+    } finally {
+      recognitionRef.current = null;
+      recognitionStartedRef.current = false;
+      currentTranscriptRef.current = "";
+    }
+  }, []);
+
   const stopSpeaking = useCallback(() => {
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
@@ -270,6 +294,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       toast({ title: "TTS not supported", description: "Voice playback is not supported in this browser.", variant: "destructive" });
       onComplete?.();return;
     }
+
+    markSpeechOutputCooldown();
+    teardownRecognitionForSpeech();
     window.speechSynthesis.cancel();
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     // Clear any existing keepAlive
@@ -318,7 +345,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       window.speechSynthesis.speak(utterance);
     };
     speakNext();
-  }, [toast, markSpeechOutputCooldown]);
+  }, [toast, markSpeechOutputCooldown, teardownRecognitionForSpeech]);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
