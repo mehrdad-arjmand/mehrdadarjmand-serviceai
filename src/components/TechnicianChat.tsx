@@ -442,7 +442,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           lastSubmittedTranscriptRef.current = transcript;
           setConversationState("processing");
           setQuestion("");
-          processConversationMessage(transcript);
+          processConversationMessageRef.current(transcript);
         }
       }, SILENCE_THRESHOLD_MS);
     };
