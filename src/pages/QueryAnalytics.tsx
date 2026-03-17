@@ -15,7 +15,6 @@ interface AnalyticsData {
   cost: { avg: string; p95: string; total: string };
   retrieval_eval: {
     evaluated_count: number;
-    evaluated_nonzero_count: number;
     avg_precision_at_k: number;
     avg_recall_at_k: number;
     avg_hit_rate: number;
