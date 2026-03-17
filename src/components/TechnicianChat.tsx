@@ -494,7 +494,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         scheduleListeningRestart(isMobileDevice ? 1200 : 500);
       }
     }, isMobileDevice ? 4000 : 3000);
-  }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, processConversationMessage, isMobileDevice]);
+  }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, isMobileDevice]);
 
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
