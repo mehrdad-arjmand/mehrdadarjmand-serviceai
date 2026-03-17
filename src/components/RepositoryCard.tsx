@@ -1430,6 +1430,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
                     editDictationCaretRef.current = e.target.selectionStart ?? null;
                     setEditContentText(e.target.value);
                   }}
+                  onSelect={e => {
+                    editDictationCaretRef.current = e.currentTarget.selectionStart ?? null;
+                  }}
                   placeholder="Document content..."
                   className="mt-1.5 min-h-[200px]"
                 />
