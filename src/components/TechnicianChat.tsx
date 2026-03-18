@@ -316,13 +316,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     isTtsActiveRef.current = true;
     setIsSpeaking(true);
     if (messageId) setSpeakingMessageId(messageId);
-    // Chrome workaround: pause/resume every 10s to prevent cutting out after ~15s
-    ttsKeepAliveRef.current = setInterval(() => {
-      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
-      }
-    }, 10000);
+    // Chrome desktop workaround: pause/resume every 10s to prevent 15s cutoff
+    // SKIP on mobile — Android Chrome treats pause() as cancel(), killing the utterance and causing echo
+    if (!isMobileDevice) {
+      ttsKeepAliveRef.current = setInterval(() => {
+        if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+          window.speechSynthesis.pause();
+          window.speechSynthesis.resume();
+        }
+      }, 10000);
+    }
     const cleanup = () => {
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
       isTtsActiveRef.current = false;
