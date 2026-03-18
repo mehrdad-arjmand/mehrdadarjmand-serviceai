@@ -300,8 +300,8 @@ Deno.serve(async (req) => {
       const googleApiKeyPaid = Deno.env.get('GOOGLE_API_KEY')
       const googleApiKeyFree = Deno.env.get('GOOGLE_API_KEY_FREE')
       const googleApiKey = apiTier === 'paid'
-        ? (googleApiKeyPaid || googleApiKeyFree)
-        : (googleApiKeyFree || googleApiKeyPaid)
+        ? googleApiKeyPaid
+        : googleApiKeyFree
       console.log(`Using API key: ${apiTier === 'paid' ? 'PAID' : 'FREE'} (key ends with: ...${googleApiKey?.slice(-6) || 'NONE'})`)
 
       const triggerEmbeddings = async (docIds: string[], label: string) => {
