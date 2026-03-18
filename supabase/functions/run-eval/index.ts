@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
 
       for (const item of evalSet) {
         const embResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${Deno.env.get('GOOGLE_API_KEY')}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
