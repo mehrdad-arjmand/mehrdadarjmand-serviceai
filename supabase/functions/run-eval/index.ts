@@ -26,7 +26,19 @@ async function verifyAdmin(req: Request) {
   const { data: isAdmin } = await supabase.rpc('check_is_admin', { check_user_id: user.id })
   if (!isAdmin) throw new Error('Forbidden: admin only')
 
-  return { supabase, user }
+  // Get user's API tier
+  const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
+  const apiTier = userApiTier || 'free'
+
+  return { supabase, user, apiTier }
+}
+
+function getEmbeddingApiKey(apiTier: string): string {
+  const key = apiTier === 'paid'
+    ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
+    : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
+  if (!key) throw new Error('No Google API key configured')
+  return key
 }
 
 // Use Lovable AI gateway for LLM-based relevance evaluation
@@ -229,7 +241,7 @@ Deno.serve(async (req) => {
 
       for (const item of evalSet) {
         const embResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${Deno.env.get('GOOGLE_API_KEY')}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -467,7 +479,7 @@ Deno.serve(async (req) => {
 
         // Step 1: Re-embed the query
         const embResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${Deno.env.get('GOOGLE_API_KEY')}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

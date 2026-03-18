@@ -330,7 +330,7 @@ const Projects = () => {
   const [filterRole, setFilterRole] = useState("");
   const [projectMetadataFields, setProjectMetadataFields] = useState<Record<string, string[]>>({});
   const [metrics, setMetrics] = useState<MetricCard[]>([
-  { label: "QUALITY", sublabel: "Hit rate", value: "—" },
+  { label: "QUALITY", sublabel: "Precision", value: "—" },
   { label: "TIME", sublabel: "Median latency", value: "—" },
   { label: "COST", sublabel: "Average cost per thousand queries", value: "—" }]
   );
@@ -360,13 +360,15 @@ const Projects = () => {
   const fetchMetrics = async () => {
     const { data, error } = await supabase.
     from("query_logs").
-    select("hit_rate_at_k, execution_time_ms, upstream_inference_cost").
+    select("precision_at_k, relevant_in_top_k, top_k, total_relevant_chunks, first_relevant_rank, execution_time_ms, upstream_inference_cost").
     not("execution_time_ms", "is", null);
     if (error || !data || data.length === 0) return;
 
-    const hitRates = data.filter((d) => d.hit_rate_at_k !== null);
-    const avgHitRate =
-    hitRates.length > 0 ? hitRates.reduce((sum, d) => sum + (d.hit_rate_at_k || 0), 0) / hitRates.length : 0;
+    // Precision: sum(relevant_in_top_k) / sum(top_k) for eligible rows
+    const eligible = data.filter((d) => d.first_relevant_rank !== null && d.total_relevant_chunks !== null);
+    const sumRelevant = eligible.reduce((sum, d) => sum + (d.relevant_in_top_k || 0), 0);
+    const sumTopK = eligible.reduce((sum, d) => sum + (d.top_k || 0), 0);
+    const precision = sumTopK > 0 ? sumRelevant / sumTopK : 0;
 
     const latencies = data.
     map((d) => d.execution_time_ms).
@@ -379,7 +381,7 @@ const Projects = () => {
     costs.length > 0 ? costs.reduce((sum, d) => sum + (d.upstream_inference_cost || 0), 0) / costs.length : 0;
 
     setMetrics([
-    { label: "QUALITY", sublabel: "Hit rate", value: `${(avgHitRate * 100).toFixed(1)}%` },
+    { label: "QUALITY", sublabel: "Precision", value: `${(precision * 100).toFixed(1)}%` },
     {
       label: "TIME",
       sublabel: "Median latency",

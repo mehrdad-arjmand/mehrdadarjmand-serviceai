@@ -426,8 +426,13 @@ Deno.serve(async (req) => {
       historyLength: conversationHistory.length
     })
 
+    // Get user's API tier for embedding key selection
+    const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
+    const apiTier = userApiTier || 'free'
+    console.log(`User API tier: ${apiTier}`)
+
     // Generate embedding for the query using Lovable AI
-    const queryEmbedding = await generateEmbedding(question)
+    const queryEmbedding = await generateEmbedding(question, apiTier)
 
     // Build project-scoped document ID set FIRST (before vector search)
     let projectDocIds: Set<string> | null = null
@@ -1009,10 +1014,12 @@ async function fetchDocScopedFallbackChunks(
 }
 
 // Generate embedding using Google's Gemini Embedding API
-async function generateEmbedding(text: string): Promise<number[]> {
-  const apiKey = Deno.env.get('GOOGLE_API_KEY')
+async function generateEmbedding(text: string, apiTier: string = 'free'): Promise<number[]> {
+  const apiKey = apiTier === 'paid'
+    ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
+    : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
   if (!apiKey) {
-    throw new Error('GOOGLE_API_KEY is not configured')
+    throw new Error('No Google API key configured')
   }
 
   const response = await fetch(

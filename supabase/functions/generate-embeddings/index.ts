@@ -91,8 +91,8 @@ Deno.serve(async (req) => {
 
     // Pick API key based on tier
     const apiKey = apiTier === 'paid'
-      ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
-      : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
+      ? Deno.env.get('GOOGLE_API_KEY')
+      : Deno.env.get('GOOGLE_API_KEY_FREE')
     if (!apiKey) throw new Error('No Google API key configured')
 
     const CONCURRENT_API_CALLS = apiTier === 'paid' ? 10 : 1
