@@ -137,7 +137,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const ttsEndTimestampRef = useRef<number>(0);
   const scheduledRestartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 2500 : 500), [isMobileDevice]);
+  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 3500 : 500), [isMobileDevice]);
 
   const markSpeechOutputCooldown = useCallback(() => {
     speechOutputCooldownUntilRef.current = Date.now() + getSpeechRestartCooldownMs();
