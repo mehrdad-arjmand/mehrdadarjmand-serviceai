@@ -137,7 +137,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const ttsEndTimestampRef = useRef<number>(0);
   const scheduledRestartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 2500 : 500), [isMobileDevice]);
+  const getSpeechRestartCooldownMs = useCallback(() => (isMobileDevice ? 3500 : 500), [isMobileDevice]);
 
   const markSpeechOutputCooldown = useCallback(() => {
     speechOutputCooldownUntilRef.current = Date.now() + getSpeechRestartCooldownMs();
@@ -316,13 +316,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     isTtsActiveRef.current = true;
     setIsSpeaking(true);
     if (messageId) setSpeakingMessageId(messageId);
-    // Chrome workaround: pause/resume every 10s to prevent cutting out after ~15s
-    ttsKeepAliveRef.current = setInterval(() => {
-      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
-      }
-    }, 10000);
+    // Chrome desktop workaround: pause/resume every 10s to prevent 15s cutoff
+    // SKIP on mobile — Android Chrome treats pause() as cancel(), killing the utterance and causing echo
+    if (!isMobileDevice) {
+      ttsKeepAliveRef.current = setInterval(() => {
+        if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+          window.speechSynthesis.pause();
+          window.speechSynthesis.resume();
+        }
+      }, 10000);
+    }
     const cleanup = () => {
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
       isTtsActiveRef.current = false;
@@ -393,6 +396,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({ title: "Speech recognition not supported", description: "Your browser doesn't support speech recognition.", variant: "destructive" });
       return;
+    }
+
+    // On mobile, force-cancel any lingering speech synthesis before starting mic
+    if (isMobileDevice && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
     }
 
     // Clean up any lingering recognition instance before creating a new one.
