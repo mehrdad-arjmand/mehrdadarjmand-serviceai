@@ -398,6 +398,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       return;
     }
 
+    // On mobile, force-cancel any lingering speech synthesis before starting mic
+    if (isMobileDevice && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
     // Clean up any lingering recognition instance before creating a new one.
     teardownRecognitionForSpeech();
 
