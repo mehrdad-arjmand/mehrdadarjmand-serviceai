@@ -587,16 +587,17 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
-    let finalTranscript = dictateContent;
+    const baseText = dictateContent;
     recognition.onstart = () => setIsDictating(true);
     recognition.onresult = (event: any) => {
-      let interimTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      let reconstructedFinal = '';
+      let interimText = '';
+      for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalTranscript += transcript + ' ';
-        else interimTranscript += transcript;
+        if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
+        else interimText += transcript;
       }
-      setDictateContent(finalTranscript + interimTranscript);
+      setDictateContent(baseText + reconstructedFinal + interimText);
     };
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });

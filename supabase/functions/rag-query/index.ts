@@ -1009,10 +1009,12 @@ async function fetchDocScopedFallbackChunks(
 }
 
 // Generate embedding using Google's Gemini Embedding API
-async function generateEmbedding(text: string): Promise<number[]> {
-  const apiKey = Deno.env.get('GOOGLE_API_KEY')
+async function generateEmbedding(text: string, apiTier: string = 'free'): Promise<number[]> {
+  const apiKey = apiTier === 'paid'
+    ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
+    : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
   if (!apiKey) {
-    throw new Error('GOOGLE_API_KEY is not configured')
+    throw new Error('No Google API key configured')
   }
 
   const response = await fetch(
