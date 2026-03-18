@@ -26,7 +26,19 @@ async function verifyAdmin(req: Request) {
   const { data: isAdmin } = await supabase.rpc('check_is_admin', { check_user_id: user.id })
   if (!isAdmin) throw new Error('Forbidden: admin only')
 
-  return { supabase, user }
+  // Get user's API tier
+  const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
+  const apiTier = userApiTier || 'free'
+
+  return { supabase, user, apiTier }
+}
+
+function getEmbeddingApiKey(apiTier: string): string {
+  const key = apiTier === 'paid'
+    ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
+    : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
+  if (!key) throw new Error('No Google API key configured')
+  return key
 }
 
 // Use Lovable AI gateway for LLM-based relevance evaluation
