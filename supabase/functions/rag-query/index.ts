@@ -426,8 +426,13 @@ Deno.serve(async (req) => {
       historyLength: conversationHistory.length
     })
 
+    // Get user's API tier for embedding key selection
+    const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
+    const apiTier = userApiTier || 'free'
+    console.log(`User API tier: ${apiTier}`)
+
     // Generate embedding for the query using Lovable AI
-    const queryEmbedding = await generateEmbedding(question)
+    const queryEmbedding = await generateEmbedding(question, apiTier)
 
     // Build project-scoped document ID set FIRST (before vector search)
     let projectDocIds: Set<string> | null = null
