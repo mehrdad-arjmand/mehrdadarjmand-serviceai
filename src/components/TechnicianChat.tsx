@@ -369,24 +369,45 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   // ── Centralized mic restart gatekeeper ──
   // This is the ONLY function that should be called to restart listening.
   // It prevents echo by polling until TTS is fully done.
+  // Uses generation tokens to prevent stale callbacks from restarting the mic.
   const scheduleListeningRestart = useCallback((delayMs = 300) => {
     // Clear any pending scheduled restart
     if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
 
+    const tokenAtSchedule = voiceGenTokenRef.current;
+    vlog('scheduleListeningRestart', `delay=${delayMs}ms token=${tokenAtSchedule}`);
+
     scheduledRestartRef.current = setTimeout(() => {
       scheduledRestartRef.current = null;
-      if (!conversationActiveRef.current || isProcessingVoiceRef.current) return;
+
+      // Stale token check — if a newer cycle started, this restart is invalid
+      if (tokenAtSchedule !== voiceGenTokenRef.current) {
+        vlog('scheduleListeningRestart:STALE', `scheduled with token=${tokenAtSchedule}, current=${voiceGenTokenRef.current}`);
+        return;
+      }
+
+      if (!conversationActiveRef.current || isProcessingVoiceRef.current) {
+        vlog('scheduleListeningRestart:SKIP', `active=${conversationActiveRef.current} processing=${isProcessingVoiceRef.current}`);
+        return;
+      }
 
       // If speech output is still active or cooling down, re-schedule
       if (isSpeechOutputBlocked()) {
-        console.log('[Voice] Gatekeeper: TTS still active/cooling, re-polling in 500ms');
+        vlog('scheduleListeningRestart:BLOCKED', 're-polling in 500ms');
+        scheduleListeningRestart(500);
+        return;
+      }
+
+      // On mobile, enforce state machine — only restart from cooldown or idle
+      if (isMobileDevice && mobileVoiceStateRef.current !== 'cooldown' && mobileVoiceStateRef.current !== 'idle') {
+        vlog('scheduleListeningRestart:MOBILE_STATE_BLOCK', `state=${mobileVoiceStateRef.current}, not cooldown/idle`);
         scheduleListeningRestart(500);
         return;
       }
 
       startConversationListeningInternal();
     }, delayMs);
-  }, [isSpeechOutputBlocked]);
+  }, [isSpeechOutputBlocked, isMobileDevice]);
 
   const startConversationListeningInternal = useCallback(() => {
     if (!conversationActiveRef.current) return;
