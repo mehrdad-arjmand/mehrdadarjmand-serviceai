@@ -289,6 +289,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   }, []);
 
   const stopSpeaking = useCallback(() => {
+    ++voiceGenTokenRef.current; // invalidate all stale callbacks
+    mobileVoiceStateRef.current = 'idle';
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
