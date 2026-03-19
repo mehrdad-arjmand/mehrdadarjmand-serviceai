@@ -414,14 +414,19 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
 
     // Final safety check right before starting
     if (isSpeechOutputBlocked()) {
+      vlog('startListening:BLOCKED', 'speech output still active');
       scheduleListeningRestart(500);
       return;
     }
 
+    // Increment generation token — any prior callbacks become stale
+    const myToken = ++voiceGenTokenRef.current;
+    mobileVoiceStateRef.current = 'listening';
+    vlog('startListening:BEGIN', `token=${myToken}`);
+
     clearSilenceTimer();
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
-    // Clear any previous watchdog
     if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
     recognitionStartedRef.current = false;
 
@@ -447,13 +452,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     currentTranscriptRef.current = '';
     let finalTranscript = '';
     recognition.onstart = () => {
+      // Stale token guard
+      if (myToken !== voiceGenTokenRef.current) { vlog('recognition.onstart:STALE', `myToken=${myToken}`); try { recognition.stop(); } catch(_){} return; }
+      vlog('recognition.onstart');
       recognitionStartedRef.current = true;
       setConversationState("listening");
       abortCountRef.current = 0;
-      // Clear watchdog since we successfully started
       if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
     };
     recognition.onresult = (event: any) => {
+      if (myToken !== voiceGenTokenRef.current) { vlog('recognition.onresult:STALE'); return; }
       clearSilenceTimer();
       let reconstructedFinal = '';
       let interimText = '';
@@ -470,13 +478,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       currentTranscriptRef.current = display;
       setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
+        if (myToken !== voiceGenTokenRef.current) { vlog('silenceTimer:STALE'); return; }
         const transcript = currentTranscriptRef.current.trim();
         if (transcript && conversationActiveRef.current && !isProcessingVoiceRef.current) {
-          // Prevent duplicate submission of same transcript
           if (transcript === lastSubmittedTranscriptRef.current) {
-            console.warn('[Voice] Duplicate transcript detected, skipping');
+            vlog('silenceTimer:DUPLICATE', 'skipping');
             return;
           }
+          vlog('silenceTimer:SUBMIT', transcript.slice(0, 50));
+          mobileVoiceStateRef.current = 'processing';
           teardownRecognitionForSpeech();
           isProcessingVoiceRef.current = true;
           lastSubmittedTranscriptRef.current = transcript;
@@ -487,7 +497,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }, SILENCE_THRESHOLD_MS);
     };
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
+      vlog('recognition.onerror', event.error);
+      // Stale token guard — ignore errors from old instances
+      if (myToken !== voiceGenTokenRef.current) { vlog('recognition.onerror:STALE'); return; }
       clearSilenceTimer();
       recognitionRef.current = null;
       recognitionStartedRef.current = false;
@@ -495,6 +507,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (event.error === 'not-allowed') {
         toast({ title: "Microphone permission denied", description: "Please enable mic access in your browser.", variant: "destructive" });
         conversationActiveRef.current = false;
+        mobileVoiceStateRef.current = 'idle';
         setIsConversationMode(false);
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
@@ -503,6 +516,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         abortCountRef.current++;
         if (abortCountRef.current >= 3) {
           conversationActiveRef.current = false;
+          mobileVoiceStateRef.current = 'idle';
           setIsConversationMode(false);
           setConversationState("idle");
           toast({ title: "Voice not available", description: "Speech recognition is not available in this environment. Try a different browser.", variant: "destructive" });
@@ -513,8 +527,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }
     };
     recognition.onend = () => {
+      vlog('recognition.onend', `myToken=${myToken} current=${voiceGenTokenRef.current}`);
       recognitionRef.current = null;
       recognitionStartedRef.current = false;
+      // CRITICAL: Stale token guard — if a newer cycle has started (e.g. TTS began),
+      // do NOT restart listening from this old onend callback
+      if (myToken !== voiceGenTokenRef.current) {
+        vlog('recognition.onend:STALE — not restarting');
+        return;
+      }
       if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
         scheduleListeningRestart(isMobileDevice ? 1200 : 200);
       }
@@ -522,19 +543,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     try {
       recognition.start();
     } catch (e) {
-      console.error('[Voice] Failed to start recognition:', e);
+      vlog('recognition.start:FAILED', e);
       recognitionRef.current = null;
       recognitionStartedRef.current = false;
     }
     // Watchdog: if onstart doesn't fire within 3s, force restart
     listeningWatchdogRef.current = setTimeout(() => {
+      if (myToken !== voiceGenTokenRef.current) return; // stale
       if (conversationActiveRef.current && !recognitionStartedRef.current) {
-        console.warn('[Voice] Watchdog: recognition did not start, restarting...');
+        vlog('watchdog:RESTART');
         teardownRecognitionForSpeech();
         scheduleListeningRestart(isMobileDevice ? 1200 : 500);
       }
     }, isMobileDevice ? 4000 : 3000);
-  }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, isMobileDevice]);
+  }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, isMobileDevice, vlog]);
 
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
