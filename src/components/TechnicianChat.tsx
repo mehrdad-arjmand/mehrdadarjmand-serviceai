@@ -768,6 +768,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       conversationActiveRef.current = false;
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
+      ++voiceGenTokenRef.current; // invalidate all stale callbacks
+      mobileVoiceStateRef.current = 'idle';
       if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
       stopListening();
       stopSpeaking();
@@ -777,6 +779,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     } else {
       ensureActiveConversation();
       conversationActiveRef.current = true;
+      mobileVoiceStateRef.current = 'idle';
       setIsConversationMode(true);
       setQuestion("");
       scheduleListeningRestart(100);
