@@ -732,6 +732,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const handleDictateToggle = () => {if (isDictating) {stopListening();} else {dictationPartsRef.current = []; startDictation();}};
 
   const stopConversationSpeaking = useCallback(() => {
+    vlog('stopConversationSpeaking');
+    // Increment token so any in-flight TTS/recognition callbacks become stale
+    ++voiceGenTokenRef.current;
+    mobileVoiceStateRef.current = 'cooldown';
     // Stop TTS but stay in conversation mode — restart listening
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
@@ -751,14 +755,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     isProcessingVoiceRef.current = false;
     lastSubmittedTranscriptRef.current = "";
     recognitionStartedRef.current = false;
-    // Reset abort counter so mute presses don't accumulate toward the 3-abort kill threshold
     abortCountRef.current = 0;
     if (conversationActiveRef.current) {
-      // Don't set conversationState to "listening" here — let onstart do it
-      // This prevents showing "Listening..." when recognition hasn't actually started
       setQuestion("");
       // Use longer initial delay to let browser fully release mic after TTS cancel
-      scheduleListeningRestart(800);
+      scheduleListeningRestart(isMobileDevice ? 1500 : 800);
     }
   }, [scheduleListeningRestart, markSpeechOutputCooldown, isSpeechOutputBlocked]);
 
