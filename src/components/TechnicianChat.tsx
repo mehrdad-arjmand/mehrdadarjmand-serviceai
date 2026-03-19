@@ -307,16 +307,23 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       onComplete?.();return;
     }
 
+    // CRITICAL: Increment generation token BEFORE teardown so any old recognition.onend is stale
+    ++voiceGenTokenRef.current;
+    mobileVoiceStateRef.current = 'speaking';
+    vlog('speakText:BEGIN', `sentences will follow, token=${voiceGenTokenRef.current}`);
+
     markSpeechOutputCooldown();
     teardownRecognitionForSpeech();
     window.speechSynthesis.cancel();
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     // Clear any existing keepAlive
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     const cleanText = renderAnswerForSpeech(text);
     const sentences = splitIntoSentences(cleanText);
     if (sentences.length === 0) {
       isTtsActiveRef.current = false;
+      mobileVoiceStateRef.current = 'cooldown';
       markSpeechOutputCooldown();
       onComplete?.();
       return;
@@ -338,29 +345,38 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }, 10000);
     }
     const cleanup = () => {
+      vlog('speakText:cleanup', `queueId=${queueId}`);
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
       isTtsActiveRef.current = false;
+      mobileVoiceStateRef.current = 'cooldown';
       markSpeechOutputCooldown();
       setIsSpeaking(false);
       setSpeakingMessageId(null);
     };
     const speakNext = () => {
       if (queueId !== utteranceQueueRef.current) { cleanup(); return; }
-      if (currentIndex >= sentences.length) { cleanup(); onComplete?.(); return; }
+      if (currentIndex >= sentences.length) {
+        vlog('speakText:COMPLETE', 'all sentences done');
+        cleanup();
+        onComplete?.();
+        return;
+      }
       const utterance = createUtterance(sentences[currentIndex], selectedVoiceRef.current);
-      utterance.onend = () => {currentIndex++;speakNext();};
+      utterance.onend = () => {
+        vlog('utterance.onend', `sentence ${currentIndex}/${sentences.length}`);
+        currentIndex++;
+        speakNext();
+      };
       utterance.onerror = (e) => {
-        console.error('[TTS] Utterance error:', e);
-        // Always check queueId before continuing — if TTS was cancelled externally, don't call onComplete
+        vlog('utterance.onerror', `sentence ${currentIndex}`, e);
         if (queueId !== utteranceQueueRef.current) { cleanup(); return; }
-        // On error, try to continue with next sentence instead of stopping
         if (currentIndex < sentences.length - 1) { currentIndex++; setTimeout(speakNext, 100); }
         else { cleanup(); onComplete?.(); }
       };
       window.speechSynthesis.speak(utterance);
     };
     speakNext();
-  }, [toast, markSpeechOutputCooldown, teardownRecognitionForSpeech]);
+  }, [toast, markSpeechOutputCooldown, teardownRecognitionForSpeech, vlog]);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
