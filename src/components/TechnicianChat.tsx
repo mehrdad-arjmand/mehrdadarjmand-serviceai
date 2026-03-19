@@ -129,6 +129,17 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
   const processConversationMessageRef = useRef<(text: string) => void>(() => {});
+  // Generation token: incremented on every voice cycle transition. Stale callbacks self-ignore.
+  const voiceGenTokenRef = useRef<number>(0);
+  // Mobile voice state machine: idle -> listening -> processing -> speaking -> cooldown -> idle
+  const mobileVoiceStateRef = useRef<"idle" | "listening" | "processing" | "speaking" | "cooldown">("idle");
+
+  const vlog = useCallback((tag: string, ...args: any[]) => {
+    const ts = new Date().toISOString().slice(11, 23);
+    const gen = voiceGenTokenRef.current;
+    const state = mobileVoiceStateRef.current;
+    console.log(`[Voice ${ts} gen=${gen} state=${state}] ${tag}`, ...args);
+  }, []);
 
   useEffect(() => {
     currentFiltersRef.current = currentFilters;
