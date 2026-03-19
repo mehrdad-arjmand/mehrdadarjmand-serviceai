@@ -129,6 +129,17 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const lastSubmittedTranscriptRef = useRef<string>("");
   const currentFiltersRef = useRef<ConversationFilters>(currentFilters);
   const processConversationMessageRef = useRef<(text: string) => void>(() => {});
+  // Generation token: incremented on every voice cycle transition. Stale callbacks self-ignore.
+  const voiceGenTokenRef = useRef<number>(0);
+  // Mobile voice state machine: idle -> listening -> processing -> speaking -> cooldown -> idle
+  const mobileVoiceStateRef = useRef<"idle" | "listening" | "processing" | "speaking" | "cooldown">("idle");
+
+  const vlog = useCallback((tag: string, ...args: any[]) => {
+    const ts = new Date().toISOString().slice(11, 23);
+    const gen = voiceGenTokenRef.current;
+    const state = mobileVoiceStateRef.current;
+    console.log(`[Voice ${ts} gen=${gen} state=${state}] ${tag}`, ...args);
+  }, []);
 
   useEffect(() => {
     currentFiltersRef.current = currentFilters;
@@ -278,6 +289,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   }, []);
 
   const stopSpeaking = useCallback(() => {
+    ++voiceGenTokenRef.current; // invalidate all stale callbacks
+    mobileVoiceStateRef.current = 'idle';
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
@@ -296,16 +309,23 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       onComplete?.();return;
     }
 
+    // CRITICAL: Increment generation token BEFORE teardown so any old recognition.onend is stale
+    ++voiceGenTokenRef.current;
+    mobileVoiceStateRef.current = 'speaking';
+    vlog('speakText:BEGIN', `sentences will follow, token=${voiceGenTokenRef.current}`);
+
     markSpeechOutputCooldown();
     teardownRecognitionForSpeech();
     window.speechSynthesis.cancel();
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     // Clear any existing keepAlive
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     const cleanText = renderAnswerForSpeech(text);
     const sentences = splitIntoSentences(cleanText);
     if (sentences.length === 0) {
       isTtsActiveRef.current = false;
+      mobileVoiceStateRef.current = 'cooldown';
       markSpeechOutputCooldown();
       onComplete?.();
       return;
@@ -327,29 +347,38 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }, 10000);
     }
     const cleanup = () => {
+      vlog('speakText:cleanup', `queueId=${queueId}`);
       if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
       isTtsActiveRef.current = false;
+      mobileVoiceStateRef.current = 'cooldown';
       markSpeechOutputCooldown();
       setIsSpeaking(false);
       setSpeakingMessageId(null);
     };
     const speakNext = () => {
       if (queueId !== utteranceQueueRef.current) { cleanup(); return; }
-      if (currentIndex >= sentences.length) { cleanup(); onComplete?.(); return; }
+      if (currentIndex >= sentences.length) {
+        vlog('speakText:COMPLETE', 'all sentences done');
+        cleanup();
+        onComplete?.();
+        return;
+      }
       const utterance = createUtterance(sentences[currentIndex], selectedVoiceRef.current);
-      utterance.onend = () => {currentIndex++;speakNext();};
+      utterance.onend = () => {
+        vlog('utterance.onend', `sentence ${currentIndex}/${sentences.length}`);
+        currentIndex++;
+        speakNext();
+      };
       utterance.onerror = (e) => {
-        console.error('[TTS] Utterance error:', e);
-        // Always check queueId before continuing — if TTS was cancelled externally, don't call onComplete
+        vlog('utterance.onerror', `sentence ${currentIndex}`, e);
         if (queueId !== utteranceQueueRef.current) { cleanup(); return; }
-        // On error, try to continue with next sentence instead of stopping
         if (currentIndex < sentences.length - 1) { currentIndex++; setTimeout(speakNext, 100); }
         else { cleanup(); onComplete?.(); }
       };
       window.speechSynthesis.speak(utterance);
     };
     speakNext();
-  }, [toast, markSpeechOutputCooldown, teardownRecognitionForSpeech]);
+  }, [toast, markSpeechOutputCooldown, teardownRecognitionForSpeech, vlog]);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
@@ -358,38 +387,64 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   // ── Centralized mic restart gatekeeper ──
   // This is the ONLY function that should be called to restart listening.
   // It prevents echo by polling until TTS is fully done.
+  // Uses generation tokens to prevent stale callbacks from restarting the mic.
   const scheduleListeningRestart = useCallback((delayMs = 300) => {
     // Clear any pending scheduled restart
     if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
 
+    const tokenAtSchedule = voiceGenTokenRef.current;
+    vlog('scheduleListeningRestart', `delay=${delayMs}ms token=${tokenAtSchedule}`);
+
     scheduledRestartRef.current = setTimeout(() => {
       scheduledRestartRef.current = null;
-      if (!conversationActiveRef.current || isProcessingVoiceRef.current) return;
+
+      // Stale token check — if a newer cycle started, this restart is invalid
+      if (tokenAtSchedule !== voiceGenTokenRef.current) {
+        vlog('scheduleListeningRestart:STALE', `scheduled with token=${tokenAtSchedule}, current=${voiceGenTokenRef.current}`);
+        return;
+      }
+
+      if (!conversationActiveRef.current || isProcessingVoiceRef.current) {
+        vlog('scheduleListeningRestart:SKIP', `active=${conversationActiveRef.current} processing=${isProcessingVoiceRef.current}`);
+        return;
+      }
 
       // If speech output is still active or cooling down, re-schedule
       if (isSpeechOutputBlocked()) {
-        console.log('[Voice] Gatekeeper: TTS still active/cooling, re-polling in 500ms');
+        vlog('scheduleListeningRestart:BLOCKED', 're-polling in 500ms');
+        scheduleListeningRestart(500);
+        return;
+      }
+
+      // On mobile, enforce state machine — only restart from cooldown or idle
+      if (isMobileDevice && mobileVoiceStateRef.current !== 'cooldown' && mobileVoiceStateRef.current !== 'idle') {
+        vlog('scheduleListeningRestart:MOBILE_STATE_BLOCK', `state=${mobileVoiceStateRef.current}, not cooldown/idle`);
         scheduleListeningRestart(500);
         return;
       }
 
       startConversationListeningInternal();
     }, delayMs);
-  }, [isSpeechOutputBlocked]);
+  }, [isSpeechOutputBlocked, isMobileDevice]);
 
   const startConversationListeningInternal = useCallback(() => {
     if (!conversationActiveRef.current) return;
 
     // Final safety check right before starting
     if (isSpeechOutputBlocked()) {
+      vlog('startListening:BLOCKED', 'speech output still active');
       scheduleListeningRestart(500);
       return;
     }
 
+    // Increment generation token — any prior callbacks become stale
+    const myToken = ++voiceGenTokenRef.current;
+    mobileVoiceStateRef.current = 'listening';
+    vlog('startListening:BEGIN', `token=${myToken}`);
+
     clearSilenceTimer();
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
     if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
-    // Clear any previous watchdog
     if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
     recognitionStartedRef.current = false;
 
@@ -415,13 +470,16 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     currentTranscriptRef.current = '';
     let finalTranscript = '';
     recognition.onstart = () => {
+      // Stale token guard
+      if (myToken !== voiceGenTokenRef.current) { vlog('recognition.onstart:STALE', `myToken=${myToken}`); try { recognition.stop(); } catch(_){} return; }
+      vlog('recognition.onstart');
       recognitionStartedRef.current = true;
       setConversationState("listening");
       abortCountRef.current = 0;
-      // Clear watchdog since we successfully started
       if (listeningWatchdogRef.current) { clearTimeout(listeningWatchdogRef.current); listeningWatchdogRef.current = null; }
     };
     recognition.onresult = (event: any) => {
+      if (myToken !== voiceGenTokenRef.current) { vlog('recognition.onresult:STALE'); return; }
       clearSilenceTimer();
       let reconstructedFinal = '';
       let interimText = '';
@@ -438,13 +496,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       currentTranscriptRef.current = display;
       setQuestion(display);
       silenceTimerRef.current = setTimeout(() => {
+        if (myToken !== voiceGenTokenRef.current) { vlog('silenceTimer:STALE'); return; }
         const transcript = currentTranscriptRef.current.trim();
         if (transcript && conversationActiveRef.current && !isProcessingVoiceRef.current) {
-          // Prevent duplicate submission of same transcript
           if (transcript === lastSubmittedTranscriptRef.current) {
-            console.warn('[Voice] Duplicate transcript detected, skipping');
+            vlog('silenceTimer:DUPLICATE', 'skipping');
             return;
           }
+          vlog('silenceTimer:SUBMIT', transcript.slice(0, 50));
+          mobileVoiceStateRef.current = 'processing';
           teardownRecognitionForSpeech();
           isProcessingVoiceRef.current = true;
           lastSubmittedTranscriptRef.current = transcript;
@@ -455,7 +515,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }, SILENCE_THRESHOLD_MS);
     };
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
+      vlog('recognition.onerror', event.error);
+      // Stale token guard — ignore errors from old instances
+      if (myToken !== voiceGenTokenRef.current) { vlog('recognition.onerror:STALE'); return; }
       clearSilenceTimer();
       recognitionRef.current = null;
       recognitionStartedRef.current = false;
@@ -463,6 +525,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (event.error === 'not-allowed') {
         toast({ title: "Microphone permission denied", description: "Please enable mic access in your browser.", variant: "destructive" });
         conversationActiveRef.current = false;
+        mobileVoiceStateRef.current = 'idle';
         setIsConversationMode(false);
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
@@ -471,6 +534,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         abortCountRef.current++;
         if (abortCountRef.current >= 3) {
           conversationActiveRef.current = false;
+          mobileVoiceStateRef.current = 'idle';
           setIsConversationMode(false);
           setConversationState("idle");
           toast({ title: "Voice not available", description: "Speech recognition is not available in this environment. Try a different browser.", variant: "destructive" });
@@ -481,8 +545,15 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }
     };
     recognition.onend = () => {
+      vlog('recognition.onend', `myToken=${myToken} current=${voiceGenTokenRef.current}`);
       recognitionRef.current = null;
       recognitionStartedRef.current = false;
+      // CRITICAL: Stale token guard — if a newer cycle has started (e.g. TTS began),
+      // do NOT restart listening from this old onend callback
+      if (myToken !== voiceGenTokenRef.current) {
+        vlog('recognition.onend:STALE — not restarting');
+        return;
+      }
       if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
         scheduleListeningRestart(isMobileDevice ? 1200 : 200);
       }
@@ -490,19 +561,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     try {
       recognition.start();
     } catch (e) {
-      console.error('[Voice] Failed to start recognition:', e);
+      vlog('recognition.start:FAILED', e);
       recognitionRef.current = null;
       recognitionStartedRef.current = false;
     }
     // Watchdog: if onstart doesn't fire within 3s, force restart
     listeningWatchdogRef.current = setTimeout(() => {
+      if (myToken !== voiceGenTokenRef.current) return; // stale
       if (conversationActiveRef.current && !recognitionStartedRef.current) {
-        console.warn('[Voice] Watchdog: recognition did not start, restarting...');
+        vlog('watchdog:RESTART');
         teardownRecognitionForSpeech();
         scheduleListeningRestart(isMobileDevice ? 1200 : 500);
       }
     }, isMobileDevice ? 4000 : 3000);
-  }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, isMobileDevice]);
+  }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, isMobileDevice, vlog]);
 
   const processConversationMessage = useCallback(async (text: string) => {
     if (!hasDocuments) {
@@ -535,18 +607,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (data.answer && conversationActiveRef.current) {
         setConversationState("speaking");
         speakText(data.answer, () => {
+          vlog('processConversation:TTS_COMPLETE');
+          // mobileVoiceStateRef is already 'cooldown' from speakText cleanup
           setFiltersLocked(false);
-          lastSubmittedTranscriptRef.current = ""; // Reset dedup after full cycle
+          lastSubmittedTranscriptRef.current = "";
           if (conversationActiveRef.current) {
-            scheduleListeningRestart(300);
+            scheduleListeningRestart(isMobileDevice ? 800 : 300);
           }
         });
       } else {
         setFiltersLocked(false);
         lastSubmittedTranscriptRef.current = "";
-        // Restart listening even if answer was empty
+        mobileVoiceStateRef.current = 'cooldown';
         if (conversationActiveRef.current) {
-          scheduleListeningRestart(300);
+          scheduleListeningRestart(isMobileDevice ? 800 : 300);
         }
       }
     } catch (error: any) {
@@ -555,6 +629,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
       setFiltersLocked(false);
+      mobileVoiceStateRef.current = 'idle';
       if (conversationActiveRef.current) {
         setConversationState("idle");
         scheduleListeningRestart(1000);
@@ -660,6 +735,10 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const handleDictateToggle = () => {if (isDictating) {stopListening();} else {dictationPartsRef.current = []; startDictation();}};
 
   const stopConversationSpeaking = useCallback(() => {
+    vlog('stopConversationSpeaking');
+    // Increment token so any in-flight TTS/recognition callbacks become stale
+    ++voiceGenTokenRef.current;
+    mobileVoiceStateRef.current = 'cooldown';
     // Stop TTS but stay in conversation mode — restart listening
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
@@ -679,14 +758,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     isProcessingVoiceRef.current = false;
     lastSubmittedTranscriptRef.current = "";
     recognitionStartedRef.current = false;
-    // Reset abort counter so mute presses don't accumulate toward the 3-abort kill threshold
     abortCountRef.current = 0;
     if (conversationActiveRef.current) {
-      // Don't set conversationState to "listening" here — let onstart do it
-      // This prevents showing "Listening..." when recognition hasn't actually started
       setQuestion("");
       // Use longer initial delay to let browser fully release mic after TTS cancel
-      scheduleListeningRestart(800);
+      scheduleListeningRestart(isMobileDevice ? 1500 : 800);
     }
   }, [scheduleListeningRestart, markSpeechOutputCooldown, isSpeechOutputBlocked]);
 
@@ -695,6 +771,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       conversationActiveRef.current = false;
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
+      ++voiceGenTokenRef.current; // invalidate all stale callbacks
+      mobileVoiceStateRef.current = 'idle';
       if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
       stopListening();
       stopSpeaking();
@@ -704,6 +782,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     } else {
       ensureActiveConversation();
       conversationActiveRef.current = true;
+      mobileVoiceStateRef.current = 'idle';
       setIsConversationMode(true);
       setQuestion("");
       scheduleListeningRestart(100);
