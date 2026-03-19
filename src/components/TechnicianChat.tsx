@@ -607,18 +607,20 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (data.answer && conversationActiveRef.current) {
         setConversationState("speaking");
         speakText(data.answer, () => {
+          vlog('processConversation:TTS_COMPLETE');
+          // mobileVoiceStateRef is already 'cooldown' from speakText cleanup
           setFiltersLocked(false);
-          lastSubmittedTranscriptRef.current = ""; // Reset dedup after full cycle
+          lastSubmittedTranscriptRef.current = "";
           if (conversationActiveRef.current) {
-            scheduleListeningRestart(300);
+            scheduleListeningRestart(isMobileDevice ? 800 : 300);
           }
         });
       } else {
         setFiltersLocked(false);
         lastSubmittedTranscriptRef.current = "";
-        // Restart listening even if answer was empty
+        mobileVoiceStateRef.current = 'cooldown';
         if (conversationActiveRef.current) {
-          scheduleListeningRestart(300);
+          scheduleListeningRestart(isMobileDevice ? 800 : 300);
         }
       }
     } catch (error: any) {
@@ -627,6 +629,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
       setFiltersLocked(false);
+      mobileVoiceStateRef.current = 'idle';
       if (conversationActiveRef.current) {
         setConversationState("idle");
         scheduleListeningRestart(1000);
