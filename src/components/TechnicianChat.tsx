@@ -702,25 +702,35 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.continuous = true;
+    // MOBILE FIX: continuous=false prevents Android Chrome result-array corruption
+    recognition.continuous = isMobileDevice ? false : true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     dictationActiveRef.current = true;
-    let finalTranscript = '';
     recognition.onstart = () => {setIsDictating(true); abortCountRef.current = 0;};
     recognition.onresult = (event: any) => {
-      let reconstructedFinal = '';
-      let interimText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          reconstructedFinal += transcript + ' ';
-        } else {
-          interimText += transcript;
+      if (isMobileDevice) {
+        // Mobile: continuous=false → single result, accumulate across restarts
+        const result = event.results[0];
+        if (result.isFinal) {
+          mobileAccumulatedRef.current += result[0].transcript + ' ';
         }
+        const interim = result.isFinal ? '' : result[0].transcript;
+        setQuestion((mobileAccumulatedRef.current + interim).trim());
+      } else {
+        // Desktop: reconstruct from full results array
+        let reconstructedFinal = '';
+        let interimText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            reconstructedFinal += transcript + ' ';
+          } else {
+            interimText += transcript;
+          }
+        }
+        setQuestion((reconstructedFinal + interimText).trim());
       }
-      finalTranscript = reconstructedFinal;
-      setQuestion((reconstructedFinal + interimText).trim());
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
@@ -748,10 +758,11 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.onend = () => {
       recognitionRef.current = null;
       if (!dictationActiveRef.current) { setIsDictating(false); return; }
-      setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, 200);
+      // Auto-restart for seamless experience (faster on mobile since each session is short)
+      setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, isMobileDevice ? 100 : 200);
     };
     recognition.start();
-  }, [toast]);
+  }, [toast, isMobileDevice]);
 
   const handleDictateToggle = () => {if (isDictating) {stopListening();} else {dictationPartsRef.current = []; startDictation();}};
 
