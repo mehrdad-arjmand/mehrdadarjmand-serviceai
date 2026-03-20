@@ -783,10 +783,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const textAfter = editContentText.slice(cursorPos);
     mobileEditAccumulatedRef.current = '';
     let newDictatedText = '';
-    recognition.onstart = () => setIsEditContentDictating(true);
+    recognition.onstart = () => { setIsEditContentDictating(true); editDictateActiveRef.current = true; };
     recognition.onresult = (event: any) => {
       if (isMobileDevice) {
-        // Mobile: single result per session, accumulate across restarts
         const result = event.results[0];
         if (result.isFinal) {
           mobileEditAccumulatedRef.current += result[0].transcript + ' ';
@@ -816,13 +815,14 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
       setIsEditContentDictating(false);
+      editDictateActiveRef.current = false;
       editDictationCaretRef.current = null;
       editContentRecognitionRef.current = null;
       mobileEditAccumulatedRef.current = '';
     };
     recognition.onend = () => {
       editContentRecognitionRef.current = null;
-      if (isMobileDevice && isEditContentDictating) {
+      if (isMobileDevice && editDictateActiveRef.current) {
         // Auto-restart for seamless mobile experience
         setTimeout(() => startEditContentDictation(), 100);
         return;
@@ -831,7 +831,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       editDictationCaretRef.current = null;
     };
     recognition.start();
-  }, [toast, editContentText, isMobileDevice, isEditContentDictating]);
+  }, [toast, editContentText, isMobileDevice]);
 
   const stopEditContentDictation = useCallback(() => {
     if (editContentRecognitionRef.current) {
