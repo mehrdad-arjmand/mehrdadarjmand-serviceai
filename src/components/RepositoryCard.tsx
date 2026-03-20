@@ -594,10 +594,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     const baseText = dictateContent;
-    recognition.onstart = () => setIsDictating(true);
+    recognition.onstart = () => { setIsDictating(true); dictateActiveRef.current = true; };
     recognition.onresult = (event: any) => {
       if (isMobileDevice) {
-        // Mobile: single result per session, accumulate across restarts
         const result = event.results[0];
         if (result.isFinal) {
           mobileAccumulatedRef.current += result[0].transcript + ' ';
@@ -618,11 +617,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
       setIsDictating(false);
+      dictateActiveRef.current = false;
       dictateRecognitionRef.current = null;
     };
     recognition.onend = () => {
       dictateRecognitionRef.current = null;
-      if (isMobileDevice && isDictating) {
+      if (isMobileDevice && dictateActiveRef.current) {
         // Auto-restart for seamless mobile experience
         setTimeout(() => startDictation(), 100);
         return;
@@ -630,7 +630,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       setIsDictating(false);
     };
     recognition.start();
-  }, [toast, dictateContent, isMobileDevice, isDictating]);
+  }, [toast, dictateContent, isMobileDevice]);
 
   const stopDictation = useCallback(() => {
     if (dictateRecognitionRef.current) {
