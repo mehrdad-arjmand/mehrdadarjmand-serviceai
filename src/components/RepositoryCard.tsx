@@ -768,7 +768,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     editContentRecognitionRef.current = recognition;
-    recognition.continuous = true;
+    // MOBILE FIX: continuous=false prevents Android Chrome result-array corruption
+    recognition.continuous = isMobileDevice ? false : true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     const textarea = editContentTextareaRef.current;
@@ -777,38 +778,57 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     editDictationCaretRef.current = cursorPos;
     const textBefore = editContentText.slice(0, cursorPos);
     const textAfter = editContentText.slice(cursorPos);
+    mobileEditAccumulatedRef.current = '';
     let newDictatedText = '';
     recognition.onstart = () => setIsEditContentDictating(true);
     recognition.onresult = (event: any) => {
-      let reconstructedFinal = '';
-      let interimText = '';
-
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
-        else interimText += transcript;
+      if (isMobileDevice) {
+        // Mobile: single result per session, accumulate across restarts
+        const result = event.results[0];
+        if (result.isFinal) {
+          mobileEditAccumulatedRef.current += result[0].transcript + ' ';
+        }
+        const interim = result.isFinal ? '' : result[0].transcript;
+        const liveInsertion = mobileEditAccumulatedRef.current + interim;
+        const nextText = textBefore + liveInsertion + textAfter;
+        editDictationCaretRef.current = editDictationAnchorRef.current + liveInsertion.length;
+        editChangeSourceRef.current = 'dictation';
+        setEditContentText(nextText);
+      } else {
+        let reconstructedFinal = '';
+        let interimText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
+          else interimText += transcript;
+        }
+        newDictatedText = reconstructedFinal;
+        const liveInsertion = `${newDictatedText}${interimText}`;
+        const nextText = textBefore + liveInsertion + textAfter;
+        editDictationCaretRef.current = editDictationAnchorRef.current + liveInsertion.length;
+        editChangeSourceRef.current = 'dictation';
+        setEditContentText(nextText);
       }
-
-      newDictatedText = reconstructedFinal;
-      const liveInsertion = `${newDictatedText}${interimText}`;
-      const nextText = textBefore + liveInsertion + textAfter;
-      editDictationCaretRef.current = editDictationAnchorRef.current + liveInsertion.length;
-      editChangeSourceRef.current = 'dictation';
-      setEditContentText(nextText);
     };
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
       setIsEditContentDictating(false);
       editDictationCaretRef.current = null;
       editContentRecognitionRef.current = null;
+      mobileEditAccumulatedRef.current = '';
     };
     recognition.onend = () => {
+      editContentRecognitionRef.current = null;
+      if (isMobileDevice && isEditContentDictating) {
+        // Auto-restart for seamless mobile experience
+        setTimeout(() => startEditContentDictation(), 100);
+        return;
+      }
       setIsEditContentDictating(false);
       editDictationCaretRef.current = null;
-      editContentRecognitionRef.current = null;
     };
     recognition.start();
-  }, [toast, editContentText]);
+  }, [toast, editContentText, isMobileDevice, isEditContentDictating]);
 
   const stopEditContentDictation = useCallback(() => {
     if (editContentRecognitionRef.current) {
