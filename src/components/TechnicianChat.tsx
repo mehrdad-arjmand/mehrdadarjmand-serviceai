@@ -115,6 +115,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const conversationActiveRef = useRef(false);
   const dictationActiveRef = useRef(false);
   const dictationPartsRef = useRef<string[]>([]);
+  const mobileAccumulatedRef = useRef<string>("");
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restartListeningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
