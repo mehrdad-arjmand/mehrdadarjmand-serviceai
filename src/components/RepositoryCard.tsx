@@ -633,6 +633,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   }, [toast, dictateContent, isMobileDevice]);
 
   const stopDictation = useCallback(() => {
+    dictateActiveRef.current = false;
     if (dictateRecognitionRef.current) {
       try { dictateRecognitionRef.current.stop(); } catch (e) {}
       dictateRecognitionRef.current = null;
