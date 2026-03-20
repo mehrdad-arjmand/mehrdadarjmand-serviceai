@@ -836,6 +836,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       editContentRecognitionRef.current = null;
     }
     editDictationCaretRef.current = null;
+    mobileEditAccumulatedRef.current = '';
     setIsEditContentDictating(false);
   }, []);
 

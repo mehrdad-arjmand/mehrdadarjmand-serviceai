@@ -803,6 +803,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       conversationActiveRef.current = false;
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
+      mobileAccumulatedRef.current = '';
       ++voiceGenTokenRef.current; // invalidate all stale callbacks
       mobileVoiceStateRef.current = 'idle';
       if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
@@ -815,6 +816,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       ensureActiveConversation();
       conversationActiveRef.current = true;
       mobileVoiceStateRef.current = 'idle';
+      mobileAccumulatedRef.current = '';
       setIsConversationMode(true);
       setQuestion("");
       scheduleListeningRestart(100);
