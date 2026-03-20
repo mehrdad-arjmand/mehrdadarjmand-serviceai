@@ -587,29 +587,48 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     dictateRecognitionRef.current = recognition;
-    recognition.continuous = true;
+    // MOBILE FIX: continuous=false prevents Android Chrome result-array corruption
+    recognition.continuous = isMobileDevice ? false : true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     const baseText = dictateContent;
     recognition.onstart = () => setIsDictating(true);
     recognition.onresult = (event: any) => {
-      let reconstructedFinal = '';
-      let interimText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
-        else interimText += transcript;
+      if (isMobileDevice) {
+        // Mobile: single result per session, accumulate across restarts
+        const result = event.results[0];
+        if (result.isFinal) {
+          mobileAccumulatedRef.current += result[0].transcript + ' ';
+        }
+        const interim = result.isFinal ? '' : result[0].transcript;
+        setDictateContent(baseText + mobileAccumulatedRef.current + interim);
+      } else {
+        let reconstructedFinal = '';
+        let interimText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
+          else interimText += transcript;
+        }
+        setDictateContent(baseText + reconstructedFinal + interimText);
       }
-      setDictateContent(baseText + reconstructedFinal + interimText);
     };
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
       setIsDictating(false);
       dictateRecognitionRef.current = null;
     };
-    recognition.onend = () => { setIsDictating(false); dictateRecognitionRef.current = null; };
+    recognition.onend = () => {
+      dictateRecognitionRef.current = null;
+      if (isMobileDevice && isDictating) {
+        // Auto-restart for seamless mobile experience
+        setTimeout(() => startDictation(), 100);
+        return;
+      }
+      setIsDictating(false);
+    };
     recognition.start();
-  }, [toast, dictateContent]);
+  }, [toast, dictateContent, isMobileDevice, isDictating]);
 
   const stopDictation = useCallback(() => {
     if (dictateRecognitionRef.current) {
