@@ -575,7 +575,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         return;
       }
       if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
-        scheduleListeningRestart(isMobileDevice ? 1200 : 200);
+        // Mobile with continuous=false: auto-restart quickly for seamless experience
+        scheduleListeningRestart(isMobileDevice ? 150 : 200);
       }
     };
     try {
