@@ -465,10 +465,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.continuous = true;
+    // MOBILE FIX: continuous=false prevents Android Chrome from replaying/corrupting results array
+    recognition.continuous = isMobileDevice ? false : true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     currentTranscriptRef.current = '';
+    // On desktop, finalTranscript is reconstructed from event.results each time.
+    // On mobile, mobileAccumulatedRef persists across restart cycles.
     let finalTranscript = '';
     recognition.onstart = () => {
       // Stale token guard
@@ -482,20 +485,35 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.onresult = (event: any) => {
       if (myToken !== voiceGenTokenRef.current) { vlog('recognition.onresult:STALE'); return; }
       clearSilenceTimer();
-      let reconstructedFinal = '';
-      let interimText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          reconstructedFinal += transcript + ' ';
-        } else {
-          interimText += transcript;
+
+      if (isMobileDevice) {
+        // Mobile: continuous=false → only one result entry, accumulate across restarts via ref
+        const result = event.results[0];
+        if (result.isFinal) {
+          mobileAccumulatedRef.current += result[0].transcript + ' ';
         }
+        const interim = result.isFinal ? '' : result[0].transcript;
+        const display = (mobileAccumulatedRef.current + interim).trim();
+        currentTranscriptRef.current = display;
+        setQuestion(display);
+      } else {
+        // Desktop: continuous=true → reconstruct from full results array
+        let reconstructedFinal = '';
+        let interimText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            reconstructedFinal += transcript + ' ';
+          } else {
+            interimText += transcript;
+          }
+        }
+        finalTranscript = reconstructedFinal;
+        const display = (reconstructedFinal + interimText).trim();
+        currentTranscriptRef.current = display;
+        setQuestion(display);
       }
-      finalTranscript = reconstructedFinal;
-      const display = (reconstructedFinal + interimText).trim();
-      currentTranscriptRef.current = display;
-      setQuestion(display);
+
       silenceTimerRef.current = setTimeout(() => {
         if (myToken !== voiceGenTokenRef.current) { vlog('silenceTimer:STALE'); return; }
         const transcript = currentTranscriptRef.current.trim();
@@ -506,6 +524,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           }
           vlog('silenceTimer:SUBMIT', transcript.slice(0, 50));
           mobileVoiceStateRef.current = 'processing';
+          mobileAccumulatedRef.current = '';
           teardownRecognitionForSpeech();
           isProcessingVoiceRef.current = true;
           lastSubmittedTranscriptRef.current = transcript;
