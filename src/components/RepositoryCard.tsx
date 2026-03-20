@@ -636,6 +636,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       dictateRecognitionRef.current = null;
     }
     setIsDictating(false);
+    mobileAccumulatedRef.current = '';
   }, []);
 
   const handleInsertDictation = async () => {
