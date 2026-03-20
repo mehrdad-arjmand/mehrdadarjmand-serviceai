@@ -834,6 +834,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   }, [toast, editContentText, isMobileDevice]);
 
   const stopEditContentDictation = useCallback(() => {
+    editDictateActiveRef.current = false;
     if (editContentRecognitionRef.current) {
       try { editContentRecognitionRef.current.stop(); } catch (e) {}
       editContentRecognitionRef.current = null;
