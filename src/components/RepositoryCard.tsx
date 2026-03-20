@@ -371,6 +371,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const editChangeSourceRef = useRef<'dictation' | 'manual'>('manual');
   const editDictationAnchorRef = useRef(0);
   const editDictationCaretRef = useRef<number | null>(null);
+  const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const mobileAccumulatedRef = useRef<string>("");
+  const mobileEditAccumulatedRef = useRef<string>("");
 
   useEffect(() => {
     if (!isEditContentDictating || editChangeSourceRef.current !== 'dictation') return;
