@@ -764,7 +764,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.start();
   }, [toast, isMobileDevice]);
 
-  const handleDictateToggle = () => {if (isDictating) {stopListening();} else {dictationPartsRef.current = []; startDictation();}};
+  const handleDictateToggle = () => {if (isDictating) {stopListening(); mobileAccumulatedRef.current = '';} else {dictationPartsRef.current = []; mobileAccumulatedRef.current = ''; startDictation();}};
 
   const stopConversationSpeaking = useCallback(() => {
     vlog('stopConversationSpeaking');
