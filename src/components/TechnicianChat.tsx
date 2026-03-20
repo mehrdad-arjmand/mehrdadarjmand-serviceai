@@ -115,6 +115,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const conversationActiveRef = useRef(false);
   const dictationActiveRef = useRef(false);
   const dictationPartsRef = useRef<string[]>([]);
+  const mobileAccumulatedRef = useRef<string>("");
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restartListeningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -464,10 +465,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.continuous = true;
+    // MOBILE FIX: continuous=false prevents Android Chrome from replaying/corrupting results array
+    recognition.continuous = isMobileDevice ? false : true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     currentTranscriptRef.current = '';
+    // On desktop, finalTranscript is reconstructed from event.results each time.
+    // On mobile, mobileAccumulatedRef persists across restart cycles.
     let finalTranscript = '';
     recognition.onstart = () => {
       // Stale token guard
@@ -481,20 +485,35 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.onresult = (event: any) => {
       if (myToken !== voiceGenTokenRef.current) { vlog('recognition.onresult:STALE'); return; }
       clearSilenceTimer();
-      let reconstructedFinal = '';
-      let interimText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          reconstructedFinal += transcript + ' ';
-        } else {
-          interimText += transcript;
+
+      if (isMobileDevice) {
+        // Mobile: continuous=false → only one result entry, accumulate across restarts via ref
+        const result = event.results[0];
+        if (result.isFinal) {
+          mobileAccumulatedRef.current += result[0].transcript + ' ';
         }
+        const interim = result.isFinal ? '' : result[0].transcript;
+        const display = (mobileAccumulatedRef.current + interim).trim();
+        currentTranscriptRef.current = display;
+        setQuestion(display);
+      } else {
+        // Desktop: continuous=true → reconstruct from full results array
+        let reconstructedFinal = '';
+        let interimText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            reconstructedFinal += transcript + ' ';
+          } else {
+            interimText += transcript;
+          }
+        }
+        finalTranscript = reconstructedFinal;
+        const display = (reconstructedFinal + interimText).trim();
+        currentTranscriptRef.current = display;
+        setQuestion(display);
       }
-      finalTranscript = reconstructedFinal;
-      const display = (reconstructedFinal + interimText).trim();
-      currentTranscriptRef.current = display;
-      setQuestion(display);
+
       silenceTimerRef.current = setTimeout(() => {
         if (myToken !== voiceGenTokenRef.current) { vlog('silenceTimer:STALE'); return; }
         const transcript = currentTranscriptRef.current.trim();
@@ -505,6 +524,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
           }
           vlog('silenceTimer:SUBMIT', transcript.slice(0, 50));
           mobileVoiceStateRef.current = 'processing';
+          mobileAccumulatedRef.current = '';
           teardownRecognitionForSpeech();
           isProcessingVoiceRef.current = true;
           lastSubmittedTranscriptRef.current = transcript;
@@ -555,7 +575,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         return;
       }
       if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
-        scheduleListeningRestart(isMobileDevice ? 1200 : 200);
+        // Mobile with continuous=false: auto-restart quickly for seamless experience
+        scheduleListeningRestart(isMobileDevice ? 150 : 200);
       }
     };
     try {
@@ -681,25 +702,35 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.continuous = true;
+    // MOBILE FIX: continuous=false prevents Android Chrome result-array corruption
+    recognition.continuous = isMobileDevice ? false : true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     dictationActiveRef.current = true;
-    let finalTranscript = '';
     recognition.onstart = () => {setIsDictating(true); abortCountRef.current = 0;};
     recognition.onresult = (event: any) => {
-      let reconstructedFinal = '';
-      let interimText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          reconstructedFinal += transcript + ' ';
-        } else {
-          interimText += transcript;
+      if (isMobileDevice) {
+        // Mobile: continuous=false → single result, accumulate across restarts
+        const result = event.results[0];
+        if (result.isFinal) {
+          mobileAccumulatedRef.current += result[0].transcript + ' ';
         }
+        const interim = result.isFinal ? '' : result[0].transcript;
+        setQuestion((mobileAccumulatedRef.current + interim).trim());
+      } else {
+        // Desktop: reconstruct from full results array
+        let reconstructedFinal = '';
+        let interimText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            reconstructedFinal += transcript + ' ';
+          } else {
+            interimText += transcript;
+          }
+        }
+        setQuestion((reconstructedFinal + interimText).trim());
       }
-      finalTranscript = reconstructedFinal;
-      setQuestion((reconstructedFinal + interimText).trim());
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
@@ -727,12 +758,13 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.onend = () => {
       recognitionRef.current = null;
       if (!dictationActiveRef.current) { setIsDictating(false); return; }
-      setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, 200);
+      // Auto-restart for seamless experience (faster on mobile since each session is short)
+      setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, isMobileDevice ? 100 : 200);
     };
     recognition.start();
-  }, [toast]);
+  }, [toast, isMobileDevice]);
 
-  const handleDictateToggle = () => {if (isDictating) {stopListening();} else {dictationPartsRef.current = []; startDictation();}};
+  const handleDictateToggle = () => {if (isDictating) {stopListening(); mobileAccumulatedRef.current = '';} else {dictationPartsRef.current = []; mobileAccumulatedRef.current = ''; startDictation();}};
 
   const stopConversationSpeaking = useCallback(() => {
     vlog('stopConversationSpeaking');
@@ -771,6 +803,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       conversationActiveRef.current = false;
       isProcessingVoiceRef.current = false;
       lastSubmittedTranscriptRef.current = "";
+      mobileAccumulatedRef.current = '';
       ++voiceGenTokenRef.current; // invalidate all stale callbacks
       mobileVoiceStateRef.current = 'idle';
       if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
@@ -783,6 +816,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       ensureActiveConversation();
       conversationActiveRef.current = true;
       mobileVoiceStateRef.current = 'idle';
+      mobileAccumulatedRef.current = '';
       setIsConversationMode(true);
       setQuestion("");
       scheduleListeningRestart(100);

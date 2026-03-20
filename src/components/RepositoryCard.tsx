@@ -346,6 +346,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const [isInsertingDictation, setIsInsertingDictation] = useState(false);
   const dictateRecognitionRef = useRef<any>(null);
   const dictateTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const dictateActiveRef = useRef(false);
+  const editDictateActiveRef = useRef(false);
 
   // Edit content modal state (for txt/docx)
   const [editContentDoc, setEditContentDoc] = useState<Document | null>(null);
@@ -371,6 +373,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const editChangeSourceRef = useRef<'dictation' | 'manual'>('manual');
   const editDictationAnchorRef = useRef(0);
   const editDictationCaretRef = useRef<number | null>(null);
+  const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const mobileAccumulatedRef = useRef<string>("");
+  const mobileEditAccumulatedRef = useRef<string>("");
 
   useEffect(() => {
     if (!isEditContentDictating || editChangeSourceRef.current !== 'dictation') return;
@@ -584,36 +589,57 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     dictateRecognitionRef.current = recognition;
-    recognition.continuous = true;
+    // MOBILE FIX: continuous=false prevents Android Chrome result-array corruption
+    recognition.continuous = isMobileDevice ? false : true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     const baseText = dictateContent;
-    recognition.onstart = () => setIsDictating(true);
+    recognition.onstart = () => { setIsDictating(true); dictateActiveRef.current = true; };
     recognition.onresult = (event: any) => {
-      let reconstructedFinal = '';
-      let interimText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
-        else interimText += transcript;
+      if (isMobileDevice) {
+        const result = event.results[0];
+        if (result.isFinal) {
+          mobileAccumulatedRef.current += result[0].transcript + ' ';
+        }
+        const interim = result.isFinal ? '' : result[0].transcript;
+        setDictateContent(baseText + mobileAccumulatedRef.current + interim);
+      } else {
+        let reconstructedFinal = '';
+        let interimText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
+          else interimText += transcript;
+        }
+        setDictateContent(baseText + reconstructedFinal + interimText);
       }
-      setDictateContent(baseText + reconstructedFinal + interimText);
     };
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
       setIsDictating(false);
+      dictateActiveRef.current = false;
       dictateRecognitionRef.current = null;
     };
-    recognition.onend = () => { setIsDictating(false); dictateRecognitionRef.current = null; };
+    recognition.onend = () => {
+      dictateRecognitionRef.current = null;
+      if (isMobileDevice && dictateActiveRef.current) {
+        // Auto-restart for seamless mobile experience
+        setTimeout(() => startDictation(), 100);
+        return;
+      }
+      setIsDictating(false);
+    };
     recognition.start();
-  }, [toast, dictateContent]);
+  }, [toast, dictateContent, isMobileDevice]);
 
   const stopDictation = useCallback(() => {
+    dictateActiveRef.current = false;
     if (dictateRecognitionRef.current) {
       try { dictateRecognitionRef.current.stop(); } catch (e) {}
       dictateRecognitionRef.current = null;
     }
     setIsDictating(false);
+    mobileAccumulatedRef.current = '';
   }, []);
 
   const handleInsertDictation = async () => {
@@ -745,7 +771,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     editContentRecognitionRef.current = recognition;
-    recognition.continuous = true;
+    // MOBILE FIX: continuous=false prevents Android Chrome result-array corruption
+    recognition.continuous = isMobileDevice ? false : true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     const textarea = editContentTextareaRef.current;
@@ -754,45 +781,66 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     editDictationCaretRef.current = cursorPos;
     const textBefore = editContentText.slice(0, cursorPos);
     const textAfter = editContentText.slice(cursorPos);
+    mobileEditAccumulatedRef.current = '';
     let newDictatedText = '';
-    recognition.onstart = () => setIsEditContentDictating(true);
+    recognition.onstart = () => { setIsEditContentDictating(true); editDictateActiveRef.current = true; };
     recognition.onresult = (event: any) => {
-      let reconstructedFinal = '';
-      let interimText = '';
-
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
-        else interimText += transcript;
+      if (isMobileDevice) {
+        const result = event.results[0];
+        if (result.isFinal) {
+          mobileEditAccumulatedRef.current += result[0].transcript + ' ';
+        }
+        const interim = result.isFinal ? '' : result[0].transcript;
+        const liveInsertion = mobileEditAccumulatedRef.current + interim;
+        const nextText = textBefore + liveInsertion + textAfter;
+        editDictationCaretRef.current = editDictationAnchorRef.current + liveInsertion.length;
+        editChangeSourceRef.current = 'dictation';
+        setEditContentText(nextText);
+      } else {
+        let reconstructedFinal = '';
+        let interimText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) reconstructedFinal += transcript + ' ';
+          else interimText += transcript;
+        }
+        newDictatedText = reconstructedFinal;
+        const liveInsertion = `${newDictatedText}${interimText}`;
+        const nextText = textBefore + liveInsertion + textAfter;
+        editDictationCaretRef.current = editDictationAnchorRef.current + liveInsertion.length;
+        editChangeSourceRef.current = 'dictation';
+        setEditContentText(nextText);
       }
-
-      newDictatedText = reconstructedFinal;
-      const liveInsertion = `${newDictatedText}${interimText}`;
-      const nextText = textBefore + liveInsertion + textAfter;
-      editDictationCaretRef.current = editDictationAnchorRef.current + liveInsertion.length;
-      editChangeSourceRef.current = 'dictation';
-      setEditContentText(nextText);
     };
     recognition.onerror = (event: any) => {
       if (event.error === 'not-allowed') toast({ title: "Microphone permission denied", variant: "destructive" });
       setIsEditContentDictating(false);
+      editDictateActiveRef.current = false;
       editDictationCaretRef.current = null;
       editContentRecognitionRef.current = null;
+      mobileEditAccumulatedRef.current = '';
     };
     recognition.onend = () => {
+      editContentRecognitionRef.current = null;
+      if (isMobileDevice && editDictateActiveRef.current) {
+        // Auto-restart for seamless mobile experience
+        setTimeout(() => startEditContentDictation(), 100);
+        return;
+      }
       setIsEditContentDictating(false);
       editDictationCaretRef.current = null;
-      editContentRecognitionRef.current = null;
     };
     recognition.start();
-  }, [toast, editContentText]);
+  }, [toast, editContentText, isMobileDevice]);
 
   const stopEditContentDictation = useCallback(() => {
+    editDictateActiveRef.current = false;
     if (editContentRecognitionRef.current) {
       try { editContentRecognitionRef.current.stop(); } catch (e) {}
       editContentRecognitionRef.current = null;
     }
     editDictationCaretRef.current = null;
+    mobileEditAccumulatedRef.current = '';
     setIsEditContentDictating(false);
   }, []);
 
