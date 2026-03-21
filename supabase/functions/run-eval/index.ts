@@ -372,13 +372,20 @@ Deno.serve(async (req) => {
           const result = await evaluateChunkRelevance(log.query_text, chunk.text)
           labels.push({ chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
-          if (result.relevant && firstRelevantRank === null && i < k) {
-            firstRelevantRank = i + 1
+          // For firstRelevantRank, check if the chunk was in the original top-K retrieval
+          const topKSet = new Set(chunkIds.slice(0, k))
+          if (result.relevant && firstRelevantRank === null && topKSet.has(chunk.id)) {
+            // Find rank in original retrieval order
+            const originalRank = chunkIds.indexOf(chunk.id)
+            if (originalRank >= 0 && originalRank < k) {
+              firstRelevantRank = originalRank + 1
+            }
           }
         }
 
+        const topKChunkIdSet = new Set(chunkIds.slice(0, k))
         const totalRelevant = labels.filter(l => l.relevant).length
-        const relevantInTopK = labels.filter(l => l.relevant && l.rank <= k).length
+        const relevantInTopK = labels.filter(l => l.relevant && topKChunkIdSet.has(l.chunk_id)).length
         const precisionAtK = k > 0 ? relevantInTopK / k : 0
         const recallAtK = totalRelevant > 0 ? relevantInTopK / totalRelevant : 0
         const hitRate = relevantInTopK > 0 ? 1 : 0
