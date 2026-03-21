@@ -49,7 +49,13 @@ async function evaluateChunkRelevance(
   const apiKey = Deno.env.get('LOVABLE_API_KEY')
   if (!apiKey) throw new Error('LOVABLE_API_KEY not configured')
 
-  const prompt = `You are a retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains information that is necessary or helpful to answer the query.
+  const prompt = `You are a strict retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains specific data, facts, or information that would need to be included in a complete answer to the query.
+
+STRICT RULES:
+- A chunk is relevant ONLY if it contains specific data/facts that directly answer or are necessary for answering the query.
+- Chunks from the same document but different sections/tables than the one asked about are NOT relevant.
+- Headers, footers, table of contents entries, footnotes, and general introductory text are NOT relevant unless they contain answerable content.
+- Be strict: when in doubt, mark as NOT relevant.
 
 Respond with ONLY a JSON object: {"relevant": true/false, "reasoning": "one sentence explanation"}
 
