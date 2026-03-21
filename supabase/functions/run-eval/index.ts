@@ -319,18 +319,39 @@ Deno.serve(async (req) => {
       for (const log of logs) {
         const chunkIds = log.retrieved_chunk_ids || []
         const k = log.top_k || chunkIds.length
-        const topKEval = Math.min(log.top_k_eval ?? chunkIds.length, chunkIds.length, 200)
 
-        if (chunkIds.length === 0 || topKEval === 0) continue
+        if (chunkIds.length === 0) continue
 
-        const { data: chunks } = await supabase
+        // Exhaustive eval: fetch ALL chunks from documents referenced in the top-K
+        // First get document IDs from the top-K chunks
+        const { data: topKChunkDocs } = await supabase
           .from('chunks')
-          .select('id, text')
-          .in('id', chunkIds.slice(0, topKEval))
+          .select('document_id')
+          .in('id', chunkIds.slice(0, k))
 
-        if (!chunks || chunks.length === 0) continue
+        const uniqueDocIds = [...new Set((topKChunkDocs || []).map((c: any) => c.document_id).filter(Boolean))]
 
-        const chunkMap = new Map(chunks.map(c => [c.id, c.text]))
+        let evalChunks: any[] = []
+        if (uniqueDocIds.length > 0) {
+          const { data: allDocChunks } = await supabase
+            .from('chunks')
+            .select('id, text')
+            .in('document_id', uniqueDocIds)
+            .order('chunk_index', { ascending: true })
+            .limit(200)
+          evalChunks = allDocChunks || []
+        }
+
+        // Fallback to stored chunk IDs if doc fetch returned nothing
+        if (evalChunks.length === 0) {
+          const { data: fallbackChunks } = await supabase
+            .from('chunks')
+            .select('id, text')
+            .in('id', chunkIds.slice(0, 200))
+          evalChunks = fallbackChunks || []
+        }
+
+        const topKEval = evalChunks.length
 
         const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
         let firstRelevantRank: number | null = null
