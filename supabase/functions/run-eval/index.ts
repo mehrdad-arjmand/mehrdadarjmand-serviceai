@@ -49,7 +49,13 @@ async function evaluateChunkRelevance(
   const apiKey = Deno.env.get('LOVABLE_API_KEY')
   if (!apiKey) throw new Error('LOVABLE_API_KEY not configured')
 
-  const prompt = `You are a retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains information that is necessary or helpful to answer the query.
+  const prompt = `You are a strict retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains specific data, facts, or information that would need to be included in a complete answer to the query.
+
+STRICT RULES:
+- A chunk is relevant ONLY if it contains specific data/facts that directly answer or are necessary for answering the query.
+- Chunks from the same document but different sections/tables than the one asked about are NOT relevant.
+- Headers, footers, table of contents entries, footnotes, and general introductory text are NOT relevant unless they contain answerable content.
+- Be strict: when in doubt, mark as NOT relevant.
 
 Respond with ONLY a JSON object: {"relevant": true/false, "reasoning": "one sentence explanation"}
 
@@ -319,40 +325,67 @@ Deno.serve(async (req) => {
       for (const log of logs) {
         const chunkIds = log.retrieved_chunk_ids || []
         const k = log.top_k || chunkIds.length
-        const topKEval = Math.min(log.top_k_eval ?? chunkIds.length, chunkIds.length, 200)
 
-        if (chunkIds.length === 0 || topKEval === 0) continue
+        if (chunkIds.length === 0) continue
 
-        const { data: chunks } = await supabase
+        // Exhaustive eval: fetch ALL chunks from documents referenced in the top-K
+        // First get document IDs from the top-K chunks
+        const { data: topKChunkDocs } = await supabase
           .from('chunks')
-          .select('id, text')
-          .in('id', chunkIds.slice(0, topKEval))
+          .select('document_id')
+          .in('id', chunkIds.slice(0, k))
 
-        if (!chunks || chunks.length === 0) continue
+        const uniqueDocIds = [...new Set((topKChunkDocs || []).map((c: any) => c.document_id).filter(Boolean))]
 
-        const chunkMap = new Map(chunks.map(c => [c.id, c.text]))
+        let evalChunks: any[] = []
+        if (uniqueDocIds.length > 0) {
+          const { data: allDocChunks } = await supabase
+            .from('chunks')
+            .select('id, text')
+            .in('document_id', uniqueDocIds)
+            .order('chunk_index', { ascending: true })
+            .limit(200)
+          evalChunks = allDocChunks || []
+        }
+
+        // Fallback to stored chunk IDs if doc fetch returned nothing
+        if (evalChunks.length === 0) {
+          const { data: fallbackChunks } = await supabase
+            .from('chunks')
+            .select('id, text')
+            .in('id', chunkIds.slice(0, 200))
+          evalChunks = fallbackChunks || []
+        }
+
+        const topKEval = evalChunks.length
 
         const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
         let firstRelevantRank: number | null = null
 
         for (let i = 0; i < topKEval; i++) {
-          const chunkId = chunkIds[i]
-          const chunkText = chunkMap.get(chunkId)
-          if (!chunkText) {
-            labels.push({ chunk_id: chunkId, relevant: false, reasoning: 'Chunk not found', rank: i + 1 })
+          const chunk = evalChunks[i]
+          if (!chunk || !chunk.text) {
+            labels.push({ chunk_id: chunk?.id || 'unknown', relevant: false, reasoning: 'Chunk not found', rank: i + 1 })
             continue
           }
 
-          const result = await evaluateChunkRelevance(log.query_text, chunkText)
-          labels.push({ chunk_id: chunkId, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          labels.push({ chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
-          if (result.relevant && firstRelevantRank === null && i < k) {
-            firstRelevantRank = i + 1
+          // For firstRelevantRank, check if the chunk was in the original top-K retrieval
+          const topKSet = new Set(chunkIds.slice(0, k))
+          if (result.relevant && firstRelevantRank === null && topKSet.has(chunk.id)) {
+            // Find rank in original retrieval order
+            const originalRank = chunkIds.indexOf(chunk.id)
+            if (originalRank >= 0 && originalRank < k) {
+              firstRelevantRank = originalRank + 1
+            }
           }
         }
 
+        const topKChunkIdSet = new Set(chunkIds.slice(0, k))
         const totalRelevant = labels.filter(l => l.relevant).length
-        const relevantInTopK = labels.filter(l => l.relevant && l.rank <= k).length
+        const relevantInTopK = labels.filter(l => l.relevant && topKChunkIdSet.has(l.chunk_id)).length
         const precisionAtK = k > 0 ? relevantInTopK / k : 0
         const recallAtK = totalRelevant > 0 ? relevantInTopK / totalRelevant : 0
         const hitRate = relevantInTopK > 0 ? 1 : 0

@@ -642,13 +642,10 @@ Deno.serve(async (req) => {
     // Re-rank chunks: prioritize substantive content over TOC/index entries
     const rankedChunks = rerankChunks(retrievalChunks, question)
 
-    // Adaptive context window: when specific documents are selected, send more chunks
-    // to allow exhaustive answers (e.g., "list all rows"). Default to 10 for general queries.
-    const contextLimit = (filterDocumentIds && filterDocumentIds.length > 0 && filterDocumentIds.length <= 5)
-      ? Math.min(rankedChunks.length, 30)
-      : 10
-    const topChunks = rankedChunks.slice(0, contextLimit)
-    console.log(`Context window: ${topChunks.length} chunks (limit: ${contextLimit}, filtered docs: ${filterDocumentIds?.length || 0})`)
+    // Blanket top_k = 20 for all queries
+    const contextLimit = 20
+    const topChunks = rankedChunks.slice(0, Math.min(rankedChunks.length, contextLimit))
+    console.log(`Context window: ${topChunks.length} chunks (blanket limit: ${contextLimit})`)
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
       chunk: c.chunk_index,
@@ -747,19 +744,50 @@ Provide a clear, concise answer based on the actual procedural content in the co
       documentId: chunk.document_id || ''
     }))
 
-    // Log to query_logs and trigger background retrieval evaluation
-    const evalChunks = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
-    const chunkIds = evalChunks.map((c: any) => c.id)
-    const similarities = evalChunks.map((c: any) => c.similarity ?? 0)
-    const chunkTexts = evalChunks.map((c: any) => ({ id: c.id, text: c.text }))
+    // Exhaustive eval scan: fetch ALL chunks from documents that appear in topChunks
+    const uniqueDocIds = [...new Set(topChunks.map((c: any) => c.document_id).filter(Boolean))]
+    let evalChunkTexts: { id: string; text: string }[] = []
+    let evalChunkIds: string[] = []
+    let evalSimilarities: number[] = []
+    let topKEval = 0
+
+    if (uniqueDocIds.length > 0) {
+      const { data: allDocChunks, error: evalFetchErr } = await supabase
+        .from('chunks')
+        .select('id, text, document_id, chunk_index')
+        .in('document_id', uniqueDocIds)
+        .order('chunk_index', { ascending: true })
+        .limit(200)
+
+      if (!evalFetchErr && allDocChunks && allDocChunks.length > 0) {
+        evalChunkTexts = allDocChunks.map((c: any) => ({ id: c.id, text: c.text }))
+        evalChunkIds = allDocChunks.map((c: any) => c.id)
+        const simMap = new Map(rankedChunks.map((c: any) => [c.id, c.similarity ?? 0]))
+        evalSimilarities = allDocChunks.map((c: any) => simMap.get(c.id) ?? 0)
+        topKEval = allDocChunks.length
+        console.log(`Exhaustive eval scan: ${topKEval} chunks from ${uniqueDocIds.length} document(s)`)
+      } else {
+        const fallback = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+        evalChunkTexts = fallback.map((c: any) => ({ id: c.id, text: c.text }))
+        evalChunkIds = fallback.map((c: any) => c.id)
+        evalSimilarities = fallback.map((c: any) => c.similarity ?? 0)
+        topKEval = fallback.length
+      }
+    } else {
+      const fallback = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+      evalChunkTexts = fallback.map((c: any) => ({ id: c.id, text: c.text }))
+      evalChunkIds = fallback.map((c: any) => c.id)
+      evalSimilarities = fallback.map((c: any) => c.similarity ?? 0)
+      topKEval = fallback.length
+    }
+
     const topK = topChunks.length
-    const topKEval = evalChunks.length
 
     const logPayload = {
       user_id: user.id,
       query_text: question,
-      retrieved_chunk_ids: chunkIds,
-      retrieved_similarities: similarities,
+      retrieved_chunk_ids: evalChunkIds,
+      retrieved_similarities: evalSimilarities,
       response_text: answer,
       citations_json: sources,
       input_tokens: usage.input_tokens,
@@ -788,7 +816,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
         console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
 
         // LLM-based retrieval evaluation
-        await evaluateRetrievalBackground(supabase, inserted.id, question, chunkTexts, topK, topKEval)
+        await evaluateRetrievalBackground(supabase, inserted.id, question, evalChunkTexts, topK, topKEval)
       } catch (e) {
         console.error('Background eval error:', e)
       }
@@ -1093,7 +1121,13 @@ async function evaluateChunkRelevance(
   const apiKey = Deno.env.get('LOVABLE_API_KEY')
   if (!apiKey) return { relevant: false, reasoning: 'LOVABLE_API_KEY not configured' }
 
-  const prompt = `You are a retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains information that is necessary or helpful to answer the query.
+  const prompt = `You are a strict retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains specific data, facts, or information that would need to be included in a complete answer to the query.
+
+STRICT RULES:
+- A chunk is relevant ONLY if it contains specific data/facts that directly answer or are necessary for answering the query.
+- Chunks from the same document but different sections/tables than the one asked about are NOT relevant.
+- Headers, footers, table of contents entries, footnotes, and general introductory text are NOT relevant unless they contain answerable content.
+- Be strict: when in doubt, mark as NOT relevant.
 
 Respond with ONLY a JSON object: {"relevant": true/false, "reasoning": "one sentence explanation"}
 
