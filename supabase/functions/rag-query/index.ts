@@ -459,13 +459,15 @@ Deno.serve(async (req) => {
 
     if (requestProjectId && projectDocIdArray.length > 0) {
       // Use project-scoped search to avoid cross-project contamination
+      // When specific documents are filtered, retrieve more chunks to allow exhaustive answers
+      const retrievalCount = (filterDocumentIds && filterDocumentIds.length > 0 && filterDocumentIds.length <= 5) ? 200 : 50
       const { data, error } = await supabase.rpc(
         'match_chunks_by_docs',
         {
           query_embedding: embeddingStr,
-          doc_ids: projectDocIdArray,
-          match_threshold: 0.15,
-          match_count: 50,
+          doc_ids: filterDocumentIds && filterDocumentIds.length > 0 ? filterDocumentIds : projectDocIdArray,
+          match_threshold: 0.10,
+          match_count: retrievalCount,
         }
       )
       chunks = data || []
