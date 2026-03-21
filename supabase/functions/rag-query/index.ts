@@ -744,13 +744,44 @@ Provide a clear, concise answer based on the actual procedural content in the co
       documentId: chunk.document_id || ''
     }))
 
-    // Log to query_logs and trigger background retrieval evaluation
-    const evalChunks = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
-    const chunkIds = evalChunks.map((c: any) => c.id)
-    const similarities = evalChunks.map((c: any) => c.similarity ?? 0)
-    const chunkTexts = evalChunks.map((c: any) => ({ id: c.id, text: c.text }))
+    // Exhaustive eval scan: fetch ALL chunks from documents that appear in topChunks
+    const uniqueDocIds = [...new Set(topChunks.map((c: any) => c.document_id).filter(Boolean))]
+    let evalChunkTexts: { id: string; text: string }[] = []
+    let evalChunkIds: string[] = []
+    let evalSimilarities: number[] = []
+    let topKEval = 0
+
+    if (uniqueDocIds.length > 0) {
+      const { data: allDocChunks, error: evalFetchErr } = await supabase
+        .from('chunks')
+        .select('id, text, document_id, chunk_index')
+        .in('document_id', uniqueDocIds)
+        .order('chunk_index', { ascending: true })
+        .limit(200)
+
+      if (!evalFetchErr && allDocChunks && allDocChunks.length > 0) {
+        evalChunkTexts = allDocChunks.map((c: any) => ({ id: c.id, text: c.text }))
+        evalChunkIds = allDocChunks.map((c: any) => c.id)
+        const simMap = new Map(rankedChunks.map((c: any) => [c.id, c.similarity ?? 0]))
+        evalSimilarities = allDocChunks.map((c: any) => simMap.get(c.id) ?? 0)
+        topKEval = allDocChunks.length
+        console.log(`Exhaustive eval scan: ${topKEval} chunks from ${uniqueDocIds.length} document(s)`)
+      } else {
+        const fallback = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+        evalChunkTexts = fallback.map((c: any) => ({ id: c.id, text: c.text }))
+        evalChunkIds = fallback.map((c: any) => c.id)
+        evalSimilarities = fallback.map((c: any) => c.similarity ?? 0)
+        topKEval = fallback.length
+      }
+    } else {
+      const fallback = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+      evalChunkTexts = fallback.map((c: any) => ({ id: c.id, text: c.text }))
+      evalChunkIds = fallback.map((c: any) => c.id)
+      evalSimilarities = fallback.map((c: any) => c.similarity ?? 0)
+      topKEval = fallback.length
+    }
+
     const topK = topChunks.length
-    const topKEval = evalChunks.length
 
     const logPayload = {
       user_id: user.id,
