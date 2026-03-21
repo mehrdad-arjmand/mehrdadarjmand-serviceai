@@ -640,8 +640,13 @@ Deno.serve(async (req) => {
     // Re-rank chunks: prioritize substantive content over TOC/index entries
     const rankedChunks = rerankChunks(retrievalChunks, question)
 
-    // Take top chunks for context (top 10 for more precise retrieval evaluation)
-    const topChunks = rankedChunks.slice(0, 10)
+    // Adaptive context window: when specific documents are selected, send more chunks
+    // to allow exhaustive answers (e.g., "list all rows"). Default to 10 for general queries.
+    const contextLimit = (filterDocumentIds && filterDocumentIds.length > 0 && filterDocumentIds.length <= 5)
+      ? Math.min(rankedChunks.length, 30)
+      : 10
+    const topChunks = rankedChunks.slice(0, contextLimit)
+    console.log(`Context window: ${topChunks.length} chunks (limit: ${contextLimit}, filtered docs: ${filterDocumentIds?.length || 0})`)
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
       chunk: c.chunk_index,
