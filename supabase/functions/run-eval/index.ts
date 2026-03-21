@@ -357,15 +357,14 @@ Deno.serve(async (req) => {
         let firstRelevantRank: number | null = null
 
         for (let i = 0; i < topKEval; i++) {
-          const chunkId = chunkIds[i]
-          const chunkText = chunkMap.get(chunkId)
-          if (!chunkText) {
-            labels.push({ chunk_id: chunkId, relevant: false, reasoning: 'Chunk not found', rank: i + 1 })
+          const chunk = evalChunks[i]
+          if (!chunk || !chunk.text) {
+            labels.push({ chunk_id: chunk?.id || 'unknown', relevant: false, reasoning: 'Chunk not found', rank: i + 1 })
             continue
           }
 
-          const result = await evaluateChunkRelevance(log.query_text, chunkText)
-          labels.push({ chunk_id: chunkId, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          labels.push({ chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
           if (result.relevant && firstRelevantRank === null && i < k) {
             firstRelevantRank = i + 1
