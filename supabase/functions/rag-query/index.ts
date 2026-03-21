@@ -786,8 +786,8 @@ Provide a clear, concise answer based on the actual procedural content in the co
     const logPayload = {
       user_id: user.id,
       query_text: question,
-      retrieved_chunk_ids: chunkIds,
-      retrieved_similarities: similarities,
+      retrieved_chunk_ids: evalChunkIds,
+      retrieved_similarities: evalSimilarities,
       response_text: answer,
       citations_json: sources,
       input_tokens: usage.input_tokens,
