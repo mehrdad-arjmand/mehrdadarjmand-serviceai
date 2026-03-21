@@ -816,7 +816,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
         console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
 
         // LLM-based retrieval evaluation
-        await evaluateRetrievalBackground(supabase, inserted.id, question, chunkTexts, topK, topKEval)
+        await evaluateRetrievalBackground(supabase, inserted.id, question, evalChunkTexts, topK, topKEval)
       } catch (e) {
         console.error('Background eval error:', e)
       }
