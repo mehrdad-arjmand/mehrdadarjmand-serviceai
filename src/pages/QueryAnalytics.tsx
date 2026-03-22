@@ -581,6 +581,92 @@ const QueryAnalytics = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* Confusion Matrix */}
+        {confusionMatrix && confusionMatrix.rows.length > 0 && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Grid3X3 className="h-4 w-4" />Confusion Matrix
+              </CardTitle>
+              <CardDescription>
+                TP/FP/FN/TN breakdown per query ({confusionMatrix.rows.length} evaluated queries)
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {/* Aggregate KPIs */}
+              <div className="flex flex-wrap gap-8 mb-6">
+                <div>
+                  <p className="text-sm text-muted-foreground">Accuracy</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Precision</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Recall</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Total TP / FP / FN / TN</p>
+                  <p className="text-lg font-mono font-medium text-foreground">
+                    {confusionMatrix.totals.tp} / {confusionMatrix.totals.fp} / {confusionMatrix.totals.fn} / {confusionMatrix.totals.tn}
+                  </p>
+                </div>
+              </div>
+
+              {/* Per-query table */}
+              <div className="border rounded-lg overflow-auto max-h-96">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="text-muted-foreground">Query</TableHead>
+                      <TableHead className="text-right text-muted-foreground">K</TableHead>
+                      <TableHead className="text-right text-muted-foreground">Eval</TableHead>
+                      <TableHead className="text-right text-muted-foreground">TP</TableHead>
+                      <TableHead className="text-right text-muted-foreground">FP</TableHead>
+                      <TableHead className="text-right text-muted-foreground">FN</TableHead>
+                      <TableHead className="text-right text-muted-foreground">TN</TableHead>
+                      <TableHead className="text-right text-muted-foreground">Acc</TableHead>
+                      <TableHead className="text-right text-muted-foreground">Prec</TableHead>
+                      <TableHead className="text-right text-muted-foreground">Recall</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {confusionMatrix.rows.map((r, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="max-w-xs truncate text-sm">{r.query}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{r.top_k}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{r.top_k_eval}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-green-600">{r.tp}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-red-500">{r.fp}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-orange-500">{r.fn}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{r.tn}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{(r.accuracy * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{(r.precision * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{(r.recall * 100).toFixed(1)}%</TableCell>
+                      </TableRow>
+                    ))}
+                    {/* Aggregate row */}
+                    <TableRow className="bg-muted/30 font-semibold border-t-2">
+                      <TableCell className="text-sm">Aggregate</TableCell>
+                      <TableCell className="text-right font-mono text-sm">—</TableCell>
+                      <TableCell className="text-right font-mono text-sm">—</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-green-600">{confusionMatrix.totals.tp}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-red-500">{confusionMatrix.totals.fp}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-orange-500">{confusionMatrix.totals.fn}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{confusionMatrix.totals.tn}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   );
