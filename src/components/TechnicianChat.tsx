@@ -561,7 +561,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         }
         return;
       } else if (conversationActiveRef.current) {
-        scheduleListeningRestart(isMobileDevice ? 1200 : 500);
+        scheduleListeningRestart(isMobileDevice ? 400 : 500);
       }
     };
     recognition.onend = () => {
