@@ -549,7 +549,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setIsConversationMode(false);
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
-        scheduleListeningRestart(isMobileDevice ? 1000 : 300);
+        scheduleListeningRestart(isMobileDevice ? 300 : 300);
       } else if (event.error === 'aborted') {
         abortCountRef.current++;
         if (abortCountRef.current >= 3) {
