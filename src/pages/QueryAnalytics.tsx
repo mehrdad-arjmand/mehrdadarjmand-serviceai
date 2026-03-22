@@ -164,10 +164,63 @@ const QueryAnalytics = () => {
     }
   };
 
-  // Auto-load analytics on mount
+  const fetchConfusionMatrix = async () => {
+    try {
+      const { data: logs, error } = await supabase
+        .from('query_logs')
+        .select('query_text, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
+        .not('evaluated_at', 'is', null)
+        .not('total_relevant_chunks', 'is', null)
+        .not('first_relevant_rank', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      
+      if (error || !logs || logs.length === 0) return;
+
+      const rows: ConfusionRow[] = logs.map(l => {
+        const tp = l.relevant_in_top_k ?? 0;
+        const fp = (l.top_k ?? 0) - tp;
+        const fn = (l.total_relevant_chunks ?? 0) - tp;
+        const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
+        const total = tp + fp + fn + tn;
+        return {
+          query: l.query_text?.slice(0, 80) || '',
+          top_k: l.top_k ?? 0,
+          top_k_eval: l.top_k_eval ?? 0,
+          relevant_in_top_k: tp,
+          total_relevant_chunks: l.total_relevant_chunks ?? 0,
+          tp, fp, fn, tn,
+          accuracy: total > 0 ? (tp + tn) / total : 0,
+          precision: (tp + fp) > 0 ? tp / (tp + fp) : 0,
+          recall: (tp + fn) > 0 ? tp / (tp + fn) : 0,
+        };
+      });
+
+      const sumTp = rows.reduce((s, r) => s + r.tp, 0);
+      const sumFp = rows.reduce((s, r) => s + r.fp, 0);
+      const sumFn = rows.reduce((s, r) => s + r.fn, 0);
+      const sumTn = rows.reduce((s, r) => s + r.tn, 0);
+      const totalAll = sumTp + sumFp + sumFn + sumTn;
+
+      setConfusionMatrix({
+        rows,
+        totals: {
+          tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
+          accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
+          precision: (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0,
+          recall: (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0,
+        },
+      });
+    } catch {
+      console.error('Failed to compute confusion matrix');
+    }
+  };
+
+  // Auto-load analytics and confusion matrix on mount
   useEffect(() => {
     if (isAdmin) {
       fetchAnalytics();
+      fetchConfusionMatrix();
     }
   }, [isAdmin]);
 
