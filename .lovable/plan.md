@@ -1,77 +1,125 @@
 
 
-# Plan: Fix RAG Retrieval, Evaluation, and Context Window Issues
+# Plan: Fix RAG Eval Regressions, Add Confusion Matrix, Fix Mobile Voice
 
-## Summary of Root Causes Found
-
-After investigating the logs and code, here are the four bugs and their confirmed root causes:
-
-### Bug 1: Context window stuck at 10 chunks (not 30 as intended)
-
-**Root cause**: The adaptive context window code (line 647) only increases from 10 to 30 when `filterDocumentIds?.length > 0`, meaning the user must explicitly select documents in the filter dropdown. When the user says "look at the 2023 document" in natural language without using the filter, `documentIds` is `undefined` and the context stays at 10.
-
-**Logs confirm**: `Context window: 10 chunks (limit: 10, filtered docs: 0)` — the conditional never fired.
-
-**Fix**: Remove the conditional. Set a blanket `top_k = 20` for all queries.
-
-### Bug 2: `top_k_eval` capped at 50 instead of reaching all document chunks (e.g., 53)
-
-**Root cause**: The evaluation scan (`evalChunks = rankedChunks.slice(0, min(200, rankedChunks.length))`) can only evaluate chunks that were retrieved. The vector search `match_count` is 50 for non-document-filtered queries. Since the project has 6 documents and the search returns 50 chunks across all of them, it never retrieves all 53 chunks from the target document.
-
-**Fix**: For evaluation purposes, after the LLM response is generated, fetch ALL chunks from the documents that appear in the top-K context (i.e., the documents the answer actually references). This gives the evaluator access to every chunk in those documents for a true recall calculation. Cap at 200 as before.
-
-### Bug 3: `total_relevant_chunks` inflated (e.g., 40 when the actual relevant section is ~15 chunks)
-
-**Root cause**: The LLM evaluator judges relevance too loosely. A query about "all-electric vehicles table rows" gets chunks from PHEV, HEV, and footnote sections marked as "relevant" because they tangentially relate to vehicle data. The evaluator prompt does not enforce strict topical precision.
-
-**Fix**: Tighten the evaluation prompt to require the chunk to **directly answer** the query, not merely be related to the same topic. Add instruction: "A chunk is only relevant if it contains data or information that would need to be included in a complete answer. General headers, footers, TOC entries, and data from different sections/tables than the one asked about are NOT relevant."
-
-### Bug 4: Blanket top_k should be 20
-
-**Fix**: Change the context limit from the current conditional (10 or 30) to a flat 20.
+Three distinct issues to address.
 
 ---
 
-## Implementation
+## Issue 1: Revert Exhaustive Eval Scan (RAG regressions)
 
-### File 1: `supabase/functions/rag-query/index.ts`
+### What went wrong
 
-**Change A — Blanket top_k = 20** (lines 645-651):
-Replace the adaptive context window logic with:
-```typescript
-const contextLimit = 20
-const topChunks = rankedChunks.slice(0, Math.min(rankedChunks.length, contextLimit))
+The "exhaustive eval scan" introduced in the last change fetches ALL chunks from documents referenced in the top-K results (up to 200), then evaluates each one via LLM. This caused:
+
+1. **Delays**: Evaluating 50-200 chunks via LLM takes minutes, explaining why eval results don't appear promptly.
+2. **Incorrect retrieval**: The core retrieval (top_k=20) was not changed — it still works. But the eval scan polluted `retrieved_chunk_ids` in query_logs with ALL doc chunks instead of just the retrieved ones, making the logs misleading.
+3. **Irrelevant query_log rows**: The `retrieved_chunk_ids` field now stores up to 200 chunk IDs from the exhaustive scan instead of the actual 20 retrieved chunks, creating confusion.
+4. **Incorrect search results**: The actual answer generation uses the correct top 20 chunks. The Volvo search failure is likely a retrieval quality issue (similarity threshold too high or embedding mismatch), not caused by this change. Need to verify.
+
+### Fix
+
+**File: `supabase/functions/rag-query/index.ts`**
+
+- **Revert eval scan to use only vector-retrieved chunks** (lines 747-782): Instead of fetching all document chunks, evaluate only the `rankedChunks` that were actually retrieved (up to 200). This was the working behavior before the exhaustive scan.
+- **Store only actual retrieved chunk IDs** in `retrieved_chunk_ids`: Use the top-K chunks' IDs, not the eval set.
+- **Separate `retrieved_chunk_ids` from eval chunk IDs**: Store the actual retrieval in one field, use a separate variable for eval scope.
+
+Specifically:
+```
+evalChunkIds = rankedChunks (up to 200) — for evaluation
+retrieved_chunk_ids in log = topChunks (top 20) — actual retrieval
 ```
 
-**Change B — Exhaustive eval scan** (lines 750-756):
-After generating the answer, for evaluation, fetch ALL chunks from the documents that appear in `topChunks`:
-1. Collect unique `document_id` values from `topChunks`
-2. Query all chunks from those documents directly from the `chunks` table (not vector search)
-3. Use those as the evaluation set instead of `rankedChunks`
-4. Set `top_k_eval = min(200, total fetched chunks)`
-5. Store all chunk IDs in `retrieved_chunk_ids` for audit
+**File: `supabase/functions/run-eval/index.ts`**
 
-**Change C — Stricter evaluation prompt** (lines 1096-1107):
-Update `evaluateChunkRelevance` prompt to:
-```
-"A chunk is relevant ONLY if it contains specific data, facts, or information 
-that would need to be included in a complete answer to the query. 
-Chunks that are merely from the same document, same topic area, or contain 
-headers/footers/TOC/footnotes are NOT relevant unless they directly contain 
-answerable content. Be strict."
-```
+- Mirror the revert: evaluate the stored `retrieved_chunk_ids` (which are the vector-retrieved chunks), not an exhaustive doc scan.
 
-### File 2: `supabase/functions/run-eval/index.ts`
+### Why this fixes all three sub-issues
+- Eval completes quickly (evaluating 20-50 chunks, not 200)
+- `retrieved_chunk_ids` correctly reflects what was actually retrieved
+- No spurious/irrelevant rows — the log payload is clean
 
-**Change D — Exhaustive eval scan for batch eval** (lines 319-351):
-When evaluating, instead of using `chunkIds.slice(0, topKEval)` from the stored `retrieved_chunk_ids`, fetch all chunks from the documents referenced in the query's top-K. This mirrors the fix in rag-query.
+---
 
-### Files unchanged
-- `src/pages/QueryAnalytics.tsx` — no changes needed, it already reads the metrics correctly
-- CSV export — already includes all columns
+## Issue 2: Confusion Matrix Metrics (TP, TN, FP, FN)
+
+### Current state
+
+The `query_logs` table already has: `top_k`, `top_k_eval`, `total_relevant_chunks`, `relevant_in_top_k`, `precision_at_k`, `recall_at_k`, `hit_rate_at_k`, `first_relevant_rank`.
+
+### Definitions using existing data
+
+For each query row, given:
+- `top_k` = number of chunks in the retrieval window (K)
+- `top_k_eval` = total chunks evaluated (the evaluation universe)
+- `relevant_in_top_k` = chunks in top-K that are relevant
+- `total_relevant_chunks` = total relevant chunks in the eval set
+
+The confusion matrix:
+- **TP** = `relevant_in_top_k` (retrieved AND relevant)
+- **FP** = `top_k - relevant_in_top_k` (retrieved but NOT relevant)
+- **FN** = `total_relevant_chunks - relevant_in_top_k` (relevant but NOT retrieved in top-K)
+- **TN** = `top_k_eval - top_k - FN` = `(top_k_eval - top_k) - (total_relevant_chunks - relevant_in_top_k)` (not retrieved AND not relevant)
+
+Derived KPIs:
+- **Accuracy** = (TP + TN) / (TP + TN + FP + FN) = (TP + TN) / top_k_eval
+- **Precision** = TP / (TP + FP) = relevant_in_top_k / top_k
+- **Recall** = TP / (TP + FN) = relevant_in_top_k / total_relevant_chunks
+
+### Implementation
+
+No database changes needed — all values are computable from existing columns.
+
+**File: `src/pages/QueryAnalytics.tsx`**
+
+Add a new "Confusion Matrix" card in the analytics dashboard that shows:
+- Per-query breakdown table with columns: Query, TP, FP, FN, TN, Accuracy, Precision, Recall
+- Aggregate row at the bottom with sums and computed aggregate KPIs
+- The three KPIs prominently displayed: Accuracy, Precision, Recall
+
+**File: `supabase/functions/run-eval/index.ts`** (analytics action)
+
+Add confusion matrix aggregates to the analytics response so the dashboard can display them without client-side recomputation from raw logs.
+
+---
+
+## Issue 3: Mobile Voice — Different Voice & Cut-Off
+
+### Problem 1: Different voice on mobile
+
+The `selectBestVoice()` function in `ttsUtils.ts` prefers Google voices first, then Microsoft. On Android Chrome, Google voices are available and get selected — but they are different (lower quality, different accent) than the voices used on desktop Chrome (which may select Microsoft neural voices or Google UK voices).
+
+**Fix**: The voice selection already prioritizes the same patterns for both. The actual difference is that Android Chrome has a different set of available voices. We should log the selected voice on mobile and ensure we pick the best available Android voice. We'll add Android-specific preferred patterns (e.g., `en-us-x-iom-local`, `en-us-x-iol-network`) that are higher quality on Android.
+
+### Problem 2: Mobile cuts off while talking
+
+This is the `recognition.continuous = false` fix we implemented. With `continuous = false`, each recognition session ends after one final result. The auto-restart in `onend` should provide seamless experience, but there's a gap between sessions where the user perceives being "cut off."
+
+**Fix**: Reduce the auto-restart delay from 100-150ms to near-zero, and ensure the `onend` restart is immediate. Also, on the `no-speech` error restart, reduce delay from 1000ms to 300ms to match desktop.
+
+### Implementation
+
+**File: `src/lib/ttsUtils.ts`**
+- Add Android-specific voice patterns to `selectBestVoice()` to pick the highest-quality available voice on Android
+
+**File: `src/components/TechnicianChat.tsx`**
+- Reduce mobile auto-restart delay in conversation mode `onend` handler
+- Reduce `no-speech` restart delay on mobile
+
+**File: `src/components/RepositoryCard.tsx`**
+- Same restart delay reduction for dictation paths
+
+---
+
+## Summary
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/rag-query/index.ts` | Blanket top_k=20, exhaustive doc-scoped eval scan, stricter eval prompt |
-| `supabase/functions/run-eval/index.ts` | Match the exhaustive eval scan pattern |
+| `supabase/functions/rag-query/index.ts` | Revert exhaustive eval scan; eval uses rankedChunks only; fix retrieved_chunk_ids |
+| `supabase/functions/run-eval/index.ts` | Revert exhaustive doc scan in batch eval; add confusion matrix to analytics response |
+| `src/pages/QueryAnalytics.tsx` | Add confusion matrix card with TP/FP/FN/TN per query + aggregate Accuracy/Precision/Recall |
+| `src/lib/ttsUtils.ts` | Add Android-specific voice preferences |
+| `src/components/TechnicianChat.tsx` | Reduce mobile voice restart delays |
+| `src/components/RepositoryCard.tsx` | Reduce mobile dictation restart delays |
 
