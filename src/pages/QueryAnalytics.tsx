@@ -76,6 +76,26 @@ interface EvalRun {
   notes: string | null;
 }
 
+interface ConfusionRow {
+  query: string;
+  top_k: number;
+  top_k_eval: number;
+  relevant_in_top_k: number;
+  total_relevant_chunks: number;
+  tp: number;
+  fp: number;
+  fn: number;
+  tn: number;
+  accuracy: number;
+  precision: number;
+  recall: number;
+}
+
+interface ConfusionMatrix {
+  rows: ConfusionRow[];
+  totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number };
+}
+
 const SQL_REFERENCE = `-- Latency percentiles
 SELECT
   COUNT(*) AS sample_size,
