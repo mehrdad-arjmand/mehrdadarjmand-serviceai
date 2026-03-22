@@ -2,11 +2,12 @@ import { Header } from "@/components/Header";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History, Copy, Check } from "lucide-react";
+import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History, Copy, Check, Grid3X3 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface AnalyticsData {
   sample_size: number;
@@ -75,6 +76,26 @@ interface EvalRun {
   notes: string | null;
 }
 
+interface ConfusionRow {
+  query: string;
+  top_k: number;
+  top_k_eval: number;
+  relevant_in_top_k: number;
+  total_relevant_chunks: number;
+  tp: number;
+  fp: number;
+  fn: number;
+  tn: number;
+  accuracy: number;
+  precision: number;
+  recall: number;
+}
+
+interface ConfusionMatrix {
+  rows: ConfusionRow[];
+  totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number };
+}
+
 const SQL_REFERENCE = `-- Latency percentiles
 SELECT
   COUNT(*) AS sample_size,
@@ -109,6 +130,7 @@ const QueryAnalytics = () => {
   const [evalRuns, setEvalRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
+  const [confusionMatrix, setConfusionMatrix] = useState<ConfusionMatrix | null>(null);
 
   const callEvalFunction = async (action: string, params?: Record<string, string>) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -142,10 +164,63 @@ const QueryAnalytics = () => {
     }
   };
 
-  // Auto-load analytics on mount
+  const fetchConfusionMatrix = async () => {
+    try {
+      const { data: logs, error } = await supabase
+        .from('query_logs')
+        .select('query_text, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
+        .not('evaluated_at', 'is', null)
+        .not('total_relevant_chunks', 'is', null)
+        .not('first_relevant_rank', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      
+      if (error || !logs || logs.length === 0) return;
+
+      const rows: ConfusionRow[] = logs.map(l => {
+        const tp = l.relevant_in_top_k ?? 0;
+        const fp = (l.top_k ?? 0) - tp;
+        const fn = (l.total_relevant_chunks ?? 0) - tp;
+        const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
+        const total = tp + fp + fn + tn;
+        return {
+          query: l.query_text?.slice(0, 80) || '',
+          top_k: l.top_k ?? 0,
+          top_k_eval: l.top_k_eval ?? 0,
+          relevant_in_top_k: tp,
+          total_relevant_chunks: l.total_relevant_chunks ?? 0,
+          tp, fp, fn, tn,
+          accuracy: total > 0 ? (tp + tn) / total : 0,
+          precision: (tp + fp) > 0 ? tp / (tp + fp) : 0,
+          recall: (tp + fn) > 0 ? tp / (tp + fn) : 0,
+        };
+      });
+
+      const sumTp = rows.reduce((s, r) => s + r.tp, 0);
+      const sumFp = rows.reduce((s, r) => s + r.fp, 0);
+      const sumFn = rows.reduce((s, r) => s + r.fn, 0);
+      const sumTn = rows.reduce((s, r) => s + r.tn, 0);
+      const totalAll = sumTp + sumFp + sumFn + sumTn;
+
+      setConfusionMatrix({
+        rows,
+        totals: {
+          tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
+          accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
+          precision: (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0,
+          recall: (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0,
+        },
+      });
+    } catch {
+      console.error('Failed to compute confusion matrix');
+    }
+  };
+
+  // Auto-load analytics and confusion matrix on mount
   useEffect(() => {
     if (isAdmin) {
       fetchAnalytics();
+      fetchConfusionMatrix();
     }
   }, [isAdmin]);
 
@@ -502,6 +577,92 @@ const QueryAnalytics = () => {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Confusion Matrix */}
+        {confusionMatrix && confusionMatrix.rows.length > 0 && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Grid3X3 className="h-4 w-4" />Confusion Matrix
+              </CardTitle>
+              <CardDescription>
+                TP/FP/FN/TN breakdown per query ({confusionMatrix.rows.length} evaluated queries)
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {/* Aggregate KPIs */}
+              <div className="flex flex-wrap gap-8 mb-6">
+                <div>
+                  <p className="text-sm text-muted-foreground">Accuracy</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Precision</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Recall</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Total TP / FP / FN / TN</p>
+                  <p className="text-lg font-mono font-medium text-foreground">
+                    {confusionMatrix.totals.tp} / {confusionMatrix.totals.fp} / {confusionMatrix.totals.fn} / {confusionMatrix.totals.tn}
+                  </p>
+                </div>
+              </div>
+
+              {/* Per-query table */}
+              <div className="border rounded-lg overflow-auto max-h-96">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="text-muted-foreground">Query</TableHead>
+                      <TableHead className="text-right text-muted-foreground">K</TableHead>
+                      <TableHead className="text-right text-muted-foreground">Eval</TableHead>
+                      <TableHead className="text-right text-muted-foreground">TP</TableHead>
+                      <TableHead className="text-right text-muted-foreground">FP</TableHead>
+                      <TableHead className="text-right text-muted-foreground">FN</TableHead>
+                      <TableHead className="text-right text-muted-foreground">TN</TableHead>
+                      <TableHead className="text-right text-muted-foreground">Acc</TableHead>
+                      <TableHead className="text-right text-muted-foreground">Prec</TableHead>
+                      <TableHead className="text-right text-muted-foreground">Recall</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {confusionMatrix.rows.map((r, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="max-w-xs truncate text-sm">{r.query}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{r.top_k}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{r.top_k_eval}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-green-600">{r.tp}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-red-500">{r.fp}</TableCell>
+                        <TableCell className="text-right font-mono text-sm text-orange-500">{r.fn}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{r.tn}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{(r.accuracy * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{(r.precision * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{(r.recall * 100).toFixed(1)}%</TableCell>
+                      </TableRow>
+                    ))}
+                    {/* Aggregate row */}
+                    <TableRow className="bg-muted/30 font-semibold border-t-2">
+                      <TableCell className="text-sm">Aggregate</TableCell>
+                      <TableCell className="text-right font-mono text-sm">—</TableCell>
+                      <TableCell className="text-right font-mono text-sm">—</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-green-600">{confusionMatrix.totals.tp}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-red-500">{confusionMatrix.totals.fp}</TableCell>
+                      <TableCell className="text-right font-mono text-sm text-orange-500">{confusionMatrix.totals.fn}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{confusionMatrix.totals.tn}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
               </div>
             </CardContent>
           </Card>

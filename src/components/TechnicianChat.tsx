@@ -549,7 +549,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         setIsConversationMode(false);
         setConversationState("idle");
       } else if (event.error === 'no-speech' && conversationActiveRef.current) {
-        scheduleListeningRestart(isMobileDevice ? 1000 : 300);
+        scheduleListeningRestart(isMobileDevice ? 300 : 300);
       } else if (event.error === 'aborted') {
         abortCountRef.current++;
         if (abortCountRef.current >= 3) {
@@ -561,7 +561,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
         }
         return;
       } else if (conversationActiveRef.current) {
-        scheduleListeningRestart(isMobileDevice ? 1200 : 500);
+        scheduleListeningRestart(isMobileDevice ? 400 : 500);
       }
     };
     recognition.onend = () => {
@@ -576,7 +576,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       }
       if (conversationActiveRef.current && !silenceTimerRef.current && !isProcessingVoiceRef.current) {
         // Mobile with continuous=false: auto-restart quickly for seamless experience
-        scheduleListeningRestart(isMobileDevice ? 150 : 200);
+        scheduleListeningRestart(isMobileDevice ? 50 : 200);
       }
     };
     try {
@@ -592,7 +592,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (conversationActiveRef.current && !recognitionStartedRef.current) {
         vlog('watchdog:RESTART');
         teardownRecognitionForSpeech();
-        scheduleListeningRestart(isMobileDevice ? 1200 : 500);
+        scheduleListeningRestart(isMobileDevice ? 400 : 500);
       }
     }, isMobileDevice ? 4000 : 3000);
   }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, isMobileDevice, vlog]);

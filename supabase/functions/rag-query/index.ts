@@ -744,50 +744,20 @@ Provide a clear, concise answer based on the actual procedural content in the co
       documentId: chunk.document_id || ''
     }))
 
-    // Exhaustive eval scan: fetch ALL chunks from documents that appear in topChunks
-    const uniqueDocIds = [...new Set(topChunks.map((c: any) => c.document_id).filter(Boolean))]
-    let evalChunkTexts: { id: string; text: string }[] = []
-    let evalChunkIds: string[] = []
-    let evalSimilarities: number[] = []
-    let topKEval = 0
-
-    if (uniqueDocIds.length > 0) {
-      const { data: allDocChunks, error: evalFetchErr } = await supabase
-        .from('chunks')
-        .select('id, text, document_id, chunk_index')
-        .in('document_id', uniqueDocIds)
-        .order('chunk_index', { ascending: true })
-        .limit(200)
-
-      if (!evalFetchErr && allDocChunks && allDocChunks.length > 0) {
-        evalChunkTexts = allDocChunks.map((c: any) => ({ id: c.id, text: c.text }))
-        evalChunkIds = allDocChunks.map((c: any) => c.id)
-        const simMap = new Map(rankedChunks.map((c: any) => [c.id, c.similarity ?? 0]))
-        evalSimilarities = allDocChunks.map((c: any) => simMap.get(c.id) ?? 0)
-        topKEval = allDocChunks.length
-        console.log(`Exhaustive eval scan: ${topKEval} chunks from ${uniqueDocIds.length} document(s)`)
-      } else {
-        const fallback = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
-        evalChunkTexts = fallback.map((c: any) => ({ id: c.id, text: c.text }))
-        evalChunkIds = fallback.map((c: any) => c.id)
-        evalSimilarities = fallback.map((c: any) => c.similarity ?? 0)
-        topKEval = fallback.length
-      }
-    } else {
-      const fallback = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
-      evalChunkTexts = fallback.map((c: any) => ({ id: c.id, text: c.text }))
-      evalChunkIds = fallback.map((c: any) => c.id)
-      evalSimilarities = fallback.map((c: any) => c.similarity ?? 0)
-      topKEval = fallback.length
-    }
+    // Eval uses only vector-retrieved chunks (rankedChunks up to 200)
+    const evalSlice = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+    const evalChunkTexts = evalSlice.map((c: any) => ({ id: c.id, text: c.text }))
+    const topKEval = evalSlice.length
+    console.log(`Eval scope: ${topKEval} vector-retrieved chunks`)
 
     const topK = topChunks.length
 
+    // retrieved_chunk_ids = only the actual top-K used for answer generation
     const logPayload = {
       user_id: user.id,
       query_text: question,
-      retrieved_chunk_ids: evalChunkIds,
-      retrieved_similarities: evalSimilarities,
+      retrieved_chunk_ids: topChunks.map((c: any) => c.id),
+      retrieved_similarities: topChunks.map((c: any) => c.similarity ?? 0),
       response_text: answer,
       citations_json: sources,
       input_tokens: usage.input_tokens,

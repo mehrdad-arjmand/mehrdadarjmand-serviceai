@@ -328,34 +328,12 @@ Deno.serve(async (req) => {
 
         if (chunkIds.length === 0) continue
 
-        // Exhaustive eval: fetch ALL chunks from documents referenced in the top-K
-        // First get document IDs from the top-K chunks
-        const { data: topKChunkDocs } = await supabase
+        // Eval uses stored retrieved_chunk_ids (vector-retrieved chunks)
+        const { data: evalChunksData } = await supabase
           .from('chunks')
-          .select('document_id')
-          .in('id', chunkIds.slice(0, k))
-
-        const uniqueDocIds = [...new Set((topKChunkDocs || []).map((c: any) => c.document_id).filter(Boolean))]
-
-        let evalChunks: any[] = []
-        if (uniqueDocIds.length > 0) {
-          const { data: allDocChunks } = await supabase
-            .from('chunks')
-            .select('id, text')
-            .in('document_id', uniqueDocIds)
-            .order('chunk_index', { ascending: true })
-            .limit(200)
-          evalChunks = allDocChunks || []
-        }
-
-        // Fallback to stored chunk IDs if doc fetch returned nothing
-        if (evalChunks.length === 0) {
-          const { data: fallbackChunks } = await supabase
-            .from('chunks')
-            .select('id, text')
-            .in('id', chunkIds.slice(0, 200))
-          evalChunks = fallbackChunks || []
-        }
+          .select('id, text')
+          .in('id', chunkIds.slice(0, 200))
+        const evalChunks = evalChunksData || []
 
         const topKEval = evalChunks.length
 

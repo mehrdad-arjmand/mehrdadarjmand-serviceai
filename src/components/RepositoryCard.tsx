@@ -624,7 +624,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       dictateRecognitionRef.current = null;
       if (isMobileDevice && dictateActiveRef.current) {
         // Auto-restart for seamless mobile experience
-        setTimeout(() => startDictation(), 100);
+        setTimeout(() => startDictation(), 50);
         return;
       }
       setIsDictating(false);
@@ -824,7 +824,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       editContentRecognitionRef.current = null;
       if (isMobileDevice && editDictateActiveRef.current) {
         // Auto-restart for seamless mobile experience
-        setTimeout(() => startEditContentDictation(), 100);
+        setTimeout(() => startEditContentDictation(), 50);
         return;
       }
       setIsEditContentDictating(false);
