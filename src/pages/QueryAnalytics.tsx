@@ -130,6 +130,7 @@ const QueryAnalytics = () => {
   const [evalRuns, setEvalRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
+  const [confusionMatrix, setConfusionMatrix] = useState<ConfusionMatrix | null>(null);
 
   const callEvalFunction = async (action: string, params?: Record<string, string>) => {
     const { data: { session } } = await supabase.auth.getSession();
