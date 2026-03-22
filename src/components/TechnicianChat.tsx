@@ -592,7 +592,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       if (conversationActiveRef.current && !recognitionStartedRef.current) {
         vlog('watchdog:RESTART');
         teardownRecognitionForSpeech();
-        scheduleListeningRestart(isMobileDevice ? 1200 : 500);
+        scheduleListeningRestart(isMobileDevice ? 400 : 500);
       }
     }, isMobileDevice ? 4000 : 3000);
   }, [toast, clearSilenceTimer, isSpeechOutputBlocked, scheduleListeningRestart, teardownRecognitionForSpeech, isMobileDevice, vlog]);
