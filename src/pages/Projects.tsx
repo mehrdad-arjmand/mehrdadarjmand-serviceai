@@ -358,17 +358,24 @@ const Projects = () => {
   };
 
   const fetchMetrics = async () => {
-    const { data, error } = await supabase.
+     const { data, error } = await supabase.
     from("query_logs").
-    select("precision_at_k, relevant_in_top_k, top_k, total_relevant_chunks, first_relevant_rank, execution_time_ms, upstream_inference_cost").
+    select("precision_at_k, relevant_in_top_k, top_k, top_k_eval, total_relevant_chunks, first_relevant_rank, execution_time_ms, upstream_inference_cost").
     not("execution_time_ms", "is", null);
     if (error || !data || data.length === 0) return;
 
-    // Precision: sum(relevant_in_top_k) / sum(top_k) for eligible rows
-    const eligible = data.filter((d) => d.first_relevant_rank !== null && d.total_relevant_chunks !== null);
-    const sumRelevant = eligible.reduce((sum, d) => sum + (d.relevant_in_top_k || 0), 0);
-    const sumTopK = eligible.reduce((sum, d) => sum + (d.top_k || 0), 0);
-    const precision = sumTopK > 0 ? sumRelevant / sumTopK : 0;
+    // Accuracy: (TP + TN) / top_k_eval for eligible rows
+    const eligible = data.filter((d) => d.first_relevant_rank !== null && d.total_relevant_chunks !== null && d.top_k_eval !== null);
+    let sumTP = 0, sumTN = 0, sumEval = 0;
+    eligible.forEach((d) => {
+      const tp = d.relevant_in_top_k || 0;
+      const fn = (d.total_relevant_chunks || 0) - tp;
+      const tn = Math.max(0, (d.top_k_eval || 0) - (d.top_k || 0) - fn);
+      sumTP += tp;
+      sumTN += tn;
+      sumEval += (d.top_k_eval || 0);
+    });
+    const accuracy = sumEval > 0 ? (sumTP + sumTN) / sumEval : 0;
 
     const latencies = data.
     map((d) => d.execution_time_ms).
@@ -381,7 +388,7 @@ const Projects = () => {
     costs.length > 0 ? costs.reduce((sum, d) => sum + (d.upstream_inference_cost || 0), 0) / costs.length : 0;
 
     setMetrics([
-    { label: "QUALITY", sublabel: "Precision", value: `${(precision * 100).toFixed(1)}%` },
+    { label: "QUALITY", sublabel: "Accuracy", value: `${(accuracy * 100).toFixed(1)}%` },
     {
       label: "TIME",
       sublabel: "Median latency",

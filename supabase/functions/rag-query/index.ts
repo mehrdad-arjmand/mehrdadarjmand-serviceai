@@ -480,7 +480,7 @@ Deno.serve(async (req) => {
         {
           query_embedding: embeddingStr,
           match_threshold: 0.15,
-          match_count: 50,
+          match_count: 200,
           p_user_id: user.id
         }
       )
