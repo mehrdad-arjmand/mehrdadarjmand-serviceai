@@ -330,7 +330,7 @@ const Projects = () => {
   const [filterRole, setFilterRole] = useState("");
   const [projectMetadataFields, setProjectMetadataFields] = useState<Record<string, string[]>>({});
   const [metrics, setMetrics] = useState<MetricCard[]>([
-  { label: "QUALITY", sublabel: "Precision", value: "—" },
+  { label: "QUALITY", sublabel: "Accuracy", value: "—" },
   { label: "TIME", sublabel: "Median latency", value: "—" },
   { label: "COST", sublabel: "Average cost per thousand queries", value: "—" }]
   );
