@@ -778,12 +778,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     isTtsActiveRef.current = false;
     markSpeechOutputCooldown();
     // User explicitly stopped speech — clear cooldown so mic restarts immediately
-    if (typeof speechOutputCooldownUntilRef !== 'undefined' && speechOutputCooldownUntilRef?.current !== undefined) {
-      speechOutputCooldownUntilRef.current = 0;
-    }
-    if (typeof ttsEndTimestampRef !== 'undefined' && ttsEndTimestampRef?.current !== undefined) {
-      ttsEndTimestampRef.current = 0;
-    }
+    speechOutputCooldownUntilRef.current = 0;
+    ttsEndTimestampRef.current = 0;
     setIsSpeaking(false);
     setIsQuerying(false);
     setFiltersLocked(false);
