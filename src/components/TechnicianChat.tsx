@@ -777,6 +777,9 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
     isTtsActiveRef.current = false;
     markSpeechOutputCooldown();
+    // User explicitly stopped speech — clear cooldown so mic restarts immediately
+    speechOutputCooldownUntilRef.current = 0;
+    ttsEndTimestampRef.current = 0;
     setIsSpeaking(false);
     setIsQuerying(false);
     setFiltersLocked(false);
@@ -793,8 +796,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     abortCountRef.current = 0;
     if (conversationActiveRef.current) {
       setQuestion("");
-      // Use longer initial delay to let browser fully release mic after TTS cancel
-      scheduleListeningRestart(isMobileDevice ? 1500 : 800);
+      scheduleListeningRestart(800);
     }
   }, [scheduleListeningRestart, markSpeechOutputCooldown, isSpeechOutputBlocked]);
 
