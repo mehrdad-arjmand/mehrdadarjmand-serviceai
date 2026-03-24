@@ -437,20 +437,39 @@ Deno.serve(async (req) => {
     // Build project-scoped document ID set FIRST (before vector search)
     let projectDocIds: Set<string> | null = null
     let projectDocIdArray: string[] = []
+    let projectDocsWithNames: { id: string; filename: string }[] = []
     if (requestProjectId) {
       const { data: projectDocs, error: projError } = await supabase
         .from('documents')
-        .select('id')
+        .select('id, filename')
         .eq('project_id', requestProjectId)
 
       if (projError) {
         console.error('Error fetching project documents:', projError)
       } else {
-        projectDocIdArray = (projectDocs || []).map((d: any) => d.id)
+        projectDocsWithNames = (projectDocs || []).map((d: any) => ({ id: d.id, filename: d.filename }))
+        projectDocIdArray = projectDocsWithNames.map(d => d.id)
         projectDocIds = new Set(projectDocIdArray)
         console.log(`Project ${requestProjectId} has ${projectDocIds.size} documents`)
       }
     }
+
+    // ── Natural-language document inference ──
+    // If the user references a year/document name in the query, scope retrieval to those docs
+    let inferredDocIds: string[] | null = null
+    if (!filterDocumentIds?.length && projectDocsWithNames.length > 0) {
+      inferredDocIds = inferDocumentFromQuery(question, projectDocsWithNames)
+      if (inferredDocIds && inferredDocIds.length > 0) {
+        console.log(`Inferred ${inferredDocIds.length} document(s) from query: ${inferredDocIds.join(', ')}`)
+      }
+    }
+
+    // Effective document scope: explicit filter > inferred > all project docs
+    const effectiveDocIds = (filterDocumentIds && filterDocumentIds.length > 0) 
+      ? filterDocumentIds 
+      : (inferredDocIds && inferredDocIds.length > 0) 
+        ? inferredDocIds 
+        : projectDocIdArray
 
     // Perform vector similarity search
     const embeddingStr = `[${queryEmbedding.join(',')}]`
@@ -465,7 +484,7 @@ Deno.serve(async (req) => {
         'match_chunks_by_docs',
         {
           query_embedding: embeddingStr,
-          doc_ids: filterDocumentIds && filterDocumentIds.length > 0 ? filterDocumentIds : projectDocIdArray,
+          doc_ids: effectiveDocIds,
           match_threshold: 0.10,
           match_count: retrievalCount,
         }
@@ -627,11 +646,12 @@ Deno.serve(async (req) => {
     // If a specific document is selected and semantic+keyword retrieval is empty,
     // fall back to direct chunk retrieval so recently re-ingested docs remain answerable
     let retrievalChunks = combinedChunks
-    if (retrievalChunks.length === 0 && filterDocumentIds && filterDocumentIds.length > 0) {
+    if (retrievalChunks.length === 0 && (filterDocumentIds?.length || inferredDocIds?.length)) {
+      const fallbackDocIds = filterDocumentIds?.length ? filterDocumentIds : inferredDocIds!
       retrievalChunks = await fetchDocScopedFallbackChunks(
         supabase,
         question,
-        filterDocumentIds,
+        fallbackDocIds,
         accessibleDocIds,
         projectDocIds,
         equipmentType
@@ -639,8 +659,27 @@ Deno.serve(async (req) => {
       console.log(`Document-scoped fallback returned ${retrievalChunks.length} chunks`)
     }
 
-    // Re-rank chunks: prioritize substantive content over TOC/index entries
-    const rankedChunks = rerankChunks(retrievalChunks, question)
+    // ── Table-aware retrieval: detect list/count intent and fetch adjacent chunks ──
+    const tableIntent = detectTableIntent(question)
+    if (tableIntent && (inferredDocIds?.length || filterDocumentIds?.length)) {
+      const targetDocIds = filterDocumentIds?.length ? filterDocumentIds : inferredDocIds!
+      const adjacentChunks = await fetchAdjacentTableChunks(
+        supabase, retrievalChunks, targetDocIds, question
+      )
+      if (adjacentChunks.length > 0) {
+        const existingIds = new Set(retrievalChunks.map((c: any) => c.id))
+        for (const ac of adjacentChunks) {
+          if (!existingIds.has(ac.id)) {
+            retrievalChunks.push(ac)
+            existingIds.add(ac.id)
+          }
+        }
+        console.log(`Table-aware retrieval added ${adjacentChunks.length} adjacent chunks, total: ${retrievalChunks.length}`)
+      }
+    }
+
+    // Re-rank chunks: intent-aware ranking
+    const rankedChunks = rerankChunks(retrievalChunks, question, inferredDocIds || filterDocumentIds || null)
 
     // Blanket top_k = 20 for all queries
     const contextLimit = 20
@@ -849,13 +888,110 @@ function isTOCChunk(text: string): boolean {
   return false
 }
 
-// Re-rank chunks to prioritize substantive content
-function rerankChunks(chunks: any[], question: string): any[] {
+// Infer target documents from natural-language query
+function inferDocumentFromQuery(
+  question: string,
+  projectDocs: { id: string; filename: string }[]
+): string[] | null {
+  const qLower = question.toLowerCase()
+  
+  // Extract years from query (4-digit numbers that look like years)
+  const yearMatches = qLower.match(/\b(20[0-2]\d|19\d{2})\b/g)
+  
+  // Check for explicit filename mentions
+  const matchedByName: string[] = []
+  for (const doc of projectDocs) {
+    const fnLower = doc.filename.toLowerCase()
+    // Check if the filename (minus extension) is mentioned in the query
+    const baseName = fnLower.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
+    if (qLower.includes(baseName) || qLower.includes(fnLower)) {
+      matchedByName.push(doc.id)
+    }
+  }
+  if (matchedByName.length > 0) return matchedByName
+  
+  // Match by year in filename
+  if (yearMatches && yearMatches.length > 0) {
+    const matchedByYear: string[] = []
+    for (const year of yearMatches) {
+      for (const doc of projectDocs) {
+        if (doc.filename.includes(year) && !matchedByYear.includes(doc.id)) {
+          matchedByYear.push(doc.id)
+        }
+      }
+    }
+    if (matchedByYear.length > 0) return matchedByYear
+  }
+  
+  return null
+}
+
+// Detect if the query has a table/list/count intent
+function detectTableIntent(question: string): boolean {
+  const qLower = question.toLowerCase()
+  const tablePatterns = [
+    /\bcount\b/, /\bhow many\b/, /\bnumber of\b/, /\blist\s+all\b/, /\btable\b/,
+    /\ball\s+.*\bmodels?\b/, /\ball\s+.*\bvehicles?\b/, /\ball\s+.*\bentries?\b/,
+    /\brows?\s+of\s+data\b/, /\btotal\s+rows?\b/, /\bhow\s+many\s+rows?\b/,
+    /\bevery\s+/, /\beach\s+/, /\bentire\s+/
+  ]
+  return tablePatterns.some(p => p.test(qLower))
+}
+
+// Fetch adjacent chunks by chunk_index to assemble full tables
+async function fetchAdjacentTableChunks(
+  supabase: any,
+  existingChunks: any[],
+  targetDocIds: string[],
+  question: string
+): Promise<any[]> {
+  try {
+    // Find the chunk_index range of existing chunks from target docs
+    const targetChunks = existingChunks.filter((c: any) => targetDocIds.includes(c.document_id))
+    if (targetChunks.length === 0) return []
+    
+    // Get the range of chunk indices we already have
+    const indices = targetChunks.map((c: any) => c.chunk_index)
+    const minIdx = Math.max(0, Math.min(...indices) - 5)
+    const maxIdx = Math.max(...indices) + 10
+    
+    // Fetch a window of adjacent chunks from the target documents
+    const { data, error } = await supabase
+      .from('chunks')
+      .select('id, document_id, chunk_index, text, site, equipment, fault_code, documents!inner(filename)')
+      .in('document_id', targetDocIds)
+      .gte('chunk_index', minIdx)
+      .lte('chunk_index', maxIdx)
+      .order('chunk_index', { ascending: true })
+      .limit(60)
+    
+    if (error || !data) return []
+    
+    return data.map((row: any) => ({
+      ...row,
+      similarity: 0.45,
+      filename: row.documents?.filename ?? 'Unknown',
+    }))
+  } catch (e) {
+    console.error('Adjacent chunk fetch failed:', e)
+    return []
+  }
+}
+
+// Re-rank chunks with intent-aware scoring
+function rerankChunks(chunks: any[], question: string, targetDocIds: string[] | null): any[] {
   const questionLower = question.toLowerCase()
   const keywords = questionLower.match(/[a-z]{4,}/g) || []
   
+  // Extract years from question for year-aware boosting
+  const queryYears = questionLower.match(/\b(20[0-2]\d|19\d{2})\b/g) || []
+  
+  // Extract potential make/model keywords (capitalized words from original question)
+  const makeModelTokens = question.match(/\b[A-Z][a-z]+\b/g)?.map(w => w.toLowerCase()) || []
+  
   return chunks.map(chunk => {
     const text = chunk.text.toLowerCase()
+    const filename = (chunk.filename || '').toLowerCase()
     const isTOC = isTOCChunk(chunk.text)
     
     // Base score from similarity
@@ -866,25 +1002,51 @@ function rerankChunks(chunks: any[], question: string): any[] {
       score *= 0.3
     }
     
-    // Boost chunks with actual procedural content
-    const proceduralIndicators = [
-      'replace', 'every', 'years', 'check', 'inspect', 'clean', 'ensure',
-      'warning', 'caution', 'must', 'should', 'procedure', 'step',
-      'value', 'concentration', 'level', 'temperature', 'pressure'
-    ]
-    const proceduralMatches = proceduralIndicators.filter(ind => text.includes(ind)).length
-    score += proceduralMatches * 0.05
-    
-    // Boost chunks that contain question keywords in actual content (not just headings)
-    const keywordMatches = keywords.filter(kw => text.includes(kw)).length
-    if (!isTOC && keywordMatches > 0) {
-      score += keywordMatches * 0.1
+    // ── Document match boost/penalty ──
+    if (targetDocIds && targetDocIds.length > 0) {
+      if (targetDocIds.includes(chunk.document_id)) {
+        score += 0.2 // Strong boost for target document
+      } else {
+        score *= 0.4 // Strong penalty for wrong document
+      }
     }
     
-    // Boost chunks with specific values/measurements
-    const hasSpecificValues = /\d+\s*(ppm|%|°C|°F|years?|months?|days?|hours?)/i.test(chunk.text)
+    // ── Year match boost/penalty ──
+    if (queryYears.length > 0) {
+      const hasMatchingYear = queryYears.some(y => text.includes(y) || filename.includes(y))
+      const hasWrongYear = !hasMatchingYear && /\b(20[0-2]\d|19\d{2})\b/.test(text)
+      if (hasMatchingYear) score += 0.15
+      if (hasWrongYear) score *= 0.5
+    }
+    
+    // ── Make/model keyword boost ──
+    const makeModelHits = makeModelTokens.filter(t => text.includes(t)).length
+    if (makeModelHits > 0) score += makeModelHits * 0.12
+    
+    // ── General keyword boost ──
+    const keywordMatches = keywords.filter(kw => text.includes(kw)).length
+    if (!isTOC && keywordMatches > 0) {
+      score += keywordMatches * 0.08
+    }
+    
+    // ── Procedural content boost (lower weight than before) ──
+    const proceduralIndicators = [
+      'replace', 'check', 'inspect', 'warning', 'caution', 'procedure', 'step',
+      'value', 'temperature', 'pressure'
+    ]
+    const proceduralMatches = proceduralIndicators.filter(ind => text.includes(ind)).length
+    score += proceduralMatches * 0.03
+    
+    // ── Table/data content boost ──
+    const hasTableContent = /\|.*\|/.test(chunk.text) || /\t/.test(chunk.text) || /\d+\s+(mi|km|mpg|kwh|hp)\b/i.test(chunk.text)
+    if (hasTableContent && detectTableIntent(question)) {
+      score += 0.1
+    }
+    
+    // ── Specific values/measurements boost ──
+    const hasSpecificValues = /\d+\s*(ppm|%|°C|°F|years?|months?|days?|hours?|mi|km|mpg|kwh)/i.test(chunk.text)
     if (hasSpecificValues) {
-      score += 0.15
+      score += 0.1
     }
     
     return { ...chunk, finalScore: score, isTOC }
