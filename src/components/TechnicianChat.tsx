@@ -767,20 +767,22 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   const handleDictateToggle = () => {if (isDictating) {stopListening(); mobileAccumulatedRef.current = '';} else {dictationPartsRef.current = []; mobileAccumulatedRef.current = ''; startDictation();}};
 
   const stopConversationSpeaking = useCallback(() => {
-    vlog('stopConversationSpeaking');
+    vlog('stopConversationSpeaking:MANUAL_INTERRUPT');
     // Increment token so any in-flight TTS/recognition callbacks become stale
     ++voiceGenTokenRef.current;
-    mobileVoiceStateRef.current = 'cooldown';
     // Stop TTS but stay in conversation mode — restart listening
     if (ttsKeepAliveRef.current) { clearInterval(ttsKeepAliveRef.current); ttsKeepAliveRef.current = null; }
     if (restartListeningTimerRef.current) { clearTimeout(restartListeningTimerRef.current); restartListeningTimerRef.current = null; }
+    if (scheduledRestartRef.current) { clearTimeout(scheduledRestartRef.current); scheduledRestartRef.current = null; }
     if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); utteranceQueueRef.current++; }
     isTtsActiveRef.current = false;
-    markSpeechOutputCooldown();
-    // User explicitly stopped speech — clear cooldown so mic restarts immediately
+    // User explicitly stopped speech — clear ALL cooldown state completely
     speechOutputCooldownUntilRef.current = 0;
     ttsEndTimestampRef.current = 0;
+    // Set mobile state to idle (NOT cooldown) so restart is not blocked
+    mobileVoiceStateRef.current = 'idle';
     setIsSpeaking(false);
+    setSpeakingMessageId(null);
     setIsQuerying(false);
     setFiltersLocked(false);
     // Clean up any existing recognition before restarting
@@ -794,11 +796,26 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     lastSubmittedTranscriptRef.current = "";
     recognitionStartedRef.current = false;
     abortCountRef.current = 0;
+    mobileAccumulatedRef.current = '';
     if (conversationActiveRef.current) {
       setQuestion("");
-      scheduleListeningRestart(800);
+      setConversationState("idle");
+      // MANUAL INTERRUPT PATH: bypass scheduleListeningRestart entirely.
+      // Call startConversationListeningInternal directly after a short delay
+      // to let speechSynthesis.cancel() settle (same approach desktop uses).
+      vlog('stopConversationSpeaking:DIRECT_RESTART', 'scheduling direct restart in 800ms');
+      const restartToken = voiceGenTokenRef.current;
+      setTimeout(() => {
+        if (restartToken !== voiceGenTokenRef.current) {
+          vlog('stopConversationSpeaking:DIRECT_RESTART:STALE');
+          return;
+        }
+        if (!conversationActiveRef.current) return;
+        vlog('stopConversationSpeaking:DIRECT_RESTART:GO');
+        startConversationListeningInternal();
+      }, 800);
     }
-  }, [scheduleListeningRestart, markSpeechOutputCooldown, isSpeechOutputBlocked]);
+  }, [startConversationListeningInternal, vlog]);
 
   const handleConversationToggle = () => {
     if (isConversationMode) {
