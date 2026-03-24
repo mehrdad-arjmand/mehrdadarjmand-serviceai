@@ -437,20 +437,39 @@ Deno.serve(async (req) => {
     // Build project-scoped document ID set FIRST (before vector search)
     let projectDocIds: Set<string> | null = null
     let projectDocIdArray: string[] = []
+    let projectDocsWithNames: { id: string; filename: string }[] = []
     if (requestProjectId) {
       const { data: projectDocs, error: projError } = await supabase
         .from('documents')
-        .select('id')
+        .select('id, filename')
         .eq('project_id', requestProjectId)
 
       if (projError) {
         console.error('Error fetching project documents:', projError)
       } else {
-        projectDocIdArray = (projectDocs || []).map((d: any) => d.id)
+        projectDocsWithNames = (projectDocs || []).map((d: any) => ({ id: d.id, filename: d.filename }))
+        projectDocIdArray = projectDocsWithNames.map(d => d.id)
         projectDocIds = new Set(projectDocIdArray)
         console.log(`Project ${requestProjectId} has ${projectDocIds.size} documents`)
       }
     }
+
+    // ── Natural-language document inference ──
+    // If the user references a year/document name in the query, scope retrieval to those docs
+    let inferredDocIds: string[] | null = null
+    if (!filterDocumentIds?.length && projectDocsWithNames.length > 0) {
+      inferredDocIds = inferDocumentFromQuery(question, projectDocsWithNames)
+      if (inferredDocIds && inferredDocIds.length > 0) {
+        console.log(`Inferred ${inferredDocIds.length} document(s) from query: ${inferredDocIds.join(', ')}`)
+      }
+    }
+
+    // Effective document scope: explicit filter > inferred > all project docs
+    const effectiveDocIds = (filterDocumentIds && filterDocumentIds.length > 0) 
+      ? filterDocumentIds 
+      : (inferredDocIds && inferredDocIds.length > 0) 
+        ? inferredDocIds 
+        : projectDocIdArray
 
     // Perform vector similarity search
     const embeddingStr = `[${queryEmbedding.join(',')}]`
