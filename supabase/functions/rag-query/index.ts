@@ -646,11 +646,12 @@ Deno.serve(async (req) => {
     // If a specific document is selected and semantic+keyword retrieval is empty,
     // fall back to direct chunk retrieval so recently re-ingested docs remain answerable
     let retrievalChunks = combinedChunks
-    if (retrievalChunks.length === 0 && filterDocumentIds && filterDocumentIds.length > 0) {
+    if (retrievalChunks.length === 0 && (filterDocumentIds?.length || inferredDocIds?.length)) {
+      const fallbackDocIds = filterDocumentIds?.length ? filterDocumentIds : inferredDocIds!
       retrievalChunks = await fetchDocScopedFallbackChunks(
         supabase,
         question,
-        filterDocumentIds,
+        fallbackDocIds,
         accessibleDocIds,
         projectDocIds,
         equipmentType
@@ -658,8 +659,27 @@ Deno.serve(async (req) => {
       console.log(`Document-scoped fallback returned ${retrievalChunks.length} chunks`)
     }
 
-    // Re-rank chunks: prioritize substantive content over TOC/index entries
-    const rankedChunks = rerankChunks(retrievalChunks, question)
+    // ── Table-aware retrieval: detect list/count intent and fetch adjacent chunks ──
+    const tableIntent = detectTableIntent(question)
+    if (tableIntent && (inferredDocIds?.length || filterDocumentIds?.length)) {
+      const targetDocIds = filterDocumentIds?.length ? filterDocumentIds : inferredDocIds!
+      const adjacentChunks = await fetchAdjacentTableChunks(
+        supabase, retrievalChunks, targetDocIds, question
+      )
+      if (adjacentChunks.length > 0) {
+        const existingIds = new Set(retrievalChunks.map((c: any) => c.id))
+        for (const ac of adjacentChunks) {
+          if (!existingIds.has(ac.id)) {
+            retrievalChunks.push(ac)
+            existingIds.add(ac.id)
+          }
+        }
+        console.log(`Table-aware retrieval added ${adjacentChunks.length} adjacent chunks, total: ${retrievalChunks.length}`)
+      }
+    }
+
+    // Re-rank chunks: intent-aware ranking
+    const rankedChunks = rerankChunks(retrievalChunks, question, inferredDocIds || filterDocumentIds || null)
 
     // Blanket top_k = 20 for all queries
     const contextLimit = 20
