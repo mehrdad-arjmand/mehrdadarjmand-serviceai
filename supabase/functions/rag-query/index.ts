@@ -484,7 +484,7 @@ Deno.serve(async (req) => {
         'match_chunks_by_docs',
         {
           query_embedding: embeddingStr,
-          doc_ids: filterDocumentIds && filterDocumentIds.length > 0 ? filterDocumentIds : projectDocIdArray,
+          doc_ids: effectiveDocIds,
           match_threshold: 0.10,
           match_count: retrievalCount,
         }
