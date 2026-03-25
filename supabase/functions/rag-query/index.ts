@@ -12,27 +12,19 @@ interface ConversationMessage {
 
 interface RAGQueryRequest {
   question: string
-  // Project scoping
   projectId?: string
-  // Session-based conversation memory
   sessionId?: string
-  // Optional document filters
   documentType?: string
   uploadDate?: string
   filterSite?: string
   equipmentType?: string
   equipmentMake?: string
   equipmentModel?: string
-  // Document ID filter (from Documents multi-select)
   documentIds?: string[]
-  // Dynamic metadata filters (from project metadata fields)
   dynamicMetadata?: Record<string, string>
-  // Access role filter
   accessRole?: string
-  // Conversation mode
   history?: ConversationMessage[]
   isConversationMode?: boolean
-  // LLM model selection
   model?: string
 }
 
@@ -54,13 +46,11 @@ function isValidOptionalString(value: unknown, maxLength: number): boolean {
 function isValidDate(value: unknown): boolean {
   if (value === undefined || value === null) return true
   if (typeof value !== 'string') return false
-  // Basic ISO date format check (YYYY-MM-DD)
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
 }
 
 function isValidHistory(history: unknown): history is ConversationMessage[] {
   if (!Array.isArray(history)) return false
-  // Allow any length — we'll truncate later
   return history.every(item => 
     typeof item === 'object' && 
     item !== null &&
@@ -75,7 +65,6 @@ function sanitizeString(value: string | undefined | null): string | undefined {
   return value.trim().slice(0, MAX_FILTER_LENGTH)
 }
 
-// Sanitize query for LIKE patterns to prevent wildcard injection
 function sanitizeLikePattern(query: string): string {
   return query.replace(/[%_\\]/g, (char) => `\\${char}`)
 }
@@ -100,12 +89,8 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Verify the user's JWT token via direct API call (avoids session issues)
     const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: {
-        Authorization: authHeader,
-        apikey: supabaseAnonKey,
-      },
+      headers: { Authorization: authHeader, apikey: supabaseAnonKey },
     })
 
     if (!userRes.ok) {
@@ -128,10 +113,9 @@ Deno.serve(async (req) => {
 
     console.log(`RAG query from user: ${user.id}`)
 
-    // Use service role client for database operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Check permission: assistant.write required for querying
+    // Check permission
     const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
       p_tab: 'assistant',
       p_action: 'write',
@@ -154,7 +138,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Get the user's role to filter accessible documents
+    // Get the user's role
     const { data: userRoleData } = await supabase
       .from('user_roles')
       .select('role')
@@ -164,7 +148,7 @@ Deno.serve(async (req) => {
     const userRole = userRoleData?.role || 'demo'
     const isAdmin = userRole === 'admin'
 
-    // Get IDs of documents this user can access based on allowed_roles
+    // Get accessible doc IDs for non-admin
     let accessibleDocIds: Set<string> | null = null
     if (!isAdmin) {
       const { data: accessibleDocs, error: accessError } = await supabase
@@ -203,7 +187,6 @@ Deno.serve(async (req) => {
       throw new Error('Content-Type must be application/json')
     }
 
-    // Parse request body with error handling
     let body: unknown
     try {
       body = await req.json()
@@ -217,12 +200,10 @@ Deno.serve(async (req) => {
 
     const rawRequest = body as Record<string, unknown>
 
-    // Validate question (required)
     if (!isValidString(rawRequest.question, MAX_QUESTION_LENGTH)) {
       throw new Error(`Question must be a string with max ${MAX_QUESTION_LENGTH} characters`)
     }
 
-    // Validate optional filters
     if (!isValidOptionalString(rawRequest.documentType, MAX_FILTER_LENGTH)) {
       throw new Error(`documentType must be a string with max ${MAX_FILTER_LENGTH} characters`)
     }
@@ -242,22 +223,18 @@ Deno.serve(async (req) => {
       throw new Error(`equipmentModel must be a string with max ${MAX_FILTER_LENGTH} characters`)
     }
 
-    // Validate history if provided
     if (rawRequest.history !== undefined && !isValidHistory(rawRequest.history)) {
       throw new Error(`history must be an array of messages with valid role and content`)
     }
 
-    // Validate isConversationMode
     if (rawRequest.isConversationMode !== undefined && typeof rawRequest.isConversationMode !== 'boolean') {
       throw new Error('isConversationMode must be a boolean')
     }
 
-    // Validate projectId if provided
     if (rawRequest.projectId !== undefined && !isValidOptionalString(rawRequest.projectId, 100)) {
       throw new Error('projectId must be a valid string')
     }
 
-    // Validate documentIds if provided
     if (rawRequest.documentIds !== undefined) {
       if (!Array.isArray(rawRequest.documentIds) || rawRequest.documentIds.length > 100) {
         throw new Error('documentIds must be an array of at most 100 strings')
@@ -267,19 +244,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Validate dynamicMetadata if provided
     if (rawRequest.dynamicMetadata !== undefined) {
       if (typeof rawRequest.dynamicMetadata !== 'object' || rawRequest.dynamicMetadata === null || Array.isArray(rawRequest.dynamicMetadata)) {
         throw new Error('dynamicMetadata must be an object')
       }
     }
 
-    // Validate accessRole if provided
     if (rawRequest.accessRole !== undefined && !isValidOptionalString(rawRequest.accessRole, MAX_FILTER_LENGTH)) {
       throw new Error('accessRole must be a valid string')
     }
 
-    // Build validated request
     const validModels = ['google/gemini-2.5-flash-lite', 'google/gemini-3-flash-preview']
     const requestedModel = typeof rawRequest.model === 'string' && validModels.includes(rawRequest.model) 
       ? rawRequest.model 
@@ -321,15 +295,12 @@ Deno.serve(async (req) => {
       model: selectedModel
     } = request
 
-    // Load conversation history ONLY in conversation mode.
-    // This prevents stale prior answers from contaminating retrieval-grounded responses
-    // after documents are updated/re-indexed.
+    // Load conversation history
     let conversationHistory: ConversationMessage[] = []
     let sessionSummary: string | null = null
     
     if (isConversationMode && sessionId) {
       try {
-        // Load session summary
         const { data: sessionData } = await supabase
           .from('chat_sessions')
           .select('summary')
@@ -338,7 +309,6 @@ Deno.serve(async (req) => {
         
         sessionSummary = sessionData?.summary || null
 
-        // Load last 12 messages (6 turns) for sliding window
         const { data: dbMessages, error: msgError } = await supabase
           .from('chat_messages')
           .select('role, content')
@@ -355,7 +325,7 @@ Deno.serve(async (req) => {
         
         console.log(`Loaded ${conversationHistory.length} messages from session ${sessionId}, summary: ${sessionSummary ? 'yes' : 'no'}`)
         
-        // Generate summary if history is getting long (>20 messages total) and no summary exists
+        // Generate summary if history is getting long
         if (!sessionSummary) {
           const { count } = await supabase
             .from('chat_messages')
@@ -363,7 +333,6 @@ Deno.serve(async (req) => {
             .eq('session_id', sessionId)
           
           if (count && count > 20) {
-            // Get older messages for summarization (skip last 12 we already have)
             const { data: olderMessages } = await supabase
               .from('chat_messages')
               .select('role, content')
@@ -413,12 +382,25 @@ Deno.serve(async (req) => {
         console.error('Error loading session history:', e)
       }
     } else if (isConversationMode && history && history.length > 0) {
-      // Fallback: use client-sent history if no sessionId
       conversationHistory = history.slice(-12)
+    }
+
+    // ── STANDALONE QUERY REWRITE for follow-up questions ──
+    // If conversation history exists, rewrite the question into a standalone search query
+    let retrievalQuery = question
+    let wasRewritten = false
+    if (conversationHistory.length > 0 && isConversationMode) {
+      const rewritten = await rewriteFollowUpQuery(question, conversationHistory, sessionSummary)
+      if (rewritten && rewritten !== question) {
+        retrievalQuery = rewritten
+        wasRewritten = true
+        console.log(`Query rewritten for retrieval: "${question.slice(0, 60)}" → "${retrievalQuery.slice(0, 100)}"`)
+      }
     }
     
     console.log('RAG Query:', { 
       question: question.slice(0, 100), 
+      retrievalQuery: wasRewritten ? retrievalQuery.slice(0, 100) : '(same)',
       projectId: requestProjectId,
       sessionId,
       filters: { documentType, uploadDate, filterSite, equipmentType, equipmentMake, equipmentModel, documentIds: filterDocumentIds?.length, dynamicMetadata, accessRole },
@@ -426,15 +408,15 @@ Deno.serve(async (req) => {
       historyLength: conversationHistory.length
     })
 
-    // Get user's API tier for embedding key selection
+    // Get user's API tier
     const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
     const apiTier = userApiTier || 'free'
     console.log(`User API tier: ${apiTier}`)
 
-    // Generate embedding for the query using Lovable AI
-    const queryEmbedding = await generateEmbedding(question, apiTier)
+    // Generate embedding using the RETRIEVAL query (rewritten if follow-up)
+    const queryEmbedding = await generateEmbedding(retrievalQuery, apiTier)
 
-    // Build project-scoped document ID set FIRST (before vector search)
+    // Build project-scoped document ID set
     let projectDocIds: Set<string> | null = null
     let projectDocIdArray: string[] = []
     let projectDocsWithNames: { id: string; filename: string }[] = []
@@ -454,17 +436,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Natural-language document inference ──
-    // If the user references a year/document name in the query, scope retrieval to those docs
+    // ── Natural-language document inference — run against RETRIEVAL query ──
     let inferredDocIds: string[] | null = null
     if (!filterDocumentIds?.length && projectDocsWithNames.length > 0) {
-      inferredDocIds = inferDocumentFromQuery(question, projectDocsWithNames)
+      inferredDocIds = inferDocumentFromQuery(retrievalQuery, projectDocsWithNames)
       if (inferredDocIds && inferredDocIds.length > 0) {
         console.log(`Inferred ${inferredDocIds.length} document(s) from query: ${inferredDocIds.join(', ')}`)
       }
     }
 
-    // Effective document scope: explicit filter > inferred > all project docs
+    // Effective document scope
     const effectiveDocIds = (filterDocumentIds && filterDocumentIds.length > 0) 
       ? filterDocumentIds 
       : (inferredDocIds && inferredDocIds.length > 0) 
@@ -477,8 +458,6 @@ Deno.serve(async (req) => {
     let searchError: any = null
 
     if (requestProjectId && projectDocIdArray.length > 0) {
-      // Use project-scoped search to avoid cross-project contamination
-      // When specific documents are filtered, retrieve more chunks to allow exhaustive answers
       const retrievalCount = 200
       const { data, error } = await supabase.rpc(
         'match_chunks_by_docs',
@@ -493,7 +472,6 @@ Deno.serve(async (req) => {
       searchError = error
       console.log(`Project-scoped search found ${chunks.length} chunks`)
     } else {
-      // No project scope — use global search with user access control
       const { data, error } = await supabase.rpc(
         'match_chunks',
         {
@@ -517,17 +495,16 @@ Deno.serve(async (req) => {
 
     console.log(`Found ${chunks.length} semantic chunks`)
 
-    // Filter chunks by user's accessible documents (RBAC enforcement)
+    // Filter by access
     let accessFilteredChunks = chunks
     if (accessibleDocIds) {
       accessFilteredChunks = accessFilteredChunks.filter((chunk: any) => accessibleDocIds.has(chunk.document_id))
       console.log(`After access filter: ${accessFilteredChunks.length} chunks (from ${chunks.length})`)
     }
 
-    // Apply document filters if provided
     let filteredChunks = accessFilteredChunks
 
-    // Apply explicit document ID filter (from Documents multi-select)
+    // Apply explicit document ID filter
     if (filterDocumentIds && filterDocumentIds.length > 0) {
       const docIdSet = new Set(filterDocumentIds)
       filteredChunks = filteredChunks.filter((chunk: any) => docIdSet.has(chunk.document_id))
@@ -554,7 +531,6 @@ Deno.serve(async (req) => {
         )
       }
 
-      // Apply dynamic metadata and accessRole filters in-memory
       let filteredDocs = matchingDocs || []
       
       if (dynamicMetadata) {
@@ -579,10 +555,7 @@ Deno.serve(async (req) => {
             answer: 'No documents match the selected filters. Try broadening your filters or searching all documents.',
             sources: []
           }),
-          { 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200 
-          }
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
         )
       }
       
@@ -592,17 +565,16 @@ Deno.serve(async (req) => {
       console.log(`Filtered to ${filteredChunks.length} chunks from ${filteredDocs.length} matching documents`)
     }
 
-    // Apply equipment type filter on chunks (this field is on chunks table)
+    // Apply equipment type filter
     if (equipmentType) {
       filteredChunks = filteredChunks.filter((chunk: any) => chunk.equipment === equipmentType)
       console.log(`After equipment type filter: ${filteredChunks.length} chunks`)
     }
 
-    // Get matching document IDs for filters (to pass to keyword fallback)
+    // Get matching document IDs for keyword fallback
     let matchingDocIds: Set<string> | null = null
     if (documentType || uploadDate || filterSite || equipmentMake || equipmentModel || filterDocumentIds?.length || accessRole || (dynamicMetadata && Object.values(dynamicMetadata).some(v => v))) {
       if (filterDocumentIds && filterDocumentIds.length > 0) {
-        // If explicit document IDs, use those directly
         matchingDocIds = new Set(filterDocumentIds)
       } else {
         let docQuery = supabase.from('documents').select('id, metadata, allowed_roles')
@@ -632,25 +604,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Merge with aggressive keyword search - PASS FILTERS to ensure keyword fallback respects them
+    // Merge with keyword search — use RETRIEVAL query for better tokens
     const combinedChunks = await enrichWithKeywordFallback(
       supabase, 
-      question, 
+      retrievalQuery, 
       filteredChunks, 
       matchingDocIds,
       equipmentType,
       accessibleDocIds,
-      projectDocIds
+      projectDocIds,
+      inferredDocIds
     )
 
-    // If a specific document is selected and semantic+keyword retrieval is empty,
-    // fall back to direct chunk retrieval so recently re-ingested docs remain answerable
+    // Fallback for empty results
     let retrievalChunks = combinedChunks
     if (retrievalChunks.length === 0 && (filterDocumentIds?.length || inferredDocIds?.length)) {
       const fallbackDocIds = filterDocumentIds?.length ? filterDocumentIds : inferredDocIds!
       retrievalChunks = await fetchDocScopedFallbackChunks(
         supabase,
-        question,
+        retrievalQuery,
         fallbackDocIds,
         accessibleDocIds,
         projectDocIds,
@@ -660,11 +632,11 @@ Deno.serve(async (req) => {
     }
 
     // ── Table-aware retrieval: detect list/count intent and fetch adjacent chunks ──
-    const tableIntent = detectTableIntent(question)
+    const tableIntent = detectTableIntent(retrievalQuery)
     if (tableIntent && (inferredDocIds?.length || filterDocumentIds?.length)) {
       const targetDocIds = filterDocumentIds?.length ? filterDocumentIds : inferredDocIds!
       const adjacentChunks = await fetchAdjacentTableChunks(
-        supabase, retrievalChunks, targetDocIds, question
+        supabase, retrievalChunks, targetDocIds, retrievalQuery
       )
       if (adjacentChunks.length > 0) {
         const existingIds = new Set(retrievalChunks.map((c: any) => c.id))
@@ -678,29 +650,36 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Re-rank chunks: intent-aware ranking
-    const rankedChunks = rerankChunks(retrievalChunks, question, inferredDocIds || filterDocumentIds || null)
+    // Re-rank chunks
+    const rankedChunks = rerankChunks(retrievalChunks, retrievalQuery, inferredDocIds || filterDocumentIds || null)
 
-    // Blanket top_k = 20 for all queries
-    const contextLimit = 20
-    const topChunks = rankedChunks.slice(0, Math.min(rankedChunks.length, contextLimit))
-    console.log(`Context window: ${topChunks.length} chunks (blanket limit: ${contextLimit})`)
+    // ── Context window: use section-window for table queries, standard top-K otherwise ──
+    let topChunks: any[]
+    const useSectionWindow = tableIntent && (inferredDocIds?.length || filterDocumentIds?.length)
+    if (useSectionWindow) {
+      topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 40)
+      console.log(`Section-window mode: selected ${topChunks.length} contiguous chunks`)
+    } else {
+      const contextLimit = 20
+      topChunks = rankedChunks.slice(0, Math.min(rankedChunks.length, contextLimit))
+      console.log(`Standard mode: ${topChunks.length} top-ranked chunks`)
+    }
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
       chunk: c.chunk_index,
       score: c.finalScore?.toFixed(3),
-      isTOC: c.isTOC,
+      doc: c.document_id?.slice(0, 8),
       preview: c.text.slice(0, 80)
     })))
 
-    // Build context from retrieved chunks
+    // Build context
     const context = topChunks
       .map((chunk: any, idx: number) => 
         `[Source ${idx + 1}: ${chunk.filename || 'Unknown'} | Chunk ${chunk.chunk_index}]\n${chunk.text}`
       )
       .join('\n\n---\n\n') || 'No relevant context found.'
 
-    // Generate answer using Lovable AI (Gemini Flash)
+    // Generate answer
     const citationInstructions = `
 CITATION INSTRUCTIONS (MANDATORY):
 - You MUST cite every factual claim, measurement, procedure, or specific detail with its source using the format (Source N) immediately after the relevant sentence or phrase.
@@ -751,7 +730,7 @@ CRITICAL INSTRUCTIONS:
 - DATA AGGREGATION: When asked to list ALL items of a type (e.g., all SUV models, all prices), be thorough and include EVERY matching entry from ALL provided sources. Count them and confirm the total. If you find fewer than expected, explicitly state how many you found and from which sources.
 ${citationInstructions}`
 
-    // Build conversation context from DB-loaded history
+    // Build conversation context
     let conversationContext = ''
     if (sessionSummary) {
       conversationContext += `\n\nConversation summary so far:\n${sessionSummary}`
@@ -783,7 +762,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
       documentId: chunk.document_id || ''
     }))
 
-    // Eval uses only vector-retrieved chunks (rankedChunks up to 200)
+    // Eval uses rankedChunks up to 200
     const evalSlice = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
     const evalChunkTexts = evalSlice.map((c: any) => ({ id: c.id, text: c.text }))
     const topKEval = evalSlice.length
@@ -791,7 +770,6 @@ Provide a clear, concise answer based on the actual procedural content in the co
 
     const topK = topChunks.length
 
-    // retrieved_chunk_ids = only the actual top-K used for answer generation
     const logPayload = {
       user_id: user.id,
       query_text: question,
@@ -808,7 +786,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
       upstream_inference_cost: usage.upstream_inference_cost ?? 0,
     }
 
-    // Background: insert log then evaluate retrieval quality
+    // Background: insert log then evaluate
     const bgTask = (async () => {
       try {
         const { data: inserted, error: logError } = await supabase
@@ -824,14 +802,12 @@ Provide a clear, concise answer based on the actual procedural content in the co
 
         console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
 
-        // LLM-based retrieval evaluation
         await evaluateRetrievalBackground(supabase, inserted.id, question, evalChunkTexts, topK, topKEval)
       } catch (e) {
         console.error('Background eval error:', e)
       }
     })()
 
-    // Use EdgeRuntime.waitUntil if available, otherwise fire-and-forget
     if (typeof (globalThis as any).EdgeRuntime?.waitUntil === 'function') {
       (globalThis as any).EdgeRuntime.waitUntil(bgTask)
     }
@@ -844,48 +820,118 @@ Provide a clear, concise answer based on the actual procedural content in the co
         usage,
         execution_time_ms: executionTimeMs,
       }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200 
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (error) {
     console.error('Error processing RAG query:', error)
     return new Response(
       JSON.stringify({ error: 'An error occurred processing your request. Please try again.' }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500 
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     )
   }
 })
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
 const STOP_WORDS = new Set<string>([
   'the','and','for','with','that','this','from','have','what','when','where','which','will','would','could','should',
-  'about','your','into','over','under','after','before','while','there','here','such','than','then','tell','know'
+  'about','your','into','over','under','after','before','while','there','here','such','than','then','tell','know',
+  'look','does','like','also','just','very','some','many','much','more','most','been','were','they','them','their',
+  'these','those','only','other','same','each','every','both','either','neither','between','through','during',
+  'can','you','see','list','give','number','find','show','want','need','please','could','would','should',
+])
+
+// Known high-value short tokens (automotive makes, abbreviations, etc.)
+const SHORT_ENTITY_TOKENS = new Set<string>([
+  'bmw', 'kia', 'gmc', 'byd', 'mg', 'ev', 'suv', 'phev', 'hev', 'bev', 'ice',
+  'gv60', 'eq', 'id4', 'id.4', 'ex30', 'ex40', 'ex90', 'xc40', 'xc60', 'xc90',
+  'i4', 'i5', 'i7', 'ix', 'eq6', 'eq8', 'e6', 'c40', 'v60', 'v90', 's60', 's90',
+  'ram', 'vw', 'awd', 'fwd', 'rwd', '4wd', 'mpg', 'kwh', 'mph', 'hp', 'rpm',
 ])
 
 // Detect if a chunk looks like a table of contents entry
 function isTOCChunk(text: string): boolean {
-  // TOC patterns: lots of dots, page numbers, section numbers without content
   const dotPattern = /\.{4,}/g
   const dotMatches = text.match(dotPattern)
   const dotCount = dotMatches ? dotMatches.length : 0
   
-  // Count actual word content vs formatting
   const words = text.split(/\s+/).filter(w => w.length > 2 && !w.match(/^[\d.]+$/))
-  const contentRatio = words.length / (text.length / 10) // words per 10 chars
+  const contentRatio = words.length / (text.length / 10)
   
-  // TOC entries have lots of dots and low content ratio
   if (dotCount >= 3 && contentRatio < 2) return true
   
-  // Check for page number patterns like "... 88" or "...... 92"
   const pageNumPattern = /\.{3,}\s*\d{1,3}\s/g
   const pageNumMatches = text.match(pageNumPattern)
   if (pageNumMatches && pageNumMatches.length >= 2) return true
   
   return false
+}
+
+// ── Standalone query rewrite for follow-up questions ──
+async function rewriteFollowUpQuery(
+  question: string,
+  conversationHistory: ConversationMessage[],
+  sessionSummary: string | null
+): Promise<string | null> {
+  const apiKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!apiKey) return null
+
+  // Quick heuristic: if the question already has enough context, skip rewrite
+  const qLower = question.toLowerCase()
+  const hasYear = /\b(20[0-2]\d|19\d{2})\b/.test(qLower)
+  const hasDocument = /document|file|pdf|report/i.test(qLower)
+  const isLong = question.split(/\s+/).length > 15
+  if (hasYear && (hasDocument || isLong)) return null // Already self-contained
+
+  // Build compact history for the rewrite prompt
+  const recentHistory = conversationHistory.slice(-6)
+  const historyText = recentHistory
+    .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 300)}`)
+    .join('\n')
+
+  const summaryPart = sessionSummary ? `\nConversation context: ${sessionSummary.slice(0, 200)}` : ''
+
+  const prompt = `Given this conversation history and the latest user question, rewrite ONLY the user's latest question into a standalone search query that preserves all relevant context (document names, years, topics, entities).
+
+Rules:
+- Keep it concise (under 50 words)
+- Preserve specific entity names, years, document references from prior messages
+- If the user asks a follow-up about something discussed earlier, include that context
+- If the question is already self-contained, return it unchanged
+- Return ONLY the rewritten query, nothing else
+
+${summaryPart}
+Recent conversation:
+${historyText}
+
+Latest question: "${question}"
+
+Rewritten standalone query:`
+
+  try {
+    const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+        max_tokens: 100,
+      }),
+    })
+
+    if (!res.ok) return null
+    const data = await res.json()
+    const rewritten = data.choices?.[0]?.message?.content?.trim()
+    if (rewritten && rewritten.length > 5 && rewritten.length < 500) {
+      return rewritten
+    }
+  } catch (e) {
+    console.error('Query rewrite failed:', e)
+  }
+  return null
 }
 
 // Infer target documents from natural-language query
@@ -895,14 +941,12 @@ function inferDocumentFromQuery(
 ): string[] | null {
   const qLower = question.toLowerCase()
   
-  // Extract years from query (4-digit numbers that look like years)
   const yearMatches = qLower.match(/\b(20[0-2]\d|19\d{2})\b/g)
   
   // Check for explicit filename mentions
   const matchedByName: string[] = []
   for (const doc of projectDocs) {
     const fnLower = doc.filename.toLowerCase()
-    // Check if the filename (minus extension) is mentioned in the query
     const baseName = fnLower.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
     if (qLower.includes(baseName) || qLower.includes(fnLower)) {
       matchedByName.push(doc.id)
@@ -933,7 +977,9 @@ function detectTableIntent(question: string): boolean {
     /\bcount\b/, /\bhow many\b/, /\bnumber of\b/, /\blist\s+all\b/, /\btable\b/,
     /\ball\s+.*\bmodels?\b/, /\ball\s+.*\bvehicles?\b/, /\ball\s+.*\bentries?\b/,
     /\brows?\s+of\s+data\b/, /\btotal\s+rows?\b/, /\bhow\s+many\s+rows?\b/,
-    /\bevery\s+/, /\beach\s+/, /\bentire\s+/
+    /\bevery\s+/, /\beach\s+/, /\bentire\s+/,
+    /\blist\b.*\b(electric|ev|phev|hev)\b/, /\b(electric|ev|phev|hev)\b.*\blist\b/,
+    /\bcan you (list|show|give)\b/,
   ]
   return tablePatterns.some(p => p.test(qLower))
 }
@@ -946,16 +992,14 @@ async function fetchAdjacentTableChunks(
   question: string
 ): Promise<any[]> {
   try {
-    // Find the chunk_index range of existing chunks from target docs
     const targetChunks = existingChunks.filter((c: any) => targetDocIds.includes(c.document_id))
     if (targetChunks.length === 0) return []
     
-    // Get the range of chunk indices we already have
     const indices = targetChunks.map((c: any) => c.chunk_index)
-    const minIdx = Math.max(0, Math.min(...indices) - 5)
-    const maxIdx = Math.max(...indices) + 10
+    // Expand the window significantly for table queries
+    const minIdx = Math.max(0, Math.min(...indices) - 10)
+    const maxIdx = Math.max(...indices) + 20
     
-    // Fetch a window of adjacent chunks from the target documents
     const { data, error } = await supabase
       .from('chunks')
       .select('id, document_id, chunk_index, text, site, equipment, fault_code, documents!inner(filename)')
@@ -963,7 +1007,7 @@ async function fetchAdjacentTableChunks(
       .gte('chunk_index', minIdx)
       .lte('chunk_index', maxIdx)
       .order('chunk_index', { ascending: true })
-      .limit(60)
+      .limit(100)
     
     if (error || !data) return []
     
@@ -978,26 +1022,63 @@ async function fetchAdjacentTableChunks(
   }
 }
 
+// ── Section-window selection for table/list queries ──
+// Instead of taking top-K scattered chunks, find the best contiguous section in the target document
+function selectSectionWindow(rankedChunks: any[], targetDocIds: string[] | null, maxChunks: number): any[] {
+  if (!targetDocIds || targetDocIds.length === 0) {
+    return rankedChunks.slice(0, maxChunks)
+  }
+
+  const targetDocIdSet = new Set(targetDocIds)
+  
+  // Separate target-doc chunks from other chunks
+  const targetChunks = rankedChunks.filter((c: any) => targetDocIdSet.has(c.document_id))
+  const otherChunks = rankedChunks.filter((c: any) => !targetDocIdSet.has(c.document_id))
+
+  if (targetChunks.length === 0) {
+    return rankedChunks.slice(0, maxChunks)
+  }
+
+  // Sort target chunks by chunk_index for contiguity
+  const sorted = [...targetChunks].sort((a, b) => {
+    if (a.document_id !== b.document_id) return a.document_id.localeCompare(b.document_id)
+    return a.chunk_index - b.chunk_index
+  })
+
+  // Take all target-doc chunks (sorted by index for coherent reading), up to maxChunks
+  const selectedTarget = sorted.slice(0, maxChunks)
+  
+  // Fill remaining slots with highest-ranked other chunks
+  const remaining = maxChunks - selectedTarget.length
+  const selectedOther = remaining > 0 ? otherChunks.slice(0, remaining) : []
+
+  return [...selectedTarget, ...selectedOther]
+}
+
 // Re-rank chunks with intent-aware scoring
 function rerankChunks(chunks: any[], question: string, targetDocIds: string[] | null): any[] {
   const questionLower = question.toLowerCase()
-  const keywords = questionLower.match(/[a-z]{4,}/g) || []
+  // Include short tokens if they're known entities
+  const allTokens = questionLower.match(/[a-z0-9.]+/g) || []
+  const keywords = allTokens.filter(w => 
+    (w.length >= 4 && !STOP_WORDS.has(w)) || SHORT_ENTITY_TOKENS.has(w)
+  )
   
-  // Extract years from question for year-aware boosting
   const queryYears = questionLower.match(/\b(20[0-2]\d|19\d{2})\b/g) || []
   
   // Extract potential make/model keywords (capitalized words from original question)
   const makeModelTokens = question.match(/\b[A-Z][a-z]+\b/g)?.map(w => w.toLowerCase()) || []
+  // Also extract all-caps tokens like BMW, KIA, GMC
+  const allCapsTokens = question.match(/\b[A-Z]{2,6}\b/g)?.map(w => w.toLowerCase()) || []
+  const combinedMakeModel = [...new Set([...makeModelTokens, ...allCapsTokens])]
   
   return chunks.map(chunk => {
     const text = chunk.text.toLowerCase()
     const filename = (chunk.filename || '').toLowerCase()
     const isTOC = isTOCChunk(chunk.text)
     
-    // Base score from similarity
     let score = chunk.similarity || 0.3
     
-    // Heavily penalize TOC chunks
     if (isTOC) {
       score *= 0.3
     }
@@ -1005,9 +1086,9 @@ function rerankChunks(chunks: any[], question: string, targetDocIds: string[] | 
     // ── Document match boost/penalty ──
     if (targetDocIds && targetDocIds.length > 0) {
       if (targetDocIds.includes(chunk.document_id)) {
-        score += 0.2 // Strong boost for target document
+        score += 0.2
       } else {
-        score *= 0.4 // Strong penalty for wrong document
+        score *= 0.4
       }
     }
     
@@ -1019,9 +1100,9 @@ function rerankChunks(chunks: any[], question: string, targetDocIds: string[] | 
       if (hasWrongYear) score *= 0.5
     }
     
-    // ── Make/model keyword boost ──
-    const makeModelHits = makeModelTokens.filter(t => text.includes(t)).length
-    if (makeModelHits > 0) score += makeModelHits * 0.12
+    // ── Make/model keyword boost (including short tokens like BMW) ──
+    const makeModelHits = combinedMakeModel.filter(t => text.includes(t)).length
+    if (makeModelHits > 0) score += makeModelHits * 0.15
     
     // ── General keyword boost ──
     const keywordMatches = keywords.filter(kw => text.includes(kw)).length
@@ -1029,7 +1110,7 @@ function rerankChunks(chunks: any[], question: string, targetDocIds: string[] | 
       score += keywordMatches * 0.08
     }
     
-    // ── Procedural content boost (lower weight than before) ──
+    // ── Procedural content boost (lower weight) ──
     const proceduralIndicators = [
       'replace', 'check', 'inspect', 'warning', 'caution', 'procedure', 'step',
       'value', 'temperature', 'pressure'
@@ -1060,29 +1141,51 @@ async function enrichWithKeywordFallback(
   matchingDocIds: Set<string> | null,
   equipmentType?: string,
   accessibleDocIds?: Set<string> | null,
-  projectDocIds?: Set<string> | null
+  projectDocIds?: Set<string> | null,
+  inferredDocIds?: string[] | null
 ): Promise<any[]> {
   try {
-    const tokens = (question.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
-      (word) => word.length >= 4 && !STOP_WORDS.has(word)
+    // Extract ALL meaningful tokens, including short entity tokens
+    const allTokens = (question.toLowerCase().match(/[a-z0-9.]+/g) || [])
+    
+    // Keep tokens that are: long enough + not stop words, OR known short entities
+    const meaningfulTokens = allTokens.filter(word => 
+      (word.length >= 4 && !STOP_WORDS.has(word)) || 
+      (word.length >= 2 && SHORT_ENTITY_TOKENS.has(word))
     )
+    
+    // Also extract all-caps from original question (BMW, KIA, etc.)
+    const capsTokens = (question.match(/\b[A-Z]{2,6}\b/g) || []).map(w => w.toLowerCase())
+    
+    // Merge and deduplicate
+    const allMeaningful = [...new Set([...meaningfulTokens, ...capsTokens])]
 
-    if (tokens.length === 0) {
+    if (allMeaningful.length === 0) {
       return initialChunks
     }
 
-    // Use multiple keywords - sanitize each for LIKE patterns
-    const sortedTokens = [...tokens].sort((a, b) => b.length - a.length).slice(0, 4)
+    // Prioritize: short entity tokens first, then by length
+    const sortedTokens = [...allMeaningful].sort((a, b) => {
+      const aIsEntity = SHORT_ENTITY_TOKENS.has(a) ? 1 : 0
+      const bIsEntity = SHORT_ENTITY_TOKENS.has(b) ? 1 : 0
+      if (aIsEntity !== bIsEntity) return bIsEntity - aIsEntity
+      return b.length - a.length
+    }).slice(0, 6) // Allow up to 6 tokens now
+    
     const sanitizedTokens = sortedTokens.map(sanitizeLikePattern)
     console.log('Keyword fallback search using:', sanitizedTokens)
 
-    // Query chunks with document join to get filename
-    // Build the OR filter with sanitized tokens
+    // If we have inferred docs, scope keyword search to those docs too
     let query = supabase
       .from('chunks')
       .select('id, document_id, chunk_index, text, site, equipment, fault_code, documents!inner(filename)')
       .or(sanitizedTokens.map(kw => `text.ilike.%${kw}%`).join(','))
-      .limit(50)
+    
+    if (inferredDocIds && inferredDocIds.length > 0) {
+      query = query.in('document_id', inferredDocIds)
+    }
+    
+    query = query.limit(80) // Increased limit for broader coverage
 
     const { data, error } = await query
 
@@ -1094,24 +1197,26 @@ async function enrichWithKeywordFallback(
     const existingIds = new Set(initialChunks.map((c: any) => c.id))
     const mergedChunks = [...initialChunks]
 
-    for (const row of data || []) {
+    // Score keyword matches by how many query tokens they contain
+    const scoredResults = (data || []).map((row: any) => {
+      const textLower = row.text.toLowerCase()
+      const hits = sanitizedTokens.filter(t => textLower.includes(t)).length
+      return { row, hits }
+    }).sort((a, b) => b.hits - a.hits)
+
+    for (const { row, hits } of scoredResults) {
       if (existingIds.has(row.id)) continue
-      
-      // APPLY ACCESS CONTROL FILTER
       if (accessibleDocIds && !accessibleDocIds.has(row.document_id)) continue
-      
-      // APPLY PROJECT SCOPE FILTER
       if (projectDocIds && !projectDocIds.has(row.document_id)) continue
-      
-      // APPLY DOCUMENT FILTERS to keyword results
       if (matchingDocIds && !matchingDocIds.has(row.document_id)) continue
-      
-      // APPLY EQUIPMENT TYPE FILTER
       if (equipmentType && row.equipment !== equipmentType) continue
+      
+      // Score based on number of keyword hits
+      const similarity = Math.min(0.55, 0.3 + hits * 0.08)
       
       mergedChunks.push({
         ...row,
-        similarity: 0.4, // Moderate similarity for keyword matches
+        similarity,
         filename: row.documents?.filename ?? 'Unknown',
       })
     }
@@ -1135,8 +1240,11 @@ async function fetchDocScopedFallbackChunks(
 ): Promise<any[]> {
   try {
     const broadIntent = /(summar|overview|task|action|todo|list)/i.test(question)
-    const tokens = (question.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
-      (word) => word.length >= 4 && !STOP_WORDS.has(word)
+    // Use improved tokenization with short entity support
+    const allTokens = (question.toLowerCase().match(/[a-z0-9.]+/g) || [])
+    const tokens = allTokens.filter(word => 
+      (word.length >= 4 && !STOP_WORDS.has(word)) || 
+      (word.length >= 2 && SHORT_ENTITY_TOKENS.has(word))
     )
 
     const { data, error } = await supabase
@@ -1180,7 +1288,7 @@ async function fetchDocScopedFallbackChunks(
   }
 }
 
-// Generate embedding using Google's Gemini Embedding API
+// Generate embedding
 async function generateEmbedding(text: string, apiTier: string = 'free'): Promise<number[]> {
   const apiKey = apiTier === 'paid'
     ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
@@ -1289,7 +1397,6 @@ Is this chunk relevant to answering the query?`
     const data = await res.json()
     const text = data.choices?.[0]?.message?.content?.trim() ?? ''
 
-    // Strip markdown code fences if present
     const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
 
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
@@ -1302,7 +1409,6 @@ Is this chunk relevant to answering the query?`
       }
     }
 
-    // Fallback: check for yes/true keywords in plain text
     const lower = cleaned.toLowerCase()
     if (lower.includes('"relevant": true') || lower.includes('"relevant":true')) {
       return { relevant: true, reasoning: 'Parsed from text fallback' }
