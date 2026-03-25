@@ -1,160 +1,141 @@
 
-Goal: fix the two real regressions instead of tuning around them:
-1) retrieval is still answering from the wrong chunks
-2) mobile mute/restart still diverges from desktop behavior
+Goal: fix the two remaining real issues:
+1) retrieval still misses obvious exact matches like BMW
+2) mobile dictation is functional but noticeably slower/clunkier than desktop
 
 What I found
 
-Do I know what the issue is? Yes.
+1. The current “keyword search” is not BM25 or TF-IDF.
+- It is a simple `ILIKE` substring fallback in `enrichWithKeywordFallback()`.
+- It only keeps up to 4 tokens and only tokens with length >= 4.
+- That means `BMW` is dropped completely because it is 3 letters.
+- This is the clearest reason the BMW follow-up is failing.
 
-1. The “200 chunks” change only affected evaluation, not the answer context.
-- In `supabase/functions/rag-query/index.ts`, `retrievalCount = 200` and `top_k_eval = 200` are active.
-- But the answer is still generated from `topChunks = rankedChunks.slice(0, 20)`.
-- Your logs confirm this: `top_k = 20`, `top_k_eval = 200`, `retrieved_ids_count = 20`.
-- So the assistant still only sees 20 chunks when answering. The extra 180 are judge-only.
+2. Follow-up retrieval is using the raw follow-up question, not a rewritten standalone search query.
+- The answer prompt gets conversation history, but retrieval does not.
+- So a query like “do you see BMW in the list” loses the prior “2023 all-electric vehicles” scope during search.
+- That is why the system can answer against the wrong retrieval set even when the chat context is correct.
 
-2. Natural-language document scoping is missing.
-- The query “look at the 2023 document…” does not become `filterDocumentIds`.
-- So search still runs across all project documents.
-- The database confirms the bad citations are coming from `model-year-2021-vehicles.pdf`, `model-year-2025-vehicles.pdf`, and `model-year-2023-vehicles.pdf` together.
-- That is why Volvo/Volkswagen from the 2023 EV table can be missed while other years leak in.
+3. Table retrieval is still being squeezed by the final answer context.
+- The system may retrieve 53 relevant chunks and add adjacent chunks, but the final answer still only sees `topChunks.slice(0, 20)`.
+- For table enumeration/counting tasks, that 20-chunk cap is too aggressive unless the selected chunks are made contiguous and section-specific.
 
-3. The reranker is optimized for manuals/procedures, not tabular year-specific queries.
-- `rerankChunks()` boosts procedural terms like `replace`, `inspect`, `warning`, `step`, `pressure`.
-- It does not strongly reward:
-  - requested year/document match
-  - requested table/section match
-  - chunk continuity inside one table
-  - exact make/model keyword hits
-  - penalties for wrong year/wrong section
-- For this use case, that ranking logic is fundamentally wrong.
-
-4. The current confusion-matrix row is not proving answer quality.
-- Recent rows show `top_k_eval = 200`, `total_relevant_chunks = 76/77`, but only `relevant_in_top_k = 10/12`.
-- That means the evaluator is seeing many relevant chunks in the candidate pool, but the answer context still excludes most of them.
-- So the bug is retrieval-to-context selection, not ingestion.
-
-5. The mobile mute path still has mobile-only blockers that desktop does not rely on.
-- `stopConversationSpeaking()` now clears cooldown refs, which was good.
-- But restart still goes through `scheduleListeningRestart()` plus:
-  - `isSpeechOutputBlocked()`
-  - mobile state gating
-  - async `speechSynthesis.cancel()` settling
-- On Android Chrome, that is still fragile. Desktop succeeds because its restart path is effectively less constrained.
+4. Mobile voice is now restarting correctly, but desktop/mobile dictation still uses different effective behavior.
+- Desktop benefits from `continuous=true`.
+- Mobile still relies on short recognition sessions plus restart loops.
+- The clunky feel is likely coming from timing/state differences, not from the mute fix anymore.
 
 Implementation plan
 
-A. Fix retrieval the right way in `supabase/functions/rag-query/index.ts`
-1. Add query-time document inference before vector search.
-- When the user names a year/document in natural language, infer the target document from project docs.
-- Examples:
-  - “2023 document” → `model-year-2023-vehicles.pdf`
-  - exact filename mention → direct match
-- If one document is confidently inferred, treat it as an implicit document filter.
+A. Fix retrieval for exact-match follow-ups in `supabase/functions/rag-query/index.ts`
+1. Add a retrieval-only “standalone query rewrite” step.
+- Rewrite follow-up questions into a short standalone search query using recent conversation context.
+- Example:
+  - “do you see BMW in the list”
+  - becomes
+  - “In the 2023 all-electric vehicles list, is BMW present?”
+- Use that rewritten query for:
+  - document inference
+  - semantic embedding
+  - keyword fallback
+- Keep the original user question for the final answer prompt.
 
-2. Scope both semantic and keyword retrieval to that inferred document.
-- Use the inferred doc ID for:
-  - `match_chunks_by_docs`
-  - `enrichWithKeywordFallback`
-  - any fallback retrieval
-- This prevents 2021/2025 chunks from entering the candidate pool for a 2023-only request.
+2. Replace the weak keyword fallback with a better lexical retrieval path.
+- Keep substring search as a backup, but improve tokenization:
+  - allow 2–3 letter high-value tokens like `bmw`, `ev`, `gv60`
+  - prioritize repeated exact terms
+  - prefer tokens from rewritten standalone query over filler words
+- Add exact-match boosts for:
+  - make/model names
+  - year terms
+  - document-title terms
+  - section header terms
+- If feasible within the current backend shape, add a proper weighted lexical score instead of flat `similarity: 0.4`.
 
-3. Add a table-aware retrieval mode for document-scoped analytical questions.
-- Detect intents like: `count`, `list all`, `number of rows`, `table`, `models`, `all-electric vehicles`.
-- For those queries, do not rely only on semantic ranking.
-- Retrieve the matching document’s relevant section plus adjacent chunk windows by `chunk_index`, so a full table can be assembled across continuation chunks.
+3. Make document scoping conversation-aware.
+- Run document inference against the rewritten standalone query, not just the raw follow-up.
+- This preserves “2023 document” scope across multi-turn conversation even when the follow-up does not repeat the year.
 
-4. Replace the current generic reranker with an intent-aware reranker.
-- Strong boost for:
-  - exact year match
-  - exact document match
-  - section/table heading match (`All-Electric Vehicles`)
-  - make/model token hits (`Volkswagen`, `Volvo`)
-  - nearby continuation chunks from the same section
-- Strong penalty for:
-  - wrong year
-  - wrong section (`PHEV`, `HEV`) when the question says EV
-  - generic “related” chunks from other documents
+4. Make table/list queries use section continuity, not just top-ranked fragments.
+- For count/list/model questions, group chunks into contiguous windows within the inferred document.
+- Prefer a dense contiguous section containing EV rows over isolated high-similarity fragments.
+- Then build the answer context from the best section window rather than arbitrary top 20 chunks.
 
-5. Keep `top_k_eval = 200`, but separate evaluation scope from answer scope more explicitly.
-- Answer context stays controlled and relevant.
-- Judge still evaluates up to 200 candidates.
-- Add logging so we can see:
-  - inferred target doc
-  - answer-scope chunk IDs
-  - eval-scope chunk IDs
-  - whether table-mode was activated
+5. Add better retrieval diagnostics to logs.
+- Log:
+  - original question
+  - rewritten retrieval query
+  - inferred document ids
+  - keyword tokens actually used
+  - whether a 3-letter exact token like BMW was retained
+  - whether table-window mode was used
 
-B. Fix the misleading evaluation signals
-1. Make evaluation document-aware when the query is document-specific.
-- If the query is clearly about one document, only evaluate candidates from that document.
-- This stops `total_relevant_chunks` from being inflated by nearby-but-wrong years.
+B. Fix evaluation so the confusion matrix matches the real retrieval task
+1. Evaluate using the rewritten/document-scoped query when the query is a follow-up.
+- This prevents the eval from judging the wrong universe for multi-turn follow-up questions.
 
-2. Add retrieval diagnostics to logs.
-- Persist:
-  - inferred document ID(s)
-  - rerank reason summary
-  - count of chunks from the target doc vs other docs
-- This gives a direct audit trail when answers are wrong.
+2. Add per-row retrieval metadata for debugging.
+- Persist enough info to explain why TP is low:
+  - inferred doc count
+  - target doc hit count in top-K
+  - lexical-hit count in top-K
+  - section-window mode on/off
 
-C. Fix mobile mute/restart by matching desktop behavior, not tuning around it
+C. Make mobile dictation behavior match desktop more closely
 Files:
 - `src/components/TechnicianChat.tsx`
-- `src/components/RepositoryCard.tsx` if shared voice/dictation helpers need parity
+- `src/components/RepositoryCard.tsx`
 
-1. Create a dedicated “manual interrupt” restart path.
-- When the user presses mute during assistant speech:
-  - cancel TTS
-  - fully tear down recognition
-  - bypass mobile cooldown/state blockers for that one path
-  - restart listening directly after the same settled delay desktop uses
+1. Extract shared speech-recognition timing/config.
+- Put the desktop/mobile recognition settings behind shared helpers/constants so both flows stop drifting.
+- Use the same restart timings, transcript accumulation rules, and watchdog strategy everywhere.
 
-2. Remove mobile-only blockers from explicit user interrupt flow.
-- Keep protection for automatic restarts after TTS completion.
-- But for manual mute, do not re-check the long speech-block path that is meant for echo prevention.
-- User interruption should be treated as “restart now,” not “wait for mobile cooldown logic.”
+2. Reduce the perceived lag on mobile text rendering.
+- Keep the Android-safe recognition mode, but tune for earlier visible updates:
+  - faster restart after `onend`
+  - faster restart after `no-speech`
+  - avoid any unnecessary reset of accumulated transcript between short sessions
+  - tighten the silence/submit thresholds where safe
 
-3. Unify desktop and mobile restart logic into one shared helper.
-- Right now the same feature is split by mobile guards.
-- I would consolidate:
-  - TTS stop
-  - recognition teardown
-  - pending timer cleanup
-  - restart trigger
-- Then keep only the minimum mobile-specific behavior required by Android Chrome.
+3. Align conversation mode and plain dictation mode.
+- The same mobile speech parameters should drive:
+  - conversation listening
+  - text dictation
+  - repository/edit dictation
+- This avoids the current situation where one mobile path feels smooth and another feels delayed.
 
-4. Keep instrumentation on the manual mute path.
+4. Add debug logs for speech timing.
 - Log:
-  - user mute clicked
-  - TTS cancel complete
-  - restart requested
-  - restart blocked reason
-  - recognition started
-- That gives a hard proof whether the restart is being blocked by synth state, token state, or mobile state.
+  - recognition start
+  - first interim token time
+  - final token time
+  - restart delay
+  - gap between sessions
+- That will let us compare mobile vs desktop directly and remove guesswork.
 
 Files to update
 
 1. `supabase/functions/rag-query/index.ts`
-- add natural-language document inference
-- apply inferred doc scoping to semantic + keyword + fallback retrieval
-- add table-aware retrieval mode
-- replace procedural reranking with intent-aware ranking
-- improve debug logging
+- add standalone retrieval-query rewrite
+- improve keyword token selection to keep short exact entity tokens like BMW
+- apply document inference to rewritten query
+- switch table/list retrieval to contiguous section-window selection
+- improve retrieval diagnostics
 
-2. `src/components/TechnicianChat.tsx`
-- add dedicated manual-interrupt restart path
-- remove mobile-only blockers from explicit mute restart
-- unify desktop/mobile restart sequence
+2. `supabase/functions/run-eval/index.ts`
+- align eval inputs with rewritten/document-scoped retrieval behavior
+- add retrieval diagnostics to analytics payload if needed
 
-3. `src/components/RepositoryCard.tsx`
-- align dictation restart behavior with the same shared mobile/desktop rules if needed for parity and regression prevention
+3. `src/components/TechnicianChat.tsx`
+- unify mobile/desktop speech timing and transcript accumulation behavior
+- reduce mobile perceived typing lag
+
+4. `src/components/RepositoryCard.tsx`
+- apply the same shared speech timing/config so repository/edit dictation behaves like desktop too
 
 Expected outcome
 
-1. A question like:
-- “look at the 2023 document… count rows in the all-electric vehicles table… list Volkswagen and Volvo”
-will search only the 2023 vehicle document, assemble the EV table across continuation chunks, and stop leaking 2021/2025 chunks.
-
-2. The answer context will finally reflect the relevant document/table instead of just a generic top-20 semantic slice.
-
-3. Mobile mute in conversation mode will restart the mic using the same effective flow as desktop, instead of being trapped behind mobile-only cooldown/state checks.
+1. A follow-up like “Do you see BMW?” will retain the 2023 EV-table scope during retrieval.
+2. BMW will no longer be dropped from keyword matching just because it is a 3-letter token.
+3. List/count questions will pull a coherent EV table section instead of scattered fragments.
+4. Mobile dictation will feel much closer to desktop in how quickly words appear on screen.
