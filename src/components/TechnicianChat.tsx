@@ -758,8 +758,8 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     recognition.onend = () => {
       recognitionRef.current = null;
       if (!dictationActiveRef.current) { setIsDictating(false); return; }
-      // Auto-restart for seamless experience (faster on mobile since each session is short)
-      setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, isMobileDevice ? 100 : 200);
+      // Auto-restart for seamless experience — fastest possible on mobile
+      setTimeout(() => { if (dictationActiveRef.current) startDictation(); }, isMobileDevice ? 30 : 200);
     };
     recognition.start();
   }, [toast, isMobileDevice]);

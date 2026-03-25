@@ -623,8 +623,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     recognition.onend = () => {
       dictateRecognitionRef.current = null;
       if (isMobileDevice && dictateActiveRef.current) {
-        // Auto-restart for seamless mobile experience
-        setTimeout(() => startDictation(), 50);
+        // Auto-restart for seamless mobile experience — fastest possible
+        setTimeout(() => startDictation(), 20);
         return;
       }
       setIsDictating(false);
