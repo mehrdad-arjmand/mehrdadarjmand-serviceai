@@ -712,6 +712,7 @@ CRITICAL RETRIEVAL AND ANALYTICAL INSTRUCTIONS:
 - Always mention safety warnings when relevant.
 - ANALYTICAL TASKS: When the user asks you to calculate, compare, sort, rank, divide, multiply, average, or perform any mathematical operation on data from the documents, you MUST perform those calculations accurately. Extract the relevant numbers from the sources, show your work, and present the results clearly. Do NOT refuse to perform calculations — you have all the data in the provided context.
 - DATA AGGREGATION: When asked to list all items, count entries, summarize across categories, or compile data from multiple sources, be thorough and include ALL matching entries from the provided context, not just a subset.
+- MATHEMATICAL ACCURACY: When performing summation, counting, or arithmetic, you MUST enumerate each item explicitly, then add them up step by step. Do NOT estimate or approximate. If you are summing a list of numbers, write out each number and compute the total carefully. Double-check your arithmetic before presenting the final answer.
 ${citationInstructions}`
       : `You are a field technician assistant for industrial energy systems. 
 
