@@ -657,7 +657,7 @@ Deno.serve(async (req) => {
     let topChunks: any[]
     const useSectionWindow = tableIntent && (inferredDocIds?.length || filterDocumentIds?.length)
     if (useSectionWindow) {
-      topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 40)
+      topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 50)
       console.log(`Section-window mode: selected ${topChunks.length} contiguous chunks`)
     } else {
       const contextLimit = 20
