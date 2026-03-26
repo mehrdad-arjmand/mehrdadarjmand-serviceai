@@ -171,9 +171,8 @@ const QueryAnalytics = () => {
         .select('query_text, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
         .not('evaluated_at', 'is', null)
         .not('total_relevant_chunks', 'is', null)
-        .not('first_relevant_rank', 'is', null)
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(500);
       
       if (error || !logs || logs.length === 0) return;
 
