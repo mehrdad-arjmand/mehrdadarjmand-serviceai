@@ -657,7 +657,7 @@ Deno.serve(async (req) => {
     let topChunks: any[]
     const useSectionWindow = tableIntent && (inferredDocIds?.length || filterDocumentIds?.length)
     if (useSectionWindow) {
-      topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 40)
+      topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 50)
       console.log(`Section-window mode: selected ${topChunks.length} contiguous chunks`)
     } else {
       const contextLimit = 20
@@ -712,6 +712,7 @@ CRITICAL RETRIEVAL AND ANALYTICAL INSTRUCTIONS:
 - Always mention safety warnings when relevant.
 - ANALYTICAL TASKS: When the user asks you to calculate, compare, sort, rank, divide, multiply, average, or perform any mathematical operation on data from the documents, you MUST perform those calculations accurately. Extract the relevant numbers from the sources, show your work, and present the results clearly. Do NOT refuse to perform calculations — you have all the data in the provided context.
 - DATA AGGREGATION: When asked to list all items, count entries, summarize across categories, or compile data from multiple sources, be thorough and include ALL matching entries from the provided context, not just a subset.
+- MATHEMATICAL ACCURACY: When performing summation, counting, or arithmetic, you MUST enumerate each item explicitly, then add them up step by step. Do NOT estimate or approximate. If you are summing a list of numbers, write out each number and compute the total carefully. Double-check your arithmetic before presenting the final answer.
 ${citationInstructions}`
       : `You are a field technician assistant for industrial energy systems. 
 
@@ -728,6 +729,7 @@ CRITICAL INSTRUCTIONS:
 - Always prioritize safety - mention safety warnings when relevant.
 - ANALYTICAL TASKS: When the user asks you to calculate, compare, sort, rank, divide, multiply, average, or perform any mathematical operation on data from the documents, you MUST perform those calculations accurately. Extract the relevant numbers from the sources, show your work step by step, and present the results in a clear table or list format. Do NOT refuse or say you cannot calculate — you have all the data in the provided context.
 - DATA AGGREGATION: When asked to list ALL items of a type (e.g., all SUV models, all prices), be thorough and include EVERY matching entry from ALL provided sources. Count them and confirm the total. If you find fewer than expected, explicitly state how many you found and from which sources.
+- MATHEMATICAL ACCURACY: When performing summation, counting, or arithmetic, you MUST enumerate each item explicitly, then add them up step by step. Do NOT estimate or approximate. If you are summing a list of numbers, write out each number and compute the total carefully. Double-check your arithmetic before presenting the final answer.
 ${citationInstructions}`
 
     // Build conversation context
@@ -1331,7 +1333,8 @@ async function generateAnswer(systemPrompt: string, userPrompt: string, model: s
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      temperature: 0.3
+      temperature: 0.3,
+      max_tokens: 8192
     })
   })
 
