@@ -2,6 +2,12 @@
  * TTS Utilities - Voice selection and text processing for natural speech
  */
 
+type VoiceSelection = {
+  voice: SpeechSynthesisVoice | null;
+  score: number;
+  label: string;
+};
+
 // Clean markdown formatting from text for natural TTS
 export function renderAnswerForSpeech(markdown: string): string {
   let text = markdown;
@@ -51,12 +57,24 @@ export function renderAnswerForSpeech(markdown: string): string {
 
 // Select the best available voice for natural speech
 export function selectBestVoice(): SpeechSynthesisVoice | null {
+  const selection = getBestVoiceSelection();
+  if (selection.voice) {
+    console.log(`[TTS] ${selection.label}: "${selection.voice.name}" (${selection.voice.lang})`);
+  } else {
+    console.log('[TTS] No speech synthesis voice available');
+  }
+  return selection.voice;
+}
+
+function getBestVoiceSelection(): VoiceSelection {
   if (!('speechSynthesis' in window)) {
-    return null;
+    return { voice: null, score: Number.POSITIVE_INFINITY, label: 'TTS unavailable' };
   }
   
   const voices = window.speechSynthesis.getVoices();
-  if (voices.length === 0) return null;
+  if (voices.length === 0) {
+    return { voice: null, score: Number.POSITIVE_INFINITY, label: 'Waiting for voice list' };
+  }
   
   // Priority list of voice name patterns (natural, human-like voices first)
   // Same order on all platforms for consistent voice experience
@@ -93,27 +111,102 @@ export function selectBestVoice(): SpeechSynthesisVoice | null {
   for (const pattern of preferredPatterns) {
     const match = englishVoices.find(v => pattern.test(v.name));
     if (match) {
-      console.log(`[TTS] Selected voice: "${match.name}" (${match.lang})`);
-      return match;
+      return {
+        voice: match,
+        score: 10,
+        label: 'Selected preferred voice',
+      };
     }
   }
   
   // Fallback: prefer non-local voices (often higher quality)
   const remoteVoice = englishVoices.find(v => !v.localService);
   if (remoteVoice) {
-    console.log(`[TTS] Using remote voice: "${remoteVoice.name}" (${remoteVoice.lang})`);
-    return remoteVoice;
+    return {
+      voice: remoteVoice,
+      score: 40,
+      label: 'Using remote voice fallback',
+    };
   }
   
   // Last resort: first English voice
   if (englishVoices.length > 0) {
-    console.log(`[TTS] Fallback voice: "${englishVoices[0].name}" (${englishVoices[0].lang})`);
-    return englishVoices[0];
+    return {
+      voice: englishVoices[0],
+      score: 80,
+      label: 'Using English voice fallback',
+    };
   }
   
   // Absolute fallback
-  console.log(`[TTS] Using default voice: "${voices[0]?.name}"`);
-  return voices[0] || null;
+  return {
+    voice: voices[0] || null,
+    score: 120,
+    label: 'Using default voice fallback',
+  };
+}
+
+export async function resolveBestVoice(options?: {
+  timeoutMs?: number;
+  preferredScoreThreshold?: number;
+}): Promise<SpeechSynthesisVoice | null> {
+  if (!('speechSynthesis' in window)) return null;
+
+  const timeoutMs = options?.timeoutMs ?? 1500;
+  const preferredScoreThreshold = options?.preferredScoreThreshold ?? 40;
+  const initial = getBestVoiceSelection();
+
+  if (initial.voice && initial.score <= preferredScoreThreshold) {
+    console.log(`[TTS] ${initial.label}: "${initial.voice.name}" (${initial.voice.lang})`);
+    return initial.voice;
+  }
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    let latest = initial;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      settled = true;
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
+      if (typeof window.speechSynthesis.removeEventListener === 'function') {
+        window.speechSynthesis.removeEventListener('voiceschanged', evaluateVoices);
+      } else if (window.speechSynthesis.onvoiceschanged === evaluateVoices) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
+    };
+
+    const finish = (selection: VoiceSelection) => {
+      cleanup();
+      if (selection.voice) {
+        console.log(`[TTS] ${selection.label}: "${selection.voice.name}" (${selection.voice.lang})`);
+      } else {
+        console.log('[TTS] No speech synthesis voice available after waiting');
+      }
+      resolve(selection.voice);
+    };
+
+    const evaluateVoices = () => {
+      if (settled) return;
+      const selection = getBestVoiceSelection();
+      if (selection.voice) latest = selection;
+      if (selection.voice && selection.score <= preferredScoreThreshold) {
+        finish(selection);
+      }
+    };
+
+    if (typeof window.speechSynthesis.addEventListener === 'function') {
+      window.speechSynthesis.addEventListener('voiceschanged', evaluateVoices);
+    } else {
+      window.speechSynthesis.onvoiceschanged = evaluateVoices;
+    }
+
+    intervalId = setInterval(evaluateVoices, 150);
+    timeoutId = setTimeout(() => finish(latest), timeoutMs);
+    evaluateVoices();
+  });
 }
 
 // Create and configure an utterance with optimal settings
@@ -130,6 +223,7 @@ export function createUtterance(
   
   if (voice) {
     utterance.voice = voice;
+    utterance.lang = voice.lang;
   }
   
   // Natural delivery settings — slightly slower with warm pitch
