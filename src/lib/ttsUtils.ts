@@ -59,19 +59,8 @@ export function selectBestVoice(): SpeechSynthesisVoice | null {
   if (voices.length === 0) return null;
   
   // Priority list of voice name patterns (natural, human-like voices first)
-  // Detect Android for platform-specific voice preferences
-  const isAndroid = /android/i.test(navigator.userAgent);
-  
+  // Same order on all platforms for consistent voice experience
   const preferredPatterns = [
-    // Android-specific high-quality voices (network > local)
-    ...(isAndroid ? [
-      /en-us-x-iom-network/i,         // Android high-quality US English network
-      /en-us-x-iol-network/i,         // Android high-quality US English network alt
-      /en-gb-x-gba-network/i,         // Android high-quality UK English network
-      /en-us-x-iom-local/i,           // Android high-quality US English local
-      /en-us-x-iol-local/i,           // Android high-quality US English local alt
-      /en-gb-x-gba-local/i,           // Android high-quality UK English local
-    ] : []),
     /google.*uk.*english.*female/i,   // Google UK English Female - very natural
     /google.*us.*english.*female/i,   // Google US English Female
     /google.*us.*english/i,
