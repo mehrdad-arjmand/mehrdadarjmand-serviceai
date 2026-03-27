@@ -187,29 +187,24 @@ Deno.serve(async (req) => {
         return new Response('No data', { status: 200, headers: { ...corsHeaders, 'Content-Type': 'text/plain' } })
       }
 
-      // Match exact column order as shown in Cloud table view
+      // CSV columns: use summary columns instead of raw JSON blobs
+      // (citations_json and relevance_labels are huge JSON that break CSV in spreadsheets)
       const columns = [
         'id', 'created_at', 'user_id', 'query_text',
-        'retrieved_chunk_ids', 'retrieved_similarities',
-        'response_text', 'citations_json',
+        'response_text',
         'input_tokens', 'output_tokens', 'total_tokens',
         'execution_time_ms', 'top_k', 'top_k_eval', 'upstream_inference_cost',
         'total_relevant_chunks', 'relevant_in_top_k',
         'precision_at_k', 'recall_at_k', 'hit_rate_at_k',
-        'first_relevant_rank', 'relevance_labels',
+        'first_relevant_rank',
         'evaluated_at', 'eval_model',
+        'num_retrieved_chunks', 'num_citations', 'num_relevant_labels',
       ]
 
       const escapeCsvField = (val: unknown): string => {
         if (val === null || val === undefined) return ''
-        let str: string
-        if (typeof val === 'object') {
-          str = JSON.stringify(val)
-        } else {
-          str = String(val)
-        }
-        // Replace newlines with spaces so Excel doesn't split rows
-        str = str.replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\r/g, ' ')
+        const str = String(val)
+          .replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\r/g, ' ')
         // Always quote fields to avoid delimiter confusion
         return `"${str.replace(/"/g, '""')}"`
       }
@@ -218,7 +213,23 @@ Deno.serve(async (req) => {
       const bom = '\uFEFF'
       const csvRows = [columns.join(',')]
       for (const log of logs) {
-        const row = columns.map(col => escapeCsvField((log as any)[col]))
+        const rec: Record<string, unknown> = {}
+        for (const col of columns) {
+          if (col === 'num_retrieved_chunks') {
+            rec[col] = Array.isArray((log as any).retrieved_chunk_ids) ? (log as any).retrieved_chunk_ids.length : 0
+          } else if (col === 'num_citations') {
+            rec[col] = Array.isArray((log as any).citations_json) ? (log as any).citations_json.length : 0
+          } else if (col === 'num_relevant_labels') {
+            rec[col] = Array.isArray((log as any).relevance_labels) ? (log as any).relevance_labels.length : 0
+          } else if (col === 'response_text') {
+            // Truncate very long responses to keep CSV manageable
+            const rt = (log as any).response_text || ''
+            rec[col] = rt.length > 500 ? rt.slice(0, 500) + '...' : rt
+          } else {
+            rec[col] = (log as any)[col]
+          }
+        }
+        const row = columns.map(col => escapeCsvField(rec[col]))
         csvRows.push(row.join(','))
       }
 
