@@ -6,7 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { Send, Mic, Loader2, Volume2, VolumeX, AudioWaveform, Square, X, SlidersHorizontal, PanelLeftClose, PanelLeftOpen, ArrowDown, ChevronDown, Check, FolderOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { renderAnswerForSpeech, selectBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
+import { renderAnswerForSpeech, selectBestVoice, resolveBestVoice, createUtterance, splitIntoSentences } from "@/lib/ttsUtils";
 import { useChatHistory, ChatMessage, ConversationFilters, ChatSource, getDefaultFilters } from "@/hooks/useChatHistory";
 import { MarkdownWithCitations } from "@/components/MarkdownWithCitations";
 import { DocumentViewerModal } from "@/components/DocumentViewerModal";
@@ -241,10 +241,22 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
   }, []);
 
   useEffect(() => {
-    const initVoice = () => {selectedVoiceRef.current = selectBestVoice();};
+    let isMounted = true;
+
+    const initVoice = async () => {
+      const voice = await resolveBestVoice({
+        timeoutMs: isMobileDevice ? 2500 : 1200,
+        preferredScoreThreshold: 40,
+      });
+
+      if (!isMounted) return;
+      selectedVoiceRef.current = voice ?? selectBestVoice();
+    };
+
     initVoice();
-    if ('speechSynthesis' in window) {window.speechSynthesis.onvoiceschanged = initVoice;}
+    if ('speechSynthesis' in window) {window.speechSynthesis.onvoiceschanged = () => { void initVoice(); };}
     return () => {
+      isMounted = false;
       if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
       if (ttsKeepAliveRef.current) {clearInterval(ttsKeepAliveRef.current);ttsKeepAliveRef.current = null;}
       if (listeningWatchdogRef.current) {clearTimeout(listeningWatchdogRef.current);listeningWatchdogRef.current = null;}
@@ -303,7 +315,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
     setConversationState((prev) => prev === "speaking" ? "idle" : prev);
   }, [markSpeechOutputCooldown]);
 
-  const speakText = useCallback((text: string, onComplete?: () => void, messageId?: string) => {
+  const speakText = useCallback(async (text: string, onComplete?: () => void, messageId?: string) => {
     if (!('speechSynthesis' in window)) {
       isTtsActiveRef.current = false;
       toast({ title: "TTS not supported", description: "Voice playback is not supported in this browser.", variant: "destructive" });
@@ -331,7 +343,19 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       onComplete?.();
       return;
     }
-    if (!selectedVoiceRef.current) {selectedVoiceRef.current = selectBestVoice();}
+
+    const generationAtStart = voiceGenTokenRef.current;
+    const resolvedVoice = await resolveBestVoice({
+      timeoutMs: isMobileDevice ? 2500 : 1200,
+      preferredScoreThreshold: 40,
+    });
+
+    if (generationAtStart !== voiceGenTokenRef.current) {
+      vlog('speakText:STALE_AFTER_VOICE_RESOLVE', `token=${generationAtStart} current=${voiceGenTokenRef.current}`);
+      return;
+    }
+
+    selectedVoiceRef.current = resolvedVoice ?? selectedVoiceRef.current ?? selectBestVoice();
     const queueId = ++utteranceQueueRef.current;
     let currentIndex = 0;
     isTtsActiveRef.current = true;
@@ -379,7 +403,7 @@ export const TechnicianChat = ({ hasDocuments, chunksCount, permissions, showTab
       window.speechSynthesis.speak(utterance);
     };
     speakNext();
-  }, [toast, markSpeechOutputCooldown, teardownRecognitionForSpeech, vlog]);
+  }, [toast, markSpeechOutputCooldown, teardownRecognitionForSpeech, vlog, isMobileDevice]);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {clearTimeout(silenceTimerRef.current);silenceTimerRef.current = null;}
