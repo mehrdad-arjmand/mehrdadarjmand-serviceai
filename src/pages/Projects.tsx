@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Header } from "@/components/Header";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -749,7 +749,13 @@ const Projects = () => {
               const isExpanded = expandedProjectId === project.id;
               const isOwner = isProjectOwner(project);
               return (
-                <div key={project.id}>
+                <div key={project.id} ref={el => {
+                    if (isExpanded && el) {
+                      setTimeout(() => {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                      }, 100);
+                    }
+                  }}>
                     <div
                     className={cn(
                       "py-5 flex items-start justify-between cursor-pointer px-2 -mx-2 rounded-lg transition-colors min-h-[72px]",
