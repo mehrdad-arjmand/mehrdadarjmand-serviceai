@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, User, Lock, Mail } from "lucide-react";
+import { ArrowLeft, User, Lock, Mail, Settings as SettingsIcon } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Header } from "@/components/Header";
 
@@ -73,18 +73,29 @@ export default function Settings() {
       <main className="px-6 lg:px-10 py-8">
         <Button
           variant="ghost"
+          size="sm"
           onClick={() => navigate("/")}
-          className="mb-6 gap-2 -ml-2"
+          className="text-muted-foreground hover:text-foreground mb-6 -ml-2"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 mr-2" />
           Back
         </Button>
 
-        <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-16">
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight flex items-center gap-3">
+            <SettingsIcon className="h-6 w-6" />
+            Settings
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1.5">
+            Manage your account and security preferences.
+          </p>
+        </div>
+
+        <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Account Information */}
-          <Card>
+          <Card className="border border-border/60 shadow-sm">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="text-lg flex items-center gap-2">
                 <User className="h-5 w-5" />
                 Account Information
               </CardTitle>
@@ -94,14 +105,14 @@ export default function Settings() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-muted-foreground">
-                  <Mail className="h-4 w-4" />
+                <Label className="flex items-center gap-2 text-muted-foreground text-sm">
+                  <Mail className="h-3.5 w-3.5" />
                   Email Address
                 </Label>
                 <Input
                   value={user?.email || ""}
                   disabled
-                  className="bg-muted"
+                  className="bg-muted/50"
                 />
                 <p className="text-xs text-muted-foreground">
                   Email address cannot be changed
@@ -110,11 +121,11 @@ export default function Settings() {
 
               {permissions.role && (
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground">Role</Label>
+                  <Label className="text-muted-foreground text-sm">Role</Label>
                   <Input
                     value={permissions.role.charAt(0).toUpperCase() + permissions.role.slice(1)}
                     disabled
-                    className="bg-muted"
+                    className="bg-muted/50"
                   />
                   <p className="text-xs text-muted-foreground">
                     Contact an administrator to change your role
@@ -125,9 +136,9 @@ export default function Settings() {
           </Card>
 
           {/* Change Password */}
-          <Card>
+          <Card className="border border-border/60 shadow-sm">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="text-lg flex items-center gap-2">
                 <Lock className="h-5 w-5" />
                 Change Password
               </CardTitle>
@@ -138,7 +149,7 @@ export default function Settings() {
             <CardContent>
               <form onSubmit={handleChangePassword} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="newPassword">New Password</Label>
+                  <Label htmlFor="newPassword" className="text-sm">New Password</Label>
                   <Input
                     id="newPassword"
                     type="password"
@@ -151,7 +162,7 @@ export default function Settings() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                  <Label htmlFor="confirmPassword" className="text-sm">Confirm New Password</Label>
                   <Input
                     id="confirmPassword"
                     type="password"
@@ -163,7 +174,7 @@ export default function Settings() {
                   />
                 </div>
 
-                <Button type="submit" disabled={changingPassword}>
+                <Button type="submit" disabled={changingPassword} size="sm">
                   {changingPassword ? "Changing Password..." : "Change Password"}
                 </Button>
               </form>
