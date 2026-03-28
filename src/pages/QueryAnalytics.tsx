@@ -216,7 +216,6 @@ const QueryAnalytics = () => {
     }
   };
 
-  // Auto-load analytics and confusion matrix on mount
   useEffect(() => {
     if (isAdmin) {
       fetchAnalytics();
@@ -293,7 +292,6 @@ const QueryAnalytics = () => {
     }
   };
 
-
   const handleCopySQL = async () => {
     await navigator.clipboard.writeText(SQL_REFERENCE);
     setSqlCopied(true);
@@ -333,35 +331,24 @@ const QueryAnalytics = () => {
           <ArrowLeft className="h-4 w-4 mr-2" />Back
         </Button>
 
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold text-foreground tracking-tight flex items-center gap-3">
-            <BarChart3 className="h-6 w-6" />Query Analytics & Evaluation
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1.5">Latency, tokens, cost, and retrieval quality evaluation.</p>
-        </div>
-
-        {/* Action buttons */}
-        <div className="flex flex-wrap gap-3 mb-8">
-          <Button onClick={exportCSV} variant="outline" disabled={loading !== null}>
-            {loading === "export" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-            Export CSV
-          </Button>
-          <Button onClick={handleCopySQL} variant="outline" disabled={loading !== null}>
-            {sqlCopied ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
-            {sqlCopied ? "Copied!" : "SQL Reference Queries"}
-          </Button>
-          <Button onClick={runEval} variant="outline" disabled className="opacity-50">
-            <Play className="h-4 w-4 mr-2" />
-            Ground-Truth Eval
-          </Button>
-          <Button onClick={runRetrievalEval} variant="outline" disabled className="opacity-50">
-            <Target className="h-4 w-4 mr-2" />
-            LLM Retrieval Eval
-          </Button>
-          <Button onClick={fetchEvalRuns} variant="outline" disabled className="opacity-50">
-            <History className="h-4 w-4 mr-2" />
-            Eval History
-          </Button>
+        {/* Title row with Export CSV */}
+        <div className="flex items-start justify-between mb-8">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground tracking-tight flex items-center gap-3">
+              <BarChart3 className="h-6 w-6" />Query Analytics & Evaluation
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1.5">Latency, tokens, cost, and retrieval quality evaluation.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleCopySQL} variant="ghost" size="sm" className="text-muted-foreground" disabled={loading !== null}>
+              {sqlCopied ? <Check className="h-4 w-4 mr-1.5" /> : <Copy className="h-4 w-4 mr-1.5" />}
+              {sqlCopied ? "Copied" : "SQL"}
+            </Button>
+            <Button onClick={exportCSV} variant="outline" size="sm" disabled={loading !== null}>
+              {loading === "export" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+              Export CSV
+            </Button>
+          </div>
         </div>
 
         {/* Analytics cards */}
@@ -373,7 +360,7 @@ const QueryAnalytics = () => {
 
         {analytics && (
           <div className={`grid gap-6 mb-8 ${analytics.retrieval_eval ? 'md:grid-cols-2 lg:grid-cols-4' : 'md:grid-cols-3'}`}>
-            <Card>
+            <Card className="border border-border/60 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Latency</CardTitle>
                 <CardDescription>{analytics.sample_size} queries</CardDescription>
@@ -387,7 +374,7 @@ const QueryAnalytics = () => {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border border-border/60 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Tokens</CardTitle>
                 <CardDescription>Average per query</CardDescription>
@@ -399,7 +386,7 @@ const QueryAnalytics = () => {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border border-border/60 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Cost</CardTitle>
                 <CardDescription>Upstream inference</CardDescription>
@@ -412,7 +399,7 @@ const QueryAnalytics = () => {
             </Card>
 
             {analytics.retrieval_eval && (
-              <Card>
+              <Card className="border border-border/60 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Retrieval Quality</CardTitle>
                   <CardDescription>
@@ -432,7 +419,7 @@ const QueryAnalytics = () => {
 
         {/* LLM Retrieval Eval Results */}
         {retrievalEval && retrievalEval.evaluated > 0 && (
-          <Card className="mb-8">
+          <Card className="mb-8 border border-border/60 shadow-sm">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Target className="h-4 w-4" />LLM Retrieval Evaluation
@@ -495,10 +482,9 @@ const QueryAnalytics = () => {
           </Card>
         )}
 
-
         {/* Ground-truth Eval results */}
         {evalResult && (
-          <Card className="mb-8">
+          <Card className="mb-8 border border-border/60 shadow-sm">
             <CardHeader>
               <CardTitle className="text-base">Ground-Truth Evaluation (k={evalResult.k})</CardTitle>
               <CardDescription>{evalResult.total_queries} queries evaluated</CardDescription>
@@ -542,7 +528,7 @@ const QueryAnalytics = () => {
 
         {/* Eval Run History */}
         {evalRuns.length > 0 && (
-          <Card className="mb-8">
+          <Card className="mb-8 border border-border/60 shadow-sm">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <History className="h-4 w-4" />Evaluation History
@@ -584,82 +570,86 @@ const QueryAnalytics = () => {
 
         {/* Confusion Matrix */}
         {confusionMatrix && confusionMatrix.rows.length > 0 && (
-          <Card className="mb-8">
+          <Card className="mb-8 border border-border/60 shadow-sm">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Grid3X3 className="h-4 w-4" />Confusion Matrix
               </CardTitle>
               <CardDescription>
-                TP/FP/FN/TN breakdown per query ({confusionMatrix.rows.length} evaluated queries)
+                {confusionMatrix.rows.length} evaluated queries
               </CardDescription>
             </CardHeader>
             <CardContent>
               {/* Aggregate KPIs */}
-              <div className="flex flex-wrap gap-8 mb-6">
-                <div>
-                  <p className="text-sm text-muted-foreground">Accuracy</p>
-                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                <div className="bg-muted/30 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground mb-0.5">Accuracy</p>
+                  <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Precision</p>
-                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</p>
+                <div className="bg-muted/30 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground mb-0.5">Precision</p>
+                  <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</p>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Recall</p>
-                  <p className="text-2xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</p>
+                <div className="bg-muted/30 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground mb-0.5">Recall</p>
+                  <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</p>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Total TP / FP / FN / TN</p>
+                <div className="bg-muted/30 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground mb-0.5">TP / FP / FN / TN</p>
                   <p className="text-lg font-mono font-medium text-foreground">
                     {confusionMatrix.totals.tp} / {confusionMatrix.totals.fp} / {confusionMatrix.totals.fn} / {confusionMatrix.totals.tn}
                   </p>
                 </div>
               </div>
 
-              {/* Per-query table */}
-              <div className="border rounded-lg overflow-auto max-h-96">
+              {/* Per-query table — condensed */}
+              <div className="border border-border/60 rounded-lg overflow-auto max-h-96">
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead className="text-muted-foreground">Query</TableHead>
-                      <TableHead className="text-right text-muted-foreground">K</TableHead>
-                      <TableHead className="text-right text-muted-foreground">Eval</TableHead>
-                      <TableHead className="text-right text-muted-foreground">TP</TableHead>
-                      <TableHead className="text-right text-muted-foreground">FP</TableHead>
-                      <TableHead className="text-right text-muted-foreground">FN</TableHead>
-                      <TableHead className="text-right text-muted-foreground">TN</TableHead>
-                      <TableHead className="text-right text-muted-foreground">Acc</TableHead>
-                      <TableHead className="text-right text-muted-foreground">Prec</TableHead>
-                      <TableHead className="text-right text-muted-foreground">Recall</TableHead>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableHead className="text-muted-foreground text-xs">Query</TableHead>
+                      <TableHead className="text-right text-muted-foreground text-xs w-[60px]">K</TableHead>
+                      <TableHead className="text-center text-muted-foreground text-xs w-[120px]">TP/FP/FN/TN</TableHead>
+                      <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Acc</TableHead>
+                      <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Prec</TableHead>
+                      <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Recall</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {confusionMatrix.rows.map((r, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="max-w-xs truncate text-sm">{r.query}</TableCell>
-                        <TableCell className="text-right font-mono text-sm">{r.top_k}</TableCell>
-                        <TableCell className="text-right font-mono text-sm">{r.top_k_eval}</TableCell>
-                        <TableCell className="text-right font-mono text-sm text-green-600">{r.tp}</TableCell>
-                        <TableCell className="text-right font-mono text-sm text-red-500">{r.fp}</TableCell>
-                        <TableCell className="text-right font-mono text-sm text-orange-500">{r.fn}</TableCell>
-                        <TableCell className="text-right font-mono text-sm">{r.tn}</TableCell>
-                        <TableCell className="text-right font-mono text-sm">{(r.accuracy * 100).toFixed(1)}%</TableCell>
-                        <TableCell className="text-right font-mono text-sm">{(r.precision * 100).toFixed(1)}%</TableCell>
-                        <TableCell className="text-right font-mono text-sm">{(r.recall * 100).toFixed(1)}%</TableCell>
+                      <TableRow key={i} className="hover:bg-muted/20">
+                        <TableCell className="max-w-xs truncate text-sm py-2.5">{r.query}</TableCell>
+                        <TableCell className="text-right font-mono text-sm py-2.5">{r.top_k}</TableCell>
+                        <TableCell className="text-center font-mono text-sm py-2.5">
+                          <span className="text-green-600">{r.tp}</span>
+                          <span className="text-muted-foreground mx-0.5">/</span>
+                          <span className="text-red-500">{r.fp}</span>
+                          <span className="text-muted-foreground mx-0.5">/</span>
+                          <span className="text-orange-500">{r.fn}</span>
+                          <span className="text-muted-foreground mx-0.5">/</span>
+                          <span>{r.tn}</span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm py-2.5">{(r.accuracy * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right font-mono text-sm py-2.5">{(r.precision * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right font-mono text-sm py-2.5">{(r.recall * 100).toFixed(1)}%</TableCell>
                       </TableRow>
                     ))}
                     {/* Aggregate row */}
-                    <TableRow className="bg-muted/30 font-semibold border-t-2">
-                      <TableCell className="text-sm">Aggregate</TableCell>
-                      <TableCell className="text-right font-mono text-sm">—</TableCell>
-                      <TableCell className="text-right font-mono text-sm">—</TableCell>
-                      <TableCell className="text-right font-mono text-sm text-green-600">{confusionMatrix.totals.tp}</TableCell>
-                      <TableCell className="text-right font-mono text-sm text-red-500">{confusionMatrix.totals.fp}</TableCell>
-                      <TableCell className="text-right font-mono text-sm text-orange-500">{confusionMatrix.totals.fn}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{confusionMatrix.totals.tn}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</TableCell>
+                    <TableRow className="bg-muted/40 font-semibold border-t-2 border-border hover:bg-muted/40">
+                      <TableCell className="text-sm py-2.5">Aggregate</TableCell>
+                      <TableCell className="text-right font-mono text-sm py-2.5">—</TableCell>
+                      <TableCell className="text-center font-mono text-sm py-2.5">
+                        <span className="text-green-600">{confusionMatrix.totals.tp}</span>
+                        <span className="text-muted-foreground mx-0.5">/</span>
+                        <span className="text-red-500">{confusionMatrix.totals.fp}</span>
+                        <span className="text-muted-foreground mx-0.5">/</span>
+                        <span className="text-orange-500">{confusionMatrix.totals.fn}</span>
+                        <span className="text-muted-foreground mx-0.5">/</span>
+                        <span>{confusionMatrix.totals.tn}</span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm py-2.5">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</TableCell>
+                      <TableCell className="text-right font-mono text-sm py-2.5">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</TableCell>
+                      <TableCell className="text-right font-mono text-sm py-2.5">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>

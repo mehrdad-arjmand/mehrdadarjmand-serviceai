@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -38,6 +37,15 @@ interface RolesPermissionsManagerProps {
   ) => Promise<boolean>;
   onDeleteRole: (role: AppRole) => Promise<boolean>;
 }
+
+/** Compact R·W·D permission indicator */
+const PermissionDots = ({ read, write, del }: { read: boolean; write: boolean; del: boolean }) => (
+  <div className="flex items-center justify-center gap-1.5 font-mono text-xs">
+    <span className={read ? "text-foreground font-semibold" : "text-muted-foreground/40"}>R</span>
+    <span className={write ? "text-foreground font-semibold" : "text-muted-foreground/40"}>W</span>
+    <span className={del ? "text-foreground font-semibold" : "text-muted-foreground/40"}>D</span>
+  </div>
+);
 
 export const RolesPermissionsManager = ({
   roles, isUpdating, onUpdateRole, onCreateRole, onDeleteRole,
@@ -89,41 +97,26 @@ export const RolesPermissionsManager = ({
     if (success) { setEditingRole(null); setEditForm({}); }
   };
 
-  // Permission toggle with dependency: if turning off read, also turn off write & delete
   const handlePermissionToggle = (
     permission: keyof Omit<RoleWithPermissions, 'role' | 'description' | 'user_count'>
   ) => {
     setEditForm(prev => {
       const newVal = !prev[permission];
       const next = { ...prev, [permission]: newVal };
-
-      // Extract prefix (repository_, assistant_, landing_)
       const prefix = permission.replace(/(read|write|delete)$/, '');
       const writeKey = `${prefix}write` as typeof permission;
       const deleteKey = `${prefix}delete` as typeof permission;
       const readKey = `${prefix}read` as typeof permission;
 
       if (permission.endsWith('_read') && !newVal) {
-        // Turning off read → also turn off write and delete
         (next as any)[writeKey] = false;
         (next as any)[deleteKey] = false;
       } else if ((permission.endsWith('_write') || permission.endsWith('_delete')) && newVal) {
-        // Turning on write or delete → ensure read is on
         (next as any)[readKey] = true;
       }
-
       return next;
     });
   };
-
-  const renderPermissionBadge = (enabled: boolean) => (
-    <Badge
-      variant={enabled ? "default" : "secondary"}
-      className={enabled ? "bg-primary/10 text-primary hover:bg-primary/20" : "bg-muted text-muted-foreground"}
-    >
-      {enabled ? "Yes" : "No"}
-    </Badge>
-  );
 
   const handleCreateRole = async () => {
     if (!newRoleName.trim()) return;
@@ -141,12 +134,8 @@ export const RolesPermissionsManager = ({
 
   const renderPermissionSection = (
     label: string,
-    readKey: string,
-    writeKey: string,
-    deleteKey: string,
-    readLabel: string,
-    writeLabel: string,
-    deleteLabel: string
+    readKey: string, writeKey: string, deleteKey: string,
+    readLabel: string, writeLabel: string, deleteLabel: string
   ) => {
     const readVal = editForm[readKey as keyof typeof editForm] as boolean;
     return (
@@ -177,10 +166,10 @@ export const RolesPermissionsManager = ({
           <div>
             <h3 className="text-lg font-semibold text-foreground">Role Definitions</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              Configure permissions for each role. Changes apply immediately to all users with that role.
+              Configure permissions for each role.
             </p>
           </div>
-          <Button onClick={() => setIsCreateDialogOpen(true)} disabled={isUpdating}>
+          <Button variant="outline" size="sm" onClick={() => setIsCreateDialogOpen(true)} disabled={isUpdating}>
             <Plus className="h-4 w-4 mr-2" />
             Add Role
           </Button>
@@ -190,51 +179,33 @@ export const RolesPermissionsManager = ({
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-[120px]">Role</TableHead>
-                <TableHead className="w-[160px]">Description</TableHead>
-                <TableHead className="text-center">Landing<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
-                <TableHead className="text-center">Repository<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
-                <TableHead className="text-center">Assistant<br /><span className="text-xs font-normal">Read / Write / Delete</span></TableHead>
-                <TableHead className="text-center w-[100px]">API Tier</TableHead>
-                <TableHead className="text-center w-[80px]">Users</TableHead>
-                <TableHead className="w-[100px]"></TableHead>
+                <TableHead className="w-[25%]">Role</TableHead>
+                <TableHead className="text-center w-[15%]">Landing</TableHead>
+                <TableHead className="text-center w-[15%]">Repository</TableHead>
+                <TableHead className="text-center w-[15%]">Assistant</TableHead>
+                <TableHead className="text-center w-[12%]">Users</TableHead>
+                <TableHead className="w-[60px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {roles.map((role) => (
                 <TableRow key={role.role}>
-                  <TableCell className="font-medium">{role.role}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {role.description || <span className="italic">No description</span>}
-                  </TableCell>
                   <TableCell>
-                    <div className="flex items-center justify-center gap-1">
-                      {renderPermissionBadge(role.landing_read)}
-                      {renderPermissionBadge(role.landing_write)}
-                      {renderPermissionBadge(role.landing_delete)}
+                    <div>
+                      <p className="font-medium text-foreground">{role.role}</p>
+                      {role.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{role.description}</p>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center justify-center gap-1">
-                      {renderPermissionBadge(role.repository_read)}
-                      {renderPermissionBadge(role.repository_write)}
-                      {renderPermissionBadge(role.repository_delete)}
-                    </div>
+                    <PermissionDots read={role.landing_read} write={role.landing_write} del={role.landing_delete} />
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center justify-center gap-1">
-                      {renderPermissionBadge(role.assistant_read)}
-                      {renderPermissionBadge(role.assistant_write)}
-                      {renderPermissionBadge(role.assistant_delete)}
-                    </div>
+                    <PermissionDots read={role.repository_read} write={role.repository_write} del={role.repository_delete} />
                   </TableCell>
-                  <TableCell className="text-center">
-                    <Badge
-                      variant={role.api_tier === 'paid' ? "default" : "secondary"}
-                      className={role.api_tier === 'paid' ? "bg-green-500/10 text-green-600 hover:bg-green-500/20" : "bg-muted text-muted-foreground"}
-                    >
-                      {role.api_tier === 'paid' ? 'Paid' : 'Free'}
-                    </Badge>
+                  <TableCell>
+                    <PermissionDots read={role.assistant_read} write={role.assistant_write} del={role.assistant_delete} />
                   </TableCell>
                   <TableCell className="text-center">
                     <div className="flex items-center justify-center gap-1 text-muted-foreground">
@@ -315,7 +286,7 @@ export const RolesPermissionsManager = ({
 
             <div className="space-y-3">
               <Label className="text-base font-medium">API Tier</Label>
-              <p className="text-sm text-muted-foreground">Controls processing speed for document ingestion. Paid tier uses parallel processing; Free tier uses sequential.</p>
+              <p className="text-sm text-muted-foreground">Controls processing speed for document ingestion.</p>
               <Select
                 value={(editForm as any).api_tier || 'free'}
                 onValueChange={(value) => setEditForm(prev => ({ ...prev, api_tier: value }))}
@@ -375,12 +346,15 @@ export const RolesPermissionsManager = ({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Role</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the <span className="font-semibold">{deletingRole?.role}</span> role? This action cannot be undone.
+              Are you sure you want to delete the "{deletingRole?.role}" role? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isUpdating}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteRole} disabled={isUpdating} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteRole}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Delete
             </AlertDialogAction>
