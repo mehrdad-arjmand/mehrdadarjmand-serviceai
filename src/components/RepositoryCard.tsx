@@ -1232,7 +1232,13 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             const tags = getMetaTags(doc);
 
             return (
-              <div key={doc.id}>
+              <div key={doc.id} ref={el => {
+                if (isExpanded && el) {
+                  setTimeout(() => {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  }, 100);
+                }
+              }}>
                 <div
                   className={cn(
                     "py-5 flex items-start justify-between cursor-pointer px-2 -mx-2 rounded-lg transition-colors min-h-[72px]",
