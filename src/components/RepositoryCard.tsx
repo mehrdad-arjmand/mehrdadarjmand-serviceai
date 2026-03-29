@@ -538,7 +538,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             ingestion_error: 'Processing timed out. Click Reprocess to retry.'
           }).eq('id', doc.id).then(() => {
             fetchDocuments();
-          }).finally(() => {
             autoRetryingIds.current.delete(doc.id);
             delete docStatusTimestamps.current[doc.id];
           });
