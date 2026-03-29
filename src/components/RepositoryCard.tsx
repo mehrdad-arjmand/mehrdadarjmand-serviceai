@@ -472,6 +472,10 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const documentsRef = useRef(documents);
   documentsRef.current = documents;
 
+  // Track when documents entered their current status for stuck detection
+  const docStatusTimestamps = useRef<Record<string, number>>({});
+  const autoRetryingIds = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     fetchDocuments();
     const docsChannel = supabase.channel('repository-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).subscribe();
@@ -479,6 +483,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
     const poll = setInterval(async () => {
       const docs = documentsRef.current;
+      const now = Date.now();
       const hasActiveIngestion = docs.some(
         d => d.ingestionStatus === 'in_progress' || d.ingestionStatus === 'processing_embeddings'
       );
@@ -486,7 +491,60 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       if (hasActiveIngestion) {
         fetchDocuments();
       }
-    }, 5000);
+
+      // Auto-recovery: detect stuck documents and retrigger processing
+      for (const doc of docs) {
+        if (doc.ingestionStatus !== 'in_progress' && doc.ingestionStatus !== 'processing_embeddings') {
+          delete docStatusTimestamps.current[doc.id];
+          continue;
+        }
+
+        // Initialize timestamp if not tracked
+        if (!docStatusTimestamps.current[doc.id]) {
+          docStatusTimestamps.current[doc.id] = now;
+          continue;
+        }
+
+        const stuckDuration = now - docStatusTimestamps.current[doc.id];
+        const isAlreadyRetrying = autoRetryingIds.current.has(doc.id);
+
+        // Skip if already retrying or if reprocessing manually
+        if (isAlreadyRetrying || reprocessingIds.has(doc.id)) continue;
+
+        // Document stuck in 'processing_embeddings' for >90s — retrigger embeddings
+        if (doc.ingestionStatus === 'processing_embeddings' && stuckDuration > 90_000 && doc.totalChunks > 0) {
+          console.log(`Auto-recovery: retriggering embeddings for "${doc.fileName}" (stuck ${Math.round(stuckDuration / 1000)}s)`);
+          autoRetryingIds.current.add(doc.id);
+          docStatusTimestamps.current[doc.id] = now; // Reset timer
+
+          supabase.functions.invoke('generate-embeddings', {
+            body: { documentId: doc.id, mode: 'full' }
+          }).then(() => {
+            console.log(`Auto-recovery: embeddings retriggered for "${doc.fileName}"`);
+          }).catch(err => {
+            console.error(`Auto-recovery failed for "${doc.fileName}":`, err);
+          }).finally(() => {
+            autoRetryingIds.current.delete(doc.id);
+          });
+        }
+
+        // Document stuck in 'in_progress' for >120s with 0 chunks — something failed during extraction
+        if (doc.ingestionStatus === 'in_progress' && stuckDuration > 120_000 && doc.totalChunks === 0) {
+          console.log(`Auto-recovery: marking "${doc.fileName}" as failed (stuck in_progress with 0 chunks for ${Math.round(stuckDuration / 1000)}s)`);
+          autoRetryingIds.current.add(doc.id);
+          
+          supabase.from('documents').update({
+            ingestion_status: 'failed',
+            ingestion_error: 'Processing timed out. Click Reprocess to retry.'
+          }).eq('id', doc.id).then(() => {
+            fetchDocuments();
+          }).finally(() => {
+            autoRetryingIds.current.delete(doc.id);
+            delete docStatusTimestamps.current[doc.id];
+          });
+        }
+      }
+    }, 10_000); // Check every 10 seconds
 
     return () => {
       supabase.removeChannel(docsChannel);
