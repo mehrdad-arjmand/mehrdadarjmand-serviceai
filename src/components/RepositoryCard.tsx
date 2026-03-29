@@ -934,6 +934,41 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     setReprocessingIds(prev => new Set(prev).add(doc.id));
 
     try {
+      // Check if document has chunks at all
+      const { count: chunkCount } = await supabase
+        .from('chunks')
+        .select('id', { count: 'exact', head: true })
+        .eq('document_id', doc.id);
+
+      if (!chunkCount || chunkCount === 0) {
+        // No chunks exist — need to re-run full extraction pipeline
+        // First, try to reconstruct from stored text or re-extract
+        console.log(`Reprocess: "${doc.fileName}" has 0 chunks, re-running full pipeline`);
+
+        // Reset document status
+        await supabase.from('documents').update({
+          ingestion_status: 'in_progress',
+          ingestion_error: null,
+          ingested_chunks: 0,
+          total_chunks: 0,
+        }).eq('id', doc.id);
+        await fetchDocuments();
+
+        // If it's a text-based doc (docx), we can't re-extract without original content
+        // Mark as failed with helpful message
+        toast({ 
+          title: "Re-upload required", 
+          description: `"${doc.fileName}" has no chunks. Please delete and re-upload the file.`,
+          variant: "destructive" 
+        });
+        await supabase.from('documents').update({
+          ingestion_status: 'failed',
+          ingestion_error: 'No chunks found. Please delete and re-upload this document.',
+        }).eq('id', doc.id);
+        return;
+      }
+
+      // Has chunks — clear embeddings and regenerate
       const { error: clearError } = await supabase
         .from('chunks')
         .update({ embedding: null })
@@ -948,40 +983,28 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       await fetchDocuments();
 
-      let complete = false;
-      let attempts = 0;
-      const maxAttempts = 200;
+      // Use 'full' mode so generate-embeddings processes all chunks in one call
+      const { data: embedResponse, error: embedError } = await supabase.functions.invoke(
+        'generate-embeddings',
+        { body: { documentId: doc.id, mode: 'full' } }
+      );
 
-      while (!complete && attempts < maxAttempts) {
-        attempts++;
-        const { data: embedResponse, error: embedError } = await supabase.functions.invoke(
-          'generate-embeddings',
-          { body: { documentId: doc.id } }
-        );
-
-        if (embedError) {
-          console.error("Embedding batch error:", embedError);
-          break;
-        }
-
-        complete = embedResponse?.complete === true;
-
-        if (embedResponse?.embedded != null) {
-          await supabase.from('documents').update({
-            ingested_chunks: embedResponse.embedded,
-          }).eq('id', doc.id);
-        }
-
-        if (!complete) {
-          await new Promise(r => setTimeout(r, 200));
-        }
+      if (embedError) {
+        console.error("Embedding error:", embedError);
+        // Don't mark as failed — auto-recovery will pick it up
+        toast({ title: "Reprocessing started", description: "Embeddings are being generated. Auto-recovery will complete if interrupted." });
+        return;
       }
+
+      const docResult = embedResponse?.documents?.[0];
+      const complete = docResult?.complete === true;
 
       if (complete) {
         await supabase.from('documents').update({ ingestion_status: 'complete' }).eq('id', doc.id);
         toast({ title: "Reprocessing complete", description: `"${doc.fileName}" has been fully re-indexed.` });
       } else {
-        toast({ title: "Reprocessing may be incomplete", description: "Check document status.", variant: "destructive" });
+        // Partially done — auto-recovery polling will continue
+        toast({ title: "Reprocessing in progress", description: "Auto-recovery will continue processing." });
       }
     } catch (e: any) {
       toast({ title: "Reprocessing failed", description: e.message, variant: "destructive" });
