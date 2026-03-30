@@ -1097,7 +1097,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const effectivelyComplete = doc.ingestionStatus === 'complete' || (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks);
     if (effectivelyComplete) return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
     if (doc.ingestionStatus === 'failed') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(0 86% 97%)', color: 'hsl(0 72% 51%)', borderColor: 'hsl(0 72% 80%)' }}><AlertCircle className="h-3 w-3" />Failed</span>;
-    if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(38 92% 96%)', color: 'hsl(32 95% 44%)', borderColor: 'hsl(38 80% 75%)' }}><Loader2 className="h-3 w-3 animate-spin" />Processing</span>;
+    if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
+      const progress = doc.totalChunks > 0 ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100) : 0;
+      return (
+        <div className="inline-flex items-center gap-2 min-w-[140px]">
+          <div className="relative flex-1 h-5 rounded-full overflow-hidden border" style={{ background: 'hsl(38 92% 96%)', borderColor: 'hsl(38 80% 75%)' }}>
+            <div
+              className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
+              style={{ width: `${progress}%`, background: 'hsl(32 95% 44%)' }}
+            />
+            <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold" style={{ color: progress > 50 ? 'white' : 'hsl(32 95% 44%)' }}>
+              {doc.embeddedChunks}/{doc.totalChunks} chunks
+            </span>
+          </div>
+        </div>
+      );
+    }
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
   };
 
