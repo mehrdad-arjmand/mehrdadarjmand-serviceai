@@ -520,9 +520,12 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           autoRetryingIds.current.add(doc.id);
           docStatusTimestamps.current[doc.id] = now; // Reset timer
 
-          supabase.functions.invoke('generate-embeddings', {
-            body: { documentId: doc.id, mode: 'full' }
-          }).then(() => {
+          // Refresh session before invoking to avoid stale token 401s
+          supabase.auth.getSession().then(() =>
+            supabase.functions.invoke('generate-embeddings', {
+              body: { documentId: doc.id, mode: 'full' }
+            })
+          ).then(() => {
             console.log(`Auto-recovery: embeddings retriggered for "${doc.fileName}"`);
           }).catch(err => {
             console.error(`Auto-recovery failed for "${doc.fileName}":`, err);
@@ -985,7 +988,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       await fetchDocuments();
 
-      // Use 'full' mode so generate-embeddings processes all chunks in one call
+      // Refresh session before invoking to avoid stale token 401s
+      await supabase.auth.getSession();
       const { data: embedResponse, error: embedError } = await supabase.functions.invoke(
         'generate-embeddings',
         { body: { documentId: doc.id, mode: 'full' } }
