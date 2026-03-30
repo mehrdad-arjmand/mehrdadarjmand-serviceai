@@ -1242,22 +1242,31 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
               <div className="px-8 py-6">
                 <div className="flex items-center justify-between mb-5">
                   <p className="text-sm font-semibold text-foreground">Upload metadata</p>
-                  <button onClick={() => { setUploadMetadata({}); setSelectedRoles(["all"]); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+                  {projectFields.length > 0 && Object.values(uploadMetadata).some(v => v) ? (
+                    <button onClick={() => { setUploadMetadata({}); setSelectedRoles(["all"]); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+                  ) : (
+                    <button disabled className="text-sm text-muted-foreground/40 cursor-not-allowed">Reset</button>
+                  )}
                 </div>
-                <div className={`grid gap-x-8 gap-y-5 ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-                  {projectFields.map(field => (
-                    <InlineSelect
-                      key={field}
-                      label={field}
-                      value={uploadMetadata[field] || ""}
-                      onChange={v => setUploadMetadata(prev => ({ ...prev, [field]: v }))}
-                      options={fieldOptions[field] || []}
-                      allowAdd
-                      onAddNew={v => handleAddOption(field, v)}
-                    />
-                  ))}
-                  
-                </div>
+                {projectFields.length > 0 ? (
+                  <div className={`grid gap-x-8 gap-y-5 ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                    {projectFields.map(field => (
+                      <InlineSelect
+                        key={field}
+                        label={field}
+                        value={uploadMetadata[field] || ""}
+                        onChange={v => setUploadMetadata(prev => ({ ...prev, [field]: v }))}
+                        options={fieldOptions[field] || []}
+                        allowAdd
+                        onAddNew={v => handleAddOption(field, v)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm italic text-muted-foreground/60">
+                    No metadata fields configured for this project. Add metadata fields in the project settings to enable scoped retrieval and filtering.
+                  </p>
+                )}
               </div>
             </>
           )}
