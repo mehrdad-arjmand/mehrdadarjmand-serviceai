@@ -314,6 +314,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
   // Documents
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true);
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(10);
 
@@ -435,7 +436,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     let query = supabase.from('documents').select('*').order('uploaded_at', { ascending: false });
     if (projectId) query = query.eq('project_id', projectId);
     const { data: docs, error } = await query;
-    if (error || !docs) return;
+    if (error || !docs) { setIsLoadingDocuments(false); return; }
 
     const documentsWithText = await Promise.all(docs.map(async (doc) => {
       const { data: chunks } = await supabase.from('chunks').select('text, chunk_index, equipment, embedding').eq('document_id', doc.id).order('chunk_index');
@@ -467,6 +468,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     }));
 
     setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
+    setIsLoadingDocuments(false);
   };
 
   const documentsRef = useRef(documents);
@@ -477,6 +479,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const autoRetryingIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    setIsLoadingDocuments(true);
     fetchDocuments();
     const docsChannel = supabase.channel('repository-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).subscribe();
     const chunksChannel = supabase.channel('repository-chunks').on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments).subscribe();
@@ -1097,7 +1100,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     const effectivelyComplete = doc.ingestionStatus === 'complete' || (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks);
     if (effectivelyComplete) return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
     if (doc.ingestionStatus === 'failed') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(0 86% 97%)', color: 'hsl(0 72% 51%)', borderColor: 'hsl(0 72% 80%)' }}><AlertCircle className="h-3 w-3" />Failed</span>;
-    if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(38 92% 96%)', color: 'hsl(32 95% 44%)', borderColor: 'hsl(38 80% 75%)' }}><Loader2 className="h-3 w-3 animate-spin" />Processing</span>;
+    if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
+      const progress = doc.totalChunks > 0 ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100) : 0;
+      return (
+        <div className="inline-flex items-center gap-2 min-w-[140px]">
+          <div className="relative flex-1 h-5 rounded-full overflow-hidden border" style={{ background: 'hsl(38 92% 96%)', borderColor: 'hsl(38 80% 75%)' }}>
+            <div
+              className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
+              style={{ width: `${progress}%`, background: 'hsl(32 95% 44%)' }}
+            />
+            <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold" style={{ color: progress > 50 ? 'white' : 'hsl(32 95% 44%)' }}>
+              {doc.embeddedChunks}/{doc.totalChunks} chunks
+            </span>
+          </div>
+        </div>
+      );
+    }
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
   };
 
@@ -1145,11 +1163,37 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       {/* ── Upload Actions ── */}
       {canWrite && (
-        <div className="border-2 border-dashed border-border rounded-2xl bg-background">
+        <div
+          className="border-2 border-dashed border-border rounded-2xl bg-background transition-colors"
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const droppedFiles = Array.from(e.dataTransfer.files);
+            if (droppedFiles.length > 0) {
+              setSelectedFiles(droppedFiles);
+              handleUpload(droppedFiles);
+            }
+          }}
+        >
           {/* Header text */}
-          <div className="pt-6 px-8 text-center space-y-1">
-            <p className="text-sm font-medium text-foreground">Upload metadata and drag & drop files</p>
-            <p className="text-sm text-muted-foreground">or select an option below</p>
+          <div
+            className="pt-6 px-8 text-center space-y-1"
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const droppedFiles = Array.from(e.dataTransfer.files);
+              if (droppedFiles.length > 0) {
+                setSelectedFiles(droppedFiles);
+                handleUpload(droppedFiles);
+              }
+            }}
+          >
+            <p className="text-sm font-medium text-foreground">Upload metadata and files</p>
+            <p className="text-sm text-muted-foreground">Drag & drop files here, or select an option below</p>
           </div>
 
           {/* Buttons row */}
@@ -1199,22 +1243,31 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
               <div className="px-8 py-6">
                 <div className="flex items-center justify-between mb-5">
                   <p className="text-sm font-semibold text-foreground">Upload metadata</p>
-                  <button onClick={() => { setUploadMetadata({}); setSelectedRoles(["all"]); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+                  {projectFields.length > 0 && Object.values(uploadMetadata).some(v => v) ? (
+                    <button onClick={() => { setUploadMetadata({}); setSelectedRoles(["all"]); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+                  ) : (
+                    <button disabled className="text-sm text-muted-foreground/40 cursor-not-allowed">Reset</button>
+                  )}
                 </div>
-                <div className={`grid gap-x-8 gap-y-5 ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-                  {projectFields.map(field => (
-                    <InlineSelect
-                      key={field}
-                      label={field}
-                      value={uploadMetadata[field] || ""}
-                      onChange={v => setUploadMetadata(prev => ({ ...prev, [field]: v }))}
-                      options={fieldOptions[field] || []}
-                      allowAdd
-                      onAddNew={v => handleAddOption(field, v)}
-                    />
-                  ))}
-                  
-                </div>
+                {projectFields.length > 0 ? (
+                  <div className={`grid gap-x-8 gap-y-5 ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                    {projectFields.map(field => (
+                      <InlineSelect
+                        key={field}
+                        label={field}
+                        value={uploadMetadata[field] || ""}
+                        onChange={v => setUploadMetadata(prev => ({ ...prev, [field]: v }))}
+                        options={fieldOptions[field] || []}
+                        allowAdd
+                        onAddNew={v => handleAddOption(field, v)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm italic text-muted-foreground/60">
+                    No metadata fields configured for this project. Add metadata fields in the project settings to enable scoped retrieval and filtering.
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -1298,14 +1351,20 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">Documents</h2>
-          <span className="text-sm text-muted-foreground">{filteredDocuments.length} result{filteredDocuments.length !== 1 ? 's' : ''}</span>
+          <span className="text-sm text-muted-foreground">
+            {isLoadingDocuments ? '' : `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? 's' : ''}`}
+          </span>
         </div>
         <Separator className="mb-4" />
 
         <div className="divide-y divide-border">
-          {visibleDocuments.length === 0 && (
+          {isLoadingDocuments ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : visibleDocuments.length === 0 ? (
             <p className="py-12 text-center text-sm text-muted-foreground">No documents found.</p>
-          )}
+          ) : null}
 
           {visibleDocuments.map(doc => {
             const isExpanded = expandedDocId === doc.id;

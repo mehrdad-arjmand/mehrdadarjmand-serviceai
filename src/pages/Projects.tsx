@@ -318,6 +318,7 @@ const Projects = () => {
   const [availableRoles, setAvailableRoles] = useState<RoleOption[]>([]);
   const [allUsers, setAllUsers] = useState<UserOption[]>([]);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{id: string;name: string;} | null>(null);
   const [editTarget, setEditTarget] = useState<Project | null>(null);
   const [editName, setEditName] = useState("");
@@ -746,105 +747,111 @@ const Projects = () => {
               </div> :
 
             filteredProjects.map((project) => {
-              const isExpanded = expandedProjectId === project.id;
-              const isOwner = isProjectOwner(project);
-              return (
-                <div key={project.id} ref={el => {
-                    if (isExpanded && el) {
-                      setTimeout(() => {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                      }, 100);
-                    }
-                  }}>
-                    <div
-                    className={cn(
-                      "py-5 flex items-start justify-between cursor-pointer px-2 -mx-2 rounded-lg transition-colors min-h-[72px]",
-                      isExpanded ? "bg-muted/30" : "hover:bg-muted/30"
-                    )}
-                    onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
-                    onDoubleClick={() => navigate(`/?project=${project.id}`)}>
-                    
-                      <div className="flex-1 min-w-0 pr-4">
-                        <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-                          <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                          {project.name}
-                        </p>
-                        <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
-                          {(projectMetadataFields[project.id] || []).map((field) =>
-                        <span
-                          key={field}
-                          className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background">
-                          
-                              {field}
-                            </span>
-                        )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <Badge
-                        variant="secondary"
-                        className={cn("rounded-full text-[11px] px-3 py-0.5 font-medium border",
-                        isOwner ?
-                        "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800" :
-                        "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800"
-                        )}>
-                        
-                          {isOwner ? "Owner" : "Shared"}
-                        </Badge>
-                        {isExpanded ?
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" /> :
+               const isExpanded = expandedProjectId === project.id;
+               const isSelected = selectedProjectId === project.id;
+               const isOwner = isProjectOwner(project);
+               return (
+                 <div key={project.id} ref={el => {
+                     if (isExpanded && el) {
+                       setTimeout(() => {
+                         el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                       }, 100);
+                     }
+                   }}>
+                     <div
+                     className={cn(
+                       "py-5 flex items-start justify-between px-2 -mx-2 rounded-lg transition-colors min-h-[72px]",
+                       isSelected ? "bg-primary/5 ring-1 ring-primary/20" : isExpanded ? "bg-muted/30" : "hover:bg-muted/30"
+                     )}>
+                     
+                       <div
+                         className="flex-1 min-w-0 pr-4 cursor-pointer"
+                         onClick={() => {
+                           if (isSelected) {
+                             setSelectedProjectId(null);
+                           } else {
+                             setSelectedProjectId(project.id);
+                             navigate(`/?project=${project.id}`);
+                           }
+                         }}
+                       >
+                         <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                           <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                           {project.name}
+                           {isSelected && <Check className="h-3.5 w-3.5 text-primary flex-shrink-0" />}
+                         </p>
+                         <div className="flex flex-wrap gap-1.5 mt-2 min-h-[22px]">
+                           {(projectMetadataFields[project.id] || []).map((field) =>
+                         <span
+                           key={field}
+                           className="text-xs px-2.5 py-0.5 rounded-full border border-border text-foreground/70 bg-background">
+                               {field}
+                             </span>
+                         )}
+                         </div>
+                       </div>
+                       <div className="flex items-center gap-3 flex-shrink-0">
+                         <Badge
+                         variant="secondary"
+                         className={cn("rounded-full text-[11px] px-3 py-0.5 font-medium border",
+                         isOwner ?
+                         "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800" :
+                         "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800"
+                         )}>
+                           {isOwner ? "Owner" : "Shared"}
+                         </Badge>
+                         <button
+                           onClick={(e) => { e.stopPropagation(); setExpandedProjectId(isExpanded ? null : project.id); }}
+                           className="p-1 rounded hover:bg-muted/60 transition-colors"
+                         >
+                           <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", !isExpanded && "-rotate-90")} />
+                         </button>
+                       </div>
+                     </div>
 
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      }
-                      </div>
-                    </div>
-
-                    {isExpanded &&
-                  <div className="pl-8 pr-8 pb-5 bg-muted/30 -mx-2 px-[calc(2rem+0.5rem)] rounded-b-lg">
-                        <Separator className="mb-5" />
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-5">
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                              Created
-                            </p>
-                            <p className="text-sm text-foreground">
-                              {format(new Date(project.created_at), "MMM d, yyyy")}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                              Access Roles
-                            </p>
-                            <p className="text-sm text-foreground capitalize">
-                              {project.allowed_roles.includes("all") ? "All Roles" : project.allowed_roles.join(", ")}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                        onClick={(e) => {e.stopPropagation();openEdit(project);}}
-                        className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
-                        
-                            Edit
-                          </button>
-                          {(isOwner || isAdmin) &&
-                      <button
-                        onClick={(e) => {e.stopPropagation();setDeleteTarget({ id: project.id, name: project.name });}}
-                        className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
-                        
-                              Delete
-                            </button>
-                      }
-                          <button
-                        onClick={(e) => {e.stopPropagation();navigate(`/?project=${project.id}`);}}
-                        className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium">
-                        
-                            Select
-                          </button>
-                        </div>
-                      </div>
-                  }
-                  </div>);
+                     {isExpanded &&
+                   <div className="pl-8 pr-8 pb-5 bg-muted/30 -mx-2 px-[calc(2rem+0.5rem)] rounded-b-lg">
+                         <Separator className="mb-5" />
+                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-5">
+                           <div>
+                             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                               Created
+                             </p>
+                             <p className="text-sm text-foreground">
+                               {format(new Date(project.created_at), "MMM d, yyyy")}
+                             </p>
+                           </div>
+                           <div>
+                             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                               Access Roles
+                             </p>
+                             <p className="text-sm text-foreground capitalize">
+                               {project.allowed_roles.includes("all") ? "All Roles" : project.allowed_roles.join(", ")}
+                             </p>
+                           </div>
+                         </div>
+                         <div className="flex items-center justify-end gap-2">
+                           <button
+                         onClick={(e) => {e.stopPropagation();openEdit(project);}}
+                         className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
+                             Edit
+                           </button>
+                           {(isOwner || isAdmin) &&
+                       <button
+                         onClick={(e) => {e.stopPropagation();setDeleteTarget({ id: project.id, name: project.name });}}
+                         className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">
+                               Delete
+                             </button>
+                       }
+                           <button
+                         onClick={(e) => {e.stopPropagation();navigate(`/?project=${project.id}`);}}
+                         className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium">
+                             Open
+                           </button>
+                         </div>
+                       </div>
+                   }
+                   </div>);
 
             })
             }
