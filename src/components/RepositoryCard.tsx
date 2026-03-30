@@ -436,7 +436,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     let query = supabase.from('documents').select('*').order('uploaded_at', { ascending: false });
     if (projectId) query = query.eq('project_id', projectId);
     const { data: docs, error } = await query;
-    if (error || !docs) return;
+    if (error || !docs) { setIsLoadingDocuments(false); return; }
 
     const documentsWithText = await Promise.all(docs.map(async (doc) => {
       const { data: chunks } = await supabase.from('chunks').select('text, chunk_index, equipment, embedding').eq('document_id', doc.id).order('chunk_index');
@@ -468,6 +468,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     }));
 
     setDocuments(documentsWithText.filter(d => d !== null) as Document[]);
+    setIsLoadingDocuments(false);
   };
 
   const documentsRef = useRef(documents);
