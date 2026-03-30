@@ -1160,7 +1160,20 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       {/* ── Upload Actions ── */}
       {canWrite && (
-        <div className="border-2 border-dashed border-border rounded-2xl bg-background">
+        <div
+          className="border-2 border-dashed border-border rounded-2xl bg-background transition-colors"
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const droppedFiles = Array.from(e.dataTransfer.files);
+            if (droppedFiles.length > 0) {
+              setSelectedFiles(droppedFiles);
+              handleUpload(droppedFiles);
+            }
+          }}
+        >
           {/* Header text */}
           <div
             className="pt-6 px-8 text-center space-y-1"
