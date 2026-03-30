@@ -1147,9 +1147,22 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       {canWrite && (
         <div className="border-2 border-dashed border-border rounded-2xl bg-background">
           {/* Header text */}
-          <div className="pt-6 px-8 text-center space-y-1">
-            <p className="text-sm font-medium text-foreground">Upload metadata and drag & drop files</p>
-            <p className="text-sm text-muted-foreground">or select an option below</p>
+          <div
+            className="pt-6 px-8 text-center space-y-1"
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const droppedFiles = Array.from(e.dataTransfer.files);
+              if (droppedFiles.length > 0) {
+                setSelectedFiles(droppedFiles);
+                handleUpload(droppedFiles);
+              }
+            }}
+          >
+            <p className="text-sm font-medium text-foreground">Upload metadata and files</p>
+            <p className="text-sm text-muted-foreground">Drag & drop files here, or select an option below</p>
           </div>
 
           {/* Buttons row */}
