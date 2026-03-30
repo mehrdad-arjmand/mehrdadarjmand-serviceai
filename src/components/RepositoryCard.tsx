@@ -1341,14 +1341,20 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">Documents</h2>
-          <span className="text-sm text-muted-foreground">{filteredDocuments.length} result{filteredDocuments.length !== 1 ? 's' : ''}</span>
+          <span className="text-sm text-muted-foreground">
+            {isLoadingDocuments ? '' : `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? 's' : ''}`}
+          </span>
         </div>
         <Separator className="mb-4" />
 
         <div className="divide-y divide-border">
-          {visibleDocuments.length === 0 && (
+          {isLoadingDocuments ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : visibleDocuments.length === 0 ? (
             <p className="py-12 text-center text-sm text-muted-foreground">No documents found.</p>
-          )}
+          ) : null}
 
           {visibleDocuments.map(doc => {
             const isExpanded = expandedDocId === doc.id;
