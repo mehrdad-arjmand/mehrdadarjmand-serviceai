@@ -314,6 +314,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
   // Documents
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true);
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(10);
 
