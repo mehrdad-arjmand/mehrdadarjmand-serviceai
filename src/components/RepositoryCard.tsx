@@ -479,6 +479,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const autoRetryingIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    setIsLoadingDocuments(true);
     fetchDocuments();
     const docsChannel = supabase.channel('repository-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).subscribe();
     const chunksChannel = supabase.channel('repository-chunks').on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments).subscribe();
