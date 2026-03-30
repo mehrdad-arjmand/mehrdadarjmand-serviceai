@@ -318,6 +318,7 @@ const Projects = () => {
   const [availableRoles, setAvailableRoles] = useState<RoleOption[]>([]);
   const [allUsers, setAllUsers] = useState<UserOption[]>([]);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{id: string;name: string;} | null>(null);
   const [editTarget, setEditTarget] = useState<Project | null>(null);
   const [editName, setEditName] = useState("");
