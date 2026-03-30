@@ -182,6 +182,8 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
       fetchDocuments();
 
       // PHASE 2: Generate embeddings — ALL documents in parallel using full mode
+      // Refresh session before invoking to avoid stale token 401s
+      await supabase.auth.getSession();
       await Promise.allSettled(
         documentIds.map(async (docId) => {
           try {

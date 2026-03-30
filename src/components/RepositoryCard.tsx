@@ -988,7 +988,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       await fetchDocuments();
 
-      // Use 'full' mode so generate-embeddings processes all chunks in one call
+      // Refresh session before invoking to avoid stale token 401s
+      await supabase.auth.getSession();
       const { data: embedResponse, error: embedError } = await supabase.functions.invoke(
         'generate-embeddings',
         { body: { documentId: doc.id, mode: 'full' } }
