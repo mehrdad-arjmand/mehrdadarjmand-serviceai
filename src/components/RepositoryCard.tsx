@@ -534,8 +534,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           });
         }
 
-        // Document stuck in 'in_progress' for >120s with 0 chunks — something failed during extraction
-        if (doc.ingestionStatus === 'in_progress' && stuckDuration > 120_000 && doc.totalChunks === 0) {
+        // Document stuck in 'in_progress' for >5 min with 0 chunks — likely a real failure (not just queued)
+        if (doc.ingestionStatus === 'in_progress' && stuckDuration > 300_000 && doc.totalChunks === 0) {
           console.log(`Auto-recovery: marking "${doc.fileName}" as failed (stuck in_progress with 0 chunks for ${Math.round(stuckDuration / 1000)}s)`);
           autoRetryingIds.current.add(doc.id);
           
@@ -570,33 +570,44 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     if (filesToUpload.length === 0) return;
     if (selectedRoles.length === 0) { toast({ title: "Select an access role", variant: "destructive" }); return; }
     setIsUploading(true);
+
+    const BATCH_SIZE = 3; // Send files in small batches to avoid Edge Function timeouts
+    let totalUploaded = 0;
+
     try {
-      const formData = new FormData();
-      filesToUpload.forEach(f => formData.append('files', f));
-      formData.append('uploadDate', new Date().toISOString().split('T')[0]);
-      formData.append('allowedRoles', JSON.stringify(selectedRoles));
-      if (projectId) formData.append('projectId', projectId);
-      
-      // Send dynamic metadata as JSON
-      formData.append('dynamicMetadata', JSON.stringify(uploadMetadata));
+      for (let i = 0; i < filesToUpload.length; i += BATCH_SIZE) {
+        const batch = filesToUpload.slice(i, i + BATCH_SIZE);
+        const formData = new FormData();
+        batch.forEach(f => formData.append('files', f));
+        formData.append('uploadDate', new Date().toISOString().split('T')[0]);
+        formData.append('allowedRoles', JSON.stringify(selectedRoles));
+        if (projectId) formData.append('projectId', projectId);
+        
+        // Send dynamic metadata as JSON
+        formData.append('dynamicMetadata', JSON.stringify(uploadMetadata));
 
-      // Also send legacy fields for backward compatibility
-      if (uploadMetadata['Document Type']) formData.append('docType', uploadMetadata['Document Type']);
-      if (uploadMetadata['Site']) formData.append('site', uploadMetadata['Site']);
-      if (uploadMetadata['Equipment Type']) formData.append('equipmentType', uploadMetadata['Equipment Type']);
-      if (uploadMetadata['Make']) formData.append('equipmentMake', uploadMetadata['Make']);
-      if (uploadMetadata['Model']) formData.append('equipmentModel', uploadMetadata['Model']);
+        // Also send legacy fields for backward compatibility
+        if (uploadMetadata['Document Type']) formData.append('docType', uploadMetadata['Document Type']);
+        if (uploadMetadata['Site']) formData.append('site', uploadMetadata['Site']);
+        if (uploadMetadata['Equipment Type']) formData.append('equipmentType', uploadMetadata['Equipment Type']);
+        if (uploadMetadata['Make']) formData.append('equipmentMake', uploadMetadata['Make']);
+        if (uploadMetadata['Model']) formData.append('equipmentModel', uploadMetadata['Model']);
 
-      const { data, error } = await supabase.functions.invoke('ingest', { body: formData });
-      if (error) throw error;
-      if (data.success) {
-        toast({ title: "Upload successful", description: `${data.documents.length} file(s) queued for indexing.` });
-        setSelectedFiles([]);
-        setUploadMetadata({});
-        setSelectedRoles(["all"]); setMetadataOpen(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+        // Refresh session before each batch to avoid stale token
+        await supabase.auth.getSession();
+
+        const { data, error } = await supabase.functions.invoke('ingest', { body: formData });
+        if (error) throw error;
+        if (!data.success) throw new Error(data.error || 'Upload failed');
+        totalUploaded += data.documents.length;
         await fetchDocuments();
-      } else throw new Error(data.error || 'Upload failed');
+      }
+
+      toast({ title: "Upload successful", description: `${totalUploaded} file(s) queued for indexing.` });
+      setSelectedFiles([]);
+      setUploadMetadata({});
+      setSelectedRoles(["all"]); setMetadataOpen(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (e: any) { toast({ title: "Upload failed", description: e.message, variant: "destructive" }); }
     finally { setIsUploading(false); }
   };
