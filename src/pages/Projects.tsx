@@ -843,11 +843,6 @@ const Projects = () => {
                                Delete
                              </button>
                        }
-                           <button
-                         onClick={(e) => {e.stopPropagation();navigate(`/?project=${project.id}`);}}
-                         className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium">
-                             Open
-                           </button>
                          </div>
                        </div>
                    }
