@@ -534,8 +534,8 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           });
         }
 
-        // Document stuck in 'in_progress' for >120s with 0 chunks — something failed during extraction
-        if (doc.ingestionStatus === 'in_progress' && stuckDuration > 120_000 && doc.totalChunks === 0) {
+        // Document stuck in 'in_progress' for >5 min with 0 chunks — likely a real failure (not just queued)
+        if (doc.ingestionStatus === 'in_progress' && stuckDuration > 300_000 && doc.totalChunks === 0) {
           console.log(`Auto-recovery: marking "${doc.fileName}" as failed (stuck in_progress with 0 chunks for ${Math.round(stuckDuration / 1000)}s)`);
           autoRetryingIds.current.add(doc.id);
           

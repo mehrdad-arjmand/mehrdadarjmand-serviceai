@@ -450,16 +450,25 @@ Deno.serve(async (req) => {
           }
         }
       } else {
-        const settled = await Promise.allSettled(
-          workItems.map(({ fileData, doc }) => processFile(fileData, doc).then(ok => ({ ok, docId: doc.id })))
-        )
+        // Paid tier: process files in small batches to avoid Edge Function timeout
+        const PAID_BATCH = 3
+        const allReadyDocIds: string[] = []
 
-        const readyDocIds = settled
-          .filter((result): result is PromiseFulfilledResult<{ ok: boolean; docId: string }> => result.status === 'fulfilled')
-          .filter(result => result.value.ok)
-          .map(result => result.value.docId)
+        for (let i = 0; i < workItems.length; i += PAID_BATCH) {
+          const batch = workItems.slice(i, i + PAID_BATCH)
+          const settled = await Promise.allSettled(
+            batch.map(({ fileData, doc }) => processFile(fileData, doc).then(ok => ({ ok, docId: doc.id })))
+          )
 
-        await triggerEmbeddings(readyDocIds, `${readyDocIds.length} document(s)`) 
+          const readyDocIds = settled
+            .filter((result): result is PromiseFulfilledResult<{ ok: boolean; docId: string }> => result.status === 'fulfilled')
+            .filter(result => result.value.ok)
+            .map(result => result.value.docId)
+
+          allReadyDocIds.push(...readyDocIds)
+        }
+
+        await triggerEmbeddings(allReadyDocIds, `${allReadyDocIds.length} document(s)`) 
       }
     })()
 
