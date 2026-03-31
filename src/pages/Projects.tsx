@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Search, X, Loader2, ChevronRight, ChevronDown, Check, FolderOpen } from "lucide-react";
+import { Plus, Search, X, Loader2, Settings, ChevronDown, Check, FolderOpen } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { format } from "date-fns";
 import { toast } from "@/hooks/use-toast";

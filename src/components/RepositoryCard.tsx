@@ -1107,17 +1107,15 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
       const progress = doc.totalChunks > 0 ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100) : 0;
       return (
-        <div className="inline-flex items-center gap-2 min-w-[140px]">
-          <div className="relative flex-1 h-5 rounded-full overflow-hidden border" style={{ background: 'hsl(38 92% 96%)', borderColor: 'hsl(38 80% 75%)' }}>
-            <div
-              className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
-              style={{ width: `${progress}%`, background: 'hsl(32 95% 44%)' }}
+        <span className="inline-flex items-center text-xs font-medium rounded-full border overflow-hidden min-w-[90px]" style={{ borderColor: 'hsl(38 80% 75%)' }}>
+          <span className="relative h-[26px] w-full flex items-center justify-center" style={{ background: 'hsl(0 0% 100%)' }}>
+            <span
+              className="absolute inset-y-0 left-0 transition-all duration-700 ease-out rounded-full"
+              style={{ width: `${progress}%`, background: 'hsl(32 95% 84%)' }}
             />
-            <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold" style={{ color: progress > 50 ? 'white' : 'hsl(32 95% 44%)' }}>
-              {doc.embeddedChunks}/{doc.totalChunks} chunks
-            </span>
-          </div>
-        </div>
+            <span className="relative z-10 px-2.5" style={{ color: 'hsl(32 95% 35%)' }}>Processing</span>
+          </span>
+        </span>
       );
     }
     return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
