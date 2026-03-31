@@ -800,12 +800,12 @@ const Projects = () => {
                          )}>
                            {isOwner ? "Owner" : "Shared"}
                          </Badge>
-                         <button
-                           onClick={(e) => { e.stopPropagation(); setExpandedProjectId(isExpanded ? null : project.id); }}
-                           className="p-1 rounded hover:bg-muted/60 transition-colors"
-                         >
-                           <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", !isExpanded && "-rotate-90")} />
-                         </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setExpandedProjectId(isExpanded ? null : project.id); }}
+                            className="p-1 rounded hover:bg-muted/60 transition-colors"
+                          >
+                            <Settings className={cn("h-4 w-4 text-muted-foreground transition-colors", isExpanded && "text-foreground")} />
+                          </button>
                        </div>
                      </div>
 
