@@ -181,24 +181,22 @@ export const DocumentUpload = ({ onIndexComplete }: DocumentUploadProps) => {
       setFiles([]);
       fetchDocuments();
 
-      // PHASE 2: Generate embeddings — ALL documents in parallel using full mode
+      // PHASE 2: Generate embeddings — process sequentially to avoid overwhelming
       // Refresh session before invoking to avoid stale token 401s
-      await supabase.auth.getSession();
-      await Promise.allSettled(
-        documentIds.map(async (docId) => {
-          try {
-            const embedResponse = await supabase.functions.invoke(
-              "generate-embeddings",
-              { body: { documentId: docId, mode: 'full' } }
-            );
-            if (embedResponse.error) {
-              console.error(`Embedding error for ${docId}:`, embedResponse.error);
-            }
-          } catch (err) {
-            console.error(`Embedding failed for ${docId}:`, err);
+      for (const docId of documentIds) {
+        try {
+          await supabase.auth.getSession();
+          const embedResponse = await supabase.functions.invoke(
+            "generate-embeddings",
+            { body: { documentId: docId, mode: 'full' } }
+          );
+          if (embedResponse.error) {
+            console.error(`Embedding error for ${docId}:`, embedResponse.error);
           }
-        })
-      );
+        } catch (err) {
+          console.error(`Embedding failed for ${docId}:`, err);
+        }
+      }
 
       fetchDocuments();
       toast({
