@@ -497,6 +497,34 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       // Auto-recovery: detect stuck documents and retrigger processing
       for (const doc of docs) {
+        const isAlreadyRetrying = autoRetryingIds.current.has(doc.id);
+        if (isAlreadyRetrying || reprocessingIds.has(doc.id)) continue;
+
+        // Auto-retry failed docs that HAVE chunks → retrigger embeddings
+        if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
+          console.log(`Auto-recovery: auto-retrying failed doc "${doc.fileName}" (has ${doc.totalChunks} chunks, ${doc.embeddedChunks} embedded)`);
+          autoRetryingIds.current.add(doc.id);
+
+          (async () => {
+            try {
+              await supabase.from('documents').update({
+                ingestion_status: 'processing_embeddings',
+                ingestion_error: null,
+              }).eq('id', doc.id);
+              await supabase.auth.getSession();
+              await supabase.functions.invoke('generate-embeddings', {
+                body: { documentId: doc.id, mode: 'full' }
+              });
+              console.log(`Auto-recovery: embeddings re-triggered for "${doc.fileName}"`);
+            } catch (err) {
+              console.error(`Auto-recovery failed for "${doc.fileName}":`, err);
+            } finally {
+              autoRetryingIds.current.delete(doc.id);
+            }
+          })();
+          continue;
+        }
+
         if (doc.ingestionStatus !== 'in_progress' && doc.ingestionStatus !== 'processing_embeddings') {
           delete docStatusTimestamps.current[doc.id];
           continue;
@@ -509,18 +537,13 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         }
 
         const stuckDuration = now - docStatusTimestamps.current[doc.id];
-        const isAlreadyRetrying = autoRetryingIds.current.has(doc.id);
-
-        // Skip if already retrying or if reprocessing manually
-        if (isAlreadyRetrying || reprocessingIds.has(doc.id)) continue;
 
         // Document stuck in 'processing_embeddings' for >90s — retrigger embeddings
         if (doc.ingestionStatus === 'processing_embeddings' && stuckDuration > 90_000 && doc.totalChunks > 0) {
           console.log(`Auto-recovery: retriggering embeddings for "${doc.fileName}" (stuck ${Math.round(stuckDuration / 1000)}s)`);
           autoRetryingIds.current.add(doc.id);
-          docStatusTimestamps.current[doc.id] = now; // Reset timer
+          docStatusTimestamps.current[doc.id] = now;
 
-          // Refresh session before invoking to avoid stale token 401s
           supabase.auth.getSession().then(() =>
             supabase.functions.invoke('generate-embeddings', {
               body: { documentId: doc.id, mode: 'full' }
@@ -534,7 +557,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           });
         }
 
-        // Document stuck in 'in_progress' for >5 min with 0 chunks — mark as failed (server-side extraction timed out)
+        // Document stuck in 'in_progress' for >5 min with 0 chunks — mark as failed
         if (doc.ingestionStatus === 'in_progress' && stuckDuration > 300_000 && doc.totalChunks === 0) {
           console.log(`Auto-recovery: marking "${doc.fileName}" as failed (stuck in_progress with 0 chunks for ${Math.round(stuckDuration / 1000)}s)`);
           autoRetryingIds.current.add(doc.id);
@@ -546,30 +569,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             fetchDocuments();
             autoRetryingIds.current.delete(doc.id);
             delete docStatusTimestamps.current[doc.id];
-          });
-        }
-
-        // Document marked 'failed' but HAS chunks → auto-retry embeddings
-        if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
-          console.log(`Auto-recovery: auto-retrying failed doc "${doc.fileName}" (has ${doc.totalChunks} chunks, ${doc.embeddedChunks} embedded)`);
-          autoRetryingIds.current.add(doc.id);
-          docStatusTimestamps.current[doc.id] = now;
-
-          supabase.from('documents').update({
-            ingestion_status: 'processing_embeddings',
-            ingestion_error: null,
-          }).eq('id', doc.id).then(() =>
-            supabase.auth.getSession()
-          ).then(() =>
-            supabase.functions.invoke('generate-embeddings', {
-              body: { documentId: doc.id, mode: 'full' }
-            })
-          ).then(() => {
-            console.log(`Auto-recovery: embeddings re-triggered for failed doc "${doc.fileName}"`);
-          }).catch(err => {
-            console.error(`Auto-recovery failed for "${doc.fileName}":`, err);
-          }).finally(() => {
-            autoRetryingIds.current.delete(doc.id);
           });
         }
       }
