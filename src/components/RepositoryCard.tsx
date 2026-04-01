@@ -534,7 +534,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           });
         }
 
-        // Document stuck in 'in_progress' for >5 min with 0 chunks — likely a real failure (not just queued)
+        // Document stuck in 'in_progress' for >5 min with 0 chunks — mark as failed (server-side extraction timed out)
         if (doc.ingestionStatus === 'in_progress' && stuckDuration > 300_000 && doc.totalChunks === 0) {
           console.log(`Auto-recovery: marking "${doc.fileName}" as failed (stuck in_progress with 0 chunks for ${Math.round(stuckDuration / 1000)}s)`);
           autoRetryingIds.current.add(doc.id);
@@ -546,6 +546,30 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
             fetchDocuments();
             autoRetryingIds.current.delete(doc.id);
             delete docStatusTimestamps.current[doc.id];
+          });
+        }
+
+        // Document marked 'failed' but HAS chunks → auto-retry embeddings
+        if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
+          console.log(`Auto-recovery: auto-retrying failed doc "${doc.fileName}" (has ${doc.totalChunks} chunks, ${doc.embeddedChunks} embedded)`);
+          autoRetryingIds.current.add(doc.id);
+          docStatusTimestamps.current[doc.id] = now;
+
+          supabase.from('documents').update({
+            ingestion_status: 'processing_embeddings',
+            ingestion_error: null,
+          }).eq('id', doc.id).then(() =>
+            supabase.auth.getSession()
+          ).then(() =>
+            supabase.functions.invoke('generate-embeddings', {
+              body: { documentId: doc.id, mode: 'full' }
+            })
+          ).then(() => {
+            console.log(`Auto-recovery: embeddings re-triggered for failed doc "${doc.fileName}"`);
+          }).catch(err => {
+            console.error(`Auto-recovery failed for "${doc.fileName}":`, err);
+          }).finally(() => {
+            autoRetryingIds.current.delete(doc.id);
           });
         }
       }
