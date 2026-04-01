@@ -608,6 +608,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       setUploadMetadata({});
       setSelectedRoles(["all"]); setMetadataOpen(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+
+      // Post-upload retry sweep: wait then auto-retry any failed/stuck documents
+      scheduleRetrySwitch();
     } catch (e: any) { toast({ title: "Upload failed", description: e.message, variant: "destructive" }); }
     finally { setIsUploading(false); }
   };
