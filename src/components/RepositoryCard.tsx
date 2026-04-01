@@ -565,6 +565,54 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     await fetchDropdownOptions();
   };
 
+  // ── Post-upload retry sweep ──
+  const retrySweepTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRetrySwitch = () => {
+    // Clear any existing sweep
+    if (retrySweepTimer.current) clearTimeout(retrySweepTimer.current);
+
+    // Run retry sweeps at 30s and 90s after upload completes
+    const runSweep = async (attempt: number) => {
+      await fetchDocuments();
+      const docs = documentsRef.current;
+      const failedOrStuck = docs.filter(d =>
+        d.ingestionStatus === 'failed' ||
+        (d.ingestionStatus === 'in_progress' && d.totalChunks === 0) ||
+        (d.ingestionStatus === 'processing_embeddings' && d.totalChunks > 0 && d.embeddedChunks < d.totalChunks)
+      );
+
+      if (failedOrStuck.length === 0) return;
+
+      console.log(`Retry sweep #${attempt}: found ${failedOrStuck.length} documents needing retry`);
+
+      for (const doc of failedOrStuck) {
+        if (reprocessingIds.has(doc.id) || autoRetryingIds.current.has(doc.id)) continue;
+
+        // Documents with chunks but incomplete embeddings → retrigger embeddings
+        if (doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
+          console.log(`Retry sweep: retriggering embeddings for "${doc.fileName}"`);
+          autoRetryingIds.current.add(doc.id);
+          await supabase.from('documents').update({
+            ingestion_status: 'processing_embeddings',
+            ingestion_error: null,
+          }).eq('id', doc.id);
+          await supabase.auth.getSession();
+          supabase.functions.invoke('generate-embeddings', {
+            body: { documentId: doc.id, mode: 'full' }
+          }).finally(() => autoRetryingIds.current.delete(doc.id));
+          // Small delay between retries to avoid overwhelming API
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+    };
+
+    // First sweep after 30s
+    retrySweepTimer.current = setTimeout(() => runSweep(1), 30_000);
+    // Second sweep after 90s
+    setTimeout(() => runSweep(2), 90_000);
+  };
+
   // ── Upload ──
   const handleUpload = async (filesToUpload: File[]) => {
     if (filesToUpload.length === 0) return;
