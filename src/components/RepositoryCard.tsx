@@ -497,6 +497,34 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
       // Auto-recovery: detect stuck documents and retrigger processing
       for (const doc of docs) {
+        const isAlreadyRetrying = autoRetryingIds.current.has(doc.id);
+        if (isAlreadyRetrying || reprocessingIds.has(doc.id)) continue;
+
+        // Auto-retry failed docs that HAVE chunks → retrigger embeddings
+        if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
+          console.log(`Auto-recovery: auto-retrying failed doc "${doc.fileName}" (has ${doc.totalChunks} chunks, ${doc.embeddedChunks} embedded)`);
+          autoRetryingIds.current.add(doc.id);
+
+          (async () => {
+            try {
+              await supabase.from('documents').update({
+                ingestion_status: 'processing_embeddings',
+                ingestion_error: null,
+              }).eq('id', doc.id);
+              await supabase.auth.getSession();
+              await supabase.functions.invoke('generate-embeddings', {
+                body: { documentId: doc.id, mode: 'full' }
+              });
+              console.log(`Auto-recovery: embeddings re-triggered for "${doc.fileName}"`);
+            } catch (err) {
+              console.error(`Auto-recovery failed for "${doc.fileName}":`, err);
+            } finally {
+              autoRetryingIds.current.delete(doc.id);
+            }
+          })();
+          continue;
+        }
+
         if (doc.ingestionStatus !== 'in_progress' && doc.ingestionStatus !== 'processing_embeddings') {
           delete docStatusTimestamps.current[doc.id];
           continue;
@@ -509,18 +537,13 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         }
 
         const stuckDuration = now - docStatusTimestamps.current[doc.id];
-        const isAlreadyRetrying = autoRetryingIds.current.has(doc.id);
-
-        // Skip if already retrying or if reprocessing manually
-        if (isAlreadyRetrying || reprocessingIds.has(doc.id)) continue;
 
         // Document stuck in 'processing_embeddings' for >90s — retrigger embeddings
         if (doc.ingestionStatus === 'processing_embeddings' && stuckDuration > 90_000 && doc.totalChunks > 0) {
           console.log(`Auto-recovery: retriggering embeddings for "${doc.fileName}" (stuck ${Math.round(stuckDuration / 1000)}s)`);
           autoRetryingIds.current.add(doc.id);
-          docStatusTimestamps.current[doc.id] = now; // Reset timer
+          docStatusTimestamps.current[doc.id] = now;
 
-          // Refresh session before invoking to avoid stale token 401s
           supabase.auth.getSession().then(() =>
             supabase.functions.invoke('generate-embeddings', {
               body: { documentId: doc.id, mode: 'full' }
@@ -534,7 +557,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
           });
         }
 
-        // Document stuck in 'in_progress' for >5 min with 0 chunks — likely a real failure (not just queued)
+        // Document stuck in 'in_progress' for >5 min with 0 chunks — mark as failed
         if (doc.ingestionStatus === 'in_progress' && stuckDuration > 300_000 && doc.totalChunks === 0) {
           console.log(`Auto-recovery: marking "${doc.fileName}" as failed (stuck in_progress with 0 chunks for ${Math.round(stuckDuration / 1000)}s)`);
           autoRetryingIds.current.add(doc.id);
@@ -563,6 +586,54 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     if (!value.trim()) return;
     await supabase.from('dropdown_options').insert({ category, value: value.trim() });
     await fetchDropdownOptions();
+  };
+
+  // ── Post-upload retry sweep ──
+  const retrySweepTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRetrySwitch = () => {
+    // Clear any existing sweep
+    if (retrySweepTimer.current) clearTimeout(retrySweepTimer.current);
+
+    // Run retry sweeps at 30s and 90s after upload completes
+    const runSweep = async (attempt: number) => {
+      await fetchDocuments();
+      const docs = documentsRef.current;
+      const failedOrStuck = docs.filter(d =>
+        d.ingestionStatus === 'failed' ||
+        (d.ingestionStatus === 'in_progress' && d.totalChunks === 0) ||
+        (d.ingestionStatus === 'processing_embeddings' && d.totalChunks > 0 && d.embeddedChunks < d.totalChunks)
+      );
+
+      if (failedOrStuck.length === 0) return;
+
+      console.log(`Retry sweep #${attempt}: found ${failedOrStuck.length} documents needing retry`);
+
+      for (const doc of failedOrStuck) {
+        if (reprocessingIds.has(doc.id) || autoRetryingIds.current.has(doc.id)) continue;
+
+        // Documents with chunks but incomplete embeddings → retrigger embeddings
+        if (doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
+          console.log(`Retry sweep: retriggering embeddings for "${doc.fileName}"`);
+          autoRetryingIds.current.add(doc.id);
+          await supabase.from('documents').update({
+            ingestion_status: 'processing_embeddings',
+            ingestion_error: null,
+          }).eq('id', doc.id);
+          await supabase.auth.getSession();
+          supabase.functions.invoke('generate-embeddings', {
+            body: { documentId: doc.id, mode: 'full' }
+          }).finally(() => autoRetryingIds.current.delete(doc.id));
+          // Small delay between retries to avoid overwhelming API
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+    };
+
+    // First sweep after 30s
+    retrySweepTimer.current = setTimeout(() => runSweep(1), 30_000);
+    // Second sweep after 90s
+    setTimeout(() => runSweep(2), 90_000);
   };
 
   // ── Upload ──
@@ -608,6 +679,9 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       setUploadMetadata({});
       setSelectedRoles(["all"]); setMetadataOpen(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+
+      // Post-upload retry sweep: wait then auto-retry any failed/stuck documents
+      scheduleRetrySwitch();
     } catch (e: any) { toast({ title: "Upload failed", description: e.message, variant: "destructive" }); }
     finally { setIsUploading(false); }
   };
