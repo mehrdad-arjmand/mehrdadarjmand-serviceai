@@ -204,6 +204,7 @@ const Index = () => {
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
                 <main className="bg-popover">
                   <RepositoryCard
+                    apiTier={permissions.apiTier}
                     onDocumentSelect={setSelectedDocumentId}
                     permissions={permissions.repository}
                     projectId={projectId}

@@ -13,6 +13,7 @@ export interface TabPermissions {
 
 export interface UserPermissions {
   role: AppRole | null;
+  apiTier: string;
   repository: TabPermissions;
   assistant: TabPermissions;
   landing: TabPermissions;
@@ -29,6 +30,7 @@ const defaultPermissions: TabPermissions = {
 export function usePermissions(): UserPermissions {
   const { user } = useAuth();
   const [role, setRole] = useState<AppRole | null>(null);
+  const [apiTier, setApiTier] = useState("free");
   const [repository, setRepository] = useState<TabPermissions>(defaultPermissions);
   const [assistant, setAssistant] = useState<TabPermissions>(defaultPermissions);
   const [landing, setLanding] = useState<TabPermissions>(defaultPermissions);
@@ -37,6 +39,7 @@ export function usePermissions(): UserPermissions {
   const fetchPermissions = useCallback(async () => {
     if (!user) {
       setRole(null);
+      setApiTier("free");
       setRepository(defaultPermissions);
       setAssistant(defaultPermissions);
       setLanding(defaultPermissions);
@@ -52,12 +55,14 @@ export function usePermissions(): UserPermissions {
         console.error('Error fetching permissions:', error);
         // Default to basic user permissions if no role is assigned
         setRole('demo');
+        setApiTier('free');
         setRepository({ read: true, write: false, delete: false });
         setAssistant({ read: true, write: true, delete: false });
         setLanding({ read: true, write: false, delete: false });
       } else if (data && data.length > 0) {
         const perms = data[0];
         setRole(perms.role as AppRole);
+        setApiTier((perms as { api_tier?: string }).api_tier ?? 'free');
         setRepository({
           read: perms.repository_read,
           write: perms.repository_write,
@@ -77,6 +82,7 @@ export function usePermissions(): UserPermissions {
         // No role assigned - default to demo permissions
         console.log('No role assigned for user, using default demo permissions');
         setRole('demo');
+        setApiTier('free');
         setRepository({ read: true, write: false, delete: false });
         setAssistant({ read: true, write: true, delete: false });
         setLanding({ read: true, write: false, delete: false });
@@ -84,6 +90,7 @@ export function usePermissions(): UserPermissions {
     } catch (err) {
       console.error('Error fetching permissions:', err);
       setRole('demo');
+      setApiTier('free');
       setRepository({ read: true, write: false, delete: false });
       setAssistant({ read: true, write: true, delete: false });
       setLanding({ read: true, write: false, delete: false });
@@ -98,6 +105,7 @@ export function usePermissions(): UserPermissions {
 
   return {
     role,
+    apiTier,
     repository,
     assistant,
     landing,
