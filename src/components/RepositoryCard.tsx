@@ -625,6 +625,13 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
 
       for (const doc of docs) {
+        if (isPaidTier && !autoRetryingIds.current.has(doc.id) && !reprocessingIdsRef.current.has(doc.id)) {
+          if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
+            triggerEmbeddingRecovery(doc, 'Paid live recovery');
+            continue;
+          }
+        }
+
         if (doc.ingestionStatus !== 'in_progress' && doc.ingestionStatus !== 'processing_embeddings') {
           delete docProgressRef.current[doc.id];
           continue;
@@ -651,11 +658,6 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         }
 
         if (!isPaidTier || autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) {
-          continue;
-        }
-
-        if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
-          triggerEmbeddingRecovery(doc, 'Paid live recovery');
           continue;
         }
 
