@@ -56,6 +56,7 @@ interface Project {
 }
 
 interface RepositoryCardProps {
+  apiTier?: string;
   onDocumentSelect?: (id: string | null) => void;
   permissions: TabPermissions;
   projectId?: string;
@@ -292,9 +293,10 @@ const DocumentMultiSelect = ({ label, selectedIds, documents, onChange }: Docume
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, projects, currentProject, onProjectSwitch, tabSwitcher }: RepositoryCardProps) => {
+export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions, projectId, projects, currentProject, onProjectSwitch, tabSwitcher }: RepositoryCardProps) => {
   const canWrite = permissions.write;
   const canDelete = permissions.delete;
+  const isPaidTier = apiTier === "paid";
 
   // Project metadata fields
   const [projectFields, setProjectFields] = useState<string[]>([]);
@@ -317,6 +319,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true);
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(10);
+  const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set());
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -361,6 +364,20 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const editContentTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const reprocessingIdsRef = useRef(reprocessingIds);
+  const autoRetryingIds = useRef<Set<string>>(new Set());
+  const scheduledRecoveryTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const docProgressRef = useRef<Record<string, { status: string; statusSince: number; embeddedChunks: number; lastProgressAt: number }>>({});
+
+  const PAID_RETRY_SWEEP_DELAYS = [30_000, 90_000];
+  const PAID_STALLED_EMBEDDING_MS = 90_000;
+  const FREE_QUEUE_POLL_MS = 10_000;
+  const FREE_POST_QUEUE_SETTLE_MS = 20_000;
+  const FREE_STALLED_EMBEDDING_MS = 60_000;
+
+  useEffect(() => {
+    reprocessingIdsRef.current = reprocessingIds;
+  }, [reprocessingIds]);
 
   useEffect(() => {
     if (!isDictating) return;
@@ -474,9 +491,121 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
   const documentsRef = useRef(documents);
   documentsRef.current = documents;
 
-  // Track when documents entered their current status for stuck detection
-  const docStatusTimestamps = useRef<Record<string, number>>({});
-  const autoRetryingIds = useRef<Set<string>>(new Set());
+  const clearScheduledRecoveryTimers = () => {
+    scheduledRecoveryTimers.current.forEach(clearTimeout);
+    scheduledRecoveryTimers.current = [];
+  };
+
+  const triggerEmbeddingRecovery = async (doc: Document, reason: string) => {
+    if (autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) return false;
+
+    console.log(`${reason}: retriggering embeddings for "${doc.fileName}"`);
+    autoRetryingIds.current.add(doc.id);
+    docProgressRef.current[doc.id] = {
+      status: 'processing_embeddings',
+      statusSince: Date.now(),
+      embeddedChunks: doc.embeddedChunks,
+      lastProgressAt: Date.now(),
+    };
+
+    try {
+      const { error: updateError } = await supabase.from('documents').update({
+        ingestion_status: 'processing_embeddings',
+        ingestion_error: null,
+      }).eq('id', doc.id);
+      if (updateError) throw updateError;
+
+      await supabase.auth.getSession();
+      const { error } = await supabase.functions.invoke('generate-embeddings', {
+        body: { documentId: doc.id, mode: 'full' }
+      });
+      if (error) throw error;
+
+      return true;
+    } catch (err) {
+      console.error(`${reason} failed for "${doc.fileName}":`, err);
+      return false;
+    } finally {
+      autoRetryingIds.current.delete(doc.id);
+    }
+  };
+
+  const runRecoverySweep = async (
+    targetDocIds: string[],
+    reason: string,
+    stalledEmbeddingMs: number,
+  ) => {
+    if (targetDocIds.length === 0) return;
+
+    await fetchDocuments();
+
+    const targetIds = new Set(targetDocIds);
+    const now = Date.now();
+    const recoverableDocs = documentsRef.current.filter((doc) => {
+      if (!targetIds.has(doc.id)) return false;
+      if (autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) return false;
+      if (doc.totalChunks === 0 || doc.embeddedChunks >= doc.totalChunks) return false;
+
+      if (doc.ingestionStatus === 'failed') return true;
+
+      if (doc.ingestionStatus === 'processing_embeddings') {
+        const progress = docProgressRef.current[doc.id];
+        return !progress || now - progress.lastProgressAt >= stalledEmbeddingMs;
+      }
+
+      return false;
+    });
+
+    for (let i = 0; i < recoverableDocs.length; i++) {
+      await triggerEmbeddingRecovery(recoverableDocs[i], reason);
+
+      if (!isPaidTier && i < recoverableDocs.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+      }
+    }
+  };
+
+  const schedulePostUploadRecovery = (uploadedDocIds: string[]) => {
+    clearScheduledRecoveryTimers();
+    if (uploadedDocIds.length === 0) return;
+
+    if (isPaidTier) {
+      PAID_RETRY_SWEEP_DELAYS.forEach((delayMs, index) => {
+        const timer = setTimeout(() => {
+          runRecoverySweep(uploadedDocIds, `Paid retry sweep #${index + 1}`, PAID_STALLED_EMBEDDING_MS);
+        }, delayMs);
+        scheduledRecoveryTimers.current.push(timer);
+      });
+      return;
+    }
+
+    const watchFreeQueue = async () => {
+      await fetchDocuments();
+
+      const targetIds = new Set(uploadedDocIds);
+      const hasQueuedDocuments = documentsRef.current.some((doc) =>
+        targetIds.has(doc.id) && doc.ingestionStatus === 'in_progress' && doc.totalChunks === 0
+      );
+
+      if (hasQueuedDocuments) {
+        const timer = setTimeout(() => {
+          watchFreeQueue();
+        }, FREE_QUEUE_POLL_MS);
+        scheduledRecoveryTimers.current.push(timer);
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        runRecoverySweep(uploadedDocIds, 'Free-tier final retry pass', FREE_STALLED_EMBEDDING_MS);
+      }, FREE_POST_QUEUE_SETTLE_MS);
+      scheduledRecoveryTimers.current.push(timer);
+    };
+
+    const timer = setTimeout(() => {
+      watchFreeQueue();
+    }, FREE_QUEUE_POLL_MS);
+    scheduledRecoveryTimers.current.push(timer);
+  };
 
   useEffect(() => {
     setIsLoadingDocuments(true);
@@ -495,81 +624,45 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         fetchDocuments();
       }
 
-      // Auto-recovery: detect stuck documents and retrigger processing
       for (const doc of docs) {
-        const isAlreadyRetrying = autoRetryingIds.current.has(doc.id);
-        if (isAlreadyRetrying || reprocessingIds.has(doc.id)) continue;
-
-        // Auto-retry failed docs that HAVE chunks → retrigger embeddings
-        if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
-          console.log(`Auto-recovery: auto-retrying failed doc "${doc.fileName}" (has ${doc.totalChunks} chunks, ${doc.embeddedChunks} embedded)`);
-          autoRetryingIds.current.add(doc.id);
-
-          (async () => {
-            try {
-              await supabase.from('documents').update({
-                ingestion_status: 'processing_embeddings',
-                ingestion_error: null,
-              }).eq('id', doc.id);
-              await supabase.auth.getSession();
-              await supabase.functions.invoke('generate-embeddings', {
-                body: { documentId: doc.id, mode: 'full' }
-              });
-              console.log(`Auto-recovery: embeddings re-triggered for "${doc.fileName}"`);
-            } catch (err) {
-              console.error(`Auto-recovery failed for "${doc.fileName}":`, err);
-            } finally {
-              autoRetryingIds.current.delete(doc.id);
-            }
-          })();
-          continue;
-        }
-
         if (doc.ingestionStatus !== 'in_progress' && doc.ingestionStatus !== 'processing_embeddings') {
-          delete docStatusTimestamps.current[doc.id];
+          delete docProgressRef.current[doc.id];
           continue;
         }
 
-        // Initialize timestamp if not tracked
-        if (!docStatusTimestamps.current[doc.id]) {
-          docStatusTimestamps.current[doc.id] = now;
+        const previousProgress = docProgressRef.current[doc.id];
+        if (!previousProgress) {
+          docProgressRef.current[doc.id] = {
+            status: doc.ingestionStatus,
+            statusSince: now,
+            embeddedChunks: doc.embeddedChunks,
+            lastProgressAt: now,
+          };
+        } else {
+          if (previousProgress.status !== doc.ingestionStatus) {
+            previousProgress.status = doc.ingestionStatus;
+            previousProgress.statusSince = now;
+          }
+
+          if (doc.embeddedChunks > previousProgress.embeddedChunks) {
+            previousProgress.embeddedChunks = doc.embeddedChunks;
+            previousProgress.lastProgressAt = now;
+          }
+        }
+
+        if (!isPaidTier || autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) {
           continue;
         }
 
-        const stuckDuration = now - docStatusTimestamps.current[doc.id];
-
-        // Document stuck in 'processing_embeddings' for >90s — retrigger embeddings
-        if (doc.ingestionStatus === 'processing_embeddings' && stuckDuration > 90_000 && doc.totalChunks > 0) {
-          console.log(`Auto-recovery: retriggering embeddings for "${doc.fileName}" (stuck ${Math.round(stuckDuration / 1000)}s)`);
-          autoRetryingIds.current.add(doc.id);
-          docStatusTimestamps.current[doc.id] = now;
-
-          supabase.auth.getSession().then(() =>
-            supabase.functions.invoke('generate-embeddings', {
-              body: { documentId: doc.id, mode: 'full' }
-            })
-          ).then(() => {
-            console.log(`Auto-recovery: embeddings retriggered for "${doc.fileName}"`);
-          }).catch(err => {
-            console.error(`Auto-recovery failed for "${doc.fileName}":`, err);
-          }).finally(() => {
-            autoRetryingIds.current.delete(doc.id);
-          });
+        if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
+          triggerEmbeddingRecovery(doc, 'Paid live recovery');
+          continue;
         }
 
-        // Document stuck in 'in_progress' for >5 min with 0 chunks — mark as failed
-        if (doc.ingestionStatus === 'in_progress' && stuckDuration > 300_000 && doc.totalChunks === 0) {
-          console.log(`Auto-recovery: marking "${doc.fileName}" as failed (stuck in_progress with 0 chunks for ${Math.round(stuckDuration / 1000)}s)`);
-          autoRetryingIds.current.add(doc.id);
-          
-          supabase.from('documents').update({
-            ingestion_status: 'failed',
-            ingestion_error: 'Processing timed out. Click Reprocess to retry.'
-          }).eq('id', doc.id).then(() => {
-            fetchDocuments();
-            autoRetryingIds.current.delete(doc.id);
-            delete docStatusTimestamps.current[doc.id];
-          });
+        const progress = docProgressRef.current[doc.id];
+        const stalledFor = progress ? now - progress.lastProgressAt : 0;
+        if (doc.ingestionStatus === 'processing_embeddings' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks && stalledFor >= PAID_STALLED_EMBEDDING_MS) {
+          triggerEmbeddingRecovery(doc, 'Paid stalled embedding recovery');
         }
       }
     }, 10_000); // Check every 10 seconds
@@ -578,62 +671,15 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       supabase.removeChannel(docsChannel);
       supabase.removeChannel(chunksChannel);
       clearInterval(poll);
+      clearScheduledRecoveryTimers();
     };
-  }, [projectId]);
+  }, [isPaidTier, projectId]);
 
   // ── Add new dropdown option ──
   const handleAddOption = async (category: string, value: string) => {
     if (!value.trim()) return;
     await supabase.from('dropdown_options').insert({ category, value: value.trim() });
     await fetchDropdownOptions();
-  };
-
-  // ── Post-upload retry sweep ──
-  const retrySweepTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const scheduleRetrySwitch = () => {
-    // Clear any existing sweep
-    if (retrySweepTimer.current) clearTimeout(retrySweepTimer.current);
-
-    // Run retry sweeps at 30s and 90s after upload completes
-    const runSweep = async (attempt: number) => {
-      await fetchDocuments();
-      const docs = documentsRef.current;
-      const failedOrStuck = docs.filter(d =>
-        d.ingestionStatus === 'failed' ||
-        (d.ingestionStatus === 'in_progress' && d.totalChunks === 0) ||
-        (d.ingestionStatus === 'processing_embeddings' && d.totalChunks > 0 && d.embeddedChunks < d.totalChunks)
-      );
-
-      if (failedOrStuck.length === 0) return;
-
-      console.log(`Retry sweep #${attempt}: found ${failedOrStuck.length} documents needing retry`);
-
-      for (const doc of failedOrStuck) {
-        if (reprocessingIds.has(doc.id) || autoRetryingIds.current.has(doc.id)) continue;
-
-        // Documents with chunks but incomplete embeddings → retrigger embeddings
-        if (doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
-          console.log(`Retry sweep: retriggering embeddings for "${doc.fileName}"`);
-          autoRetryingIds.current.add(doc.id);
-          await supabase.from('documents').update({
-            ingestion_status: 'processing_embeddings',
-            ingestion_error: null,
-          }).eq('id', doc.id);
-          await supabase.auth.getSession();
-          supabase.functions.invoke('generate-embeddings', {
-            body: { documentId: doc.id, mode: 'full' }
-          }).finally(() => autoRetryingIds.current.delete(doc.id));
-          // Small delay between retries to avoid overwhelming API
-          await new Promise(r => setTimeout(r, 3000));
-        }
-      }
-    };
-
-    // First sweep after 30s
-    retrySweepTimer.current = setTimeout(() => runSweep(1), 30_000);
-    // Second sweep after 90s
-    setTimeout(() => runSweep(2), 90_000);
   };
 
   // ── Upload ──
@@ -644,6 +690,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
 
     const BATCH_SIZE = 3; // Send files in small batches to avoid Edge Function timeouts
     let totalUploaded = 0;
+    const uploadedDocIds: string[] = [];
 
     try {
       for (let i = 0; i < filesToUpload.length; i += BATCH_SIZE) {
@@ -671,6 +718,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
         if (error) throw error;
         if (!data.success) throw new Error(data.error || 'Upload failed');
         totalUploaded += data.documents.length;
+        uploadedDocIds.push(...data.documents.map((doc: { id: string }) => doc.id));
         await fetchDocuments();
       }
 
@@ -680,8 +728,7 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
       setSelectedRoles(["all"]); setMetadataOpen(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
-      // Post-upload retry sweep: wait then auto-retry any failed/stuck documents
-      scheduleRetrySwitch();
+      schedulePostUploadRecovery(uploadedDocIds);
     } catch (e: any) { toast({ title: "Upload failed", description: e.message, variant: "destructive" }); }
     finally { setIsUploading(false); }
   };
@@ -1015,9 +1062,6 @@ export const RepositoryCard = ({ onDocumentSelect, permissions, projectId, proje
     } catch (e: any) { toast({ title: "Update failed", description: e.message, variant: "destructive" }); }
     finally { setIsEditContentSaving(false); }
   };
-
-  // ── Reprocess ──
-  const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set());
 
   const handleReprocess = async (doc: Document) => {
     toast({ title: "Reprocessing", description: `Reindexing "${doc.fileName}"...` });
