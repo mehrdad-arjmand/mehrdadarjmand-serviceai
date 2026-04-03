@@ -374,6 +374,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const FREE_QUEUE_POLL_MS = 10_000;
   const FREE_POST_QUEUE_SETTLE_MS = 20_000;
   const FREE_STALLED_EMBEDDING_MS = 60_000;
+  const PAID_UPLOAD_BATCH_SIZE = 3;
 
   useEffect(() => {
     reprocessingIdsRef.current = reprocessingIds;
@@ -548,7 +549,10 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
       if (doc.ingestionStatus === 'failed') return true;
 
-      if (doc.ingestionStatus === 'processing_embeddings') {
+      if (
+        doc.ingestionStatus === 'processing_embeddings' ||
+        (doc.ingestionStatus === 'in_progress' && doc.totalChunks > 0)
+      ) {
         const progress = docProgressRef.current[doc.id];
         return !progress || now - progress.lastProgressAt >= stalledEmbeddingMs;
       }
@@ -663,8 +667,13 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
         const progress = docProgressRef.current[doc.id];
         const stalledFor = progress ? now - progress.lastProgressAt : 0;
-        if (doc.ingestionStatus === 'processing_embeddings' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks && stalledFor >= PAID_STALLED_EMBEDDING_MS) {
-          triggerEmbeddingRecovery(doc, 'Paid stalled embedding recovery');
+        const isRecoverablePaidDoc =
+          doc.totalChunks > 0 &&
+          doc.embeddedChunks < doc.totalChunks &&
+          (doc.ingestionStatus === 'processing_embeddings' || doc.ingestionStatus === 'in_progress');
+
+        if (isRecoverablePaidDoc && stalledFor >= PAID_STALLED_EMBEDDING_MS) {
+          triggerEmbeddingRecovery(doc, 'Paid stalled/skipped document recovery');
         }
       }
     }, 10_000); // Check every 10 seconds
@@ -690,13 +699,13 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     if (selectedRoles.length === 0) { toast({ title: "Select an access role", variant: "destructive" }); return; }
     setIsUploading(true);
 
-    const BATCH_SIZE = 3; // Send files in small batches to avoid Edge Function timeouts
+    const batchSize = isPaidTier ? PAID_UPLOAD_BATCH_SIZE : filesToUpload.length;
     let totalUploaded = 0;
     const uploadedDocIds: string[] = [];
 
     try {
-      for (let i = 0; i < filesToUpload.length; i += BATCH_SIZE) {
-        const batch = filesToUpload.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < filesToUpload.length; i += batchSize) {
+        const batch = filesToUpload.slice(i, i + batchSize);
         const formData = new FormData();
         batch.forEach(f => formData.append('files', f));
         formData.append('uploadDate', new Date().toISOString().split('T')[0]);

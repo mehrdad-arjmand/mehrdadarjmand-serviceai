@@ -5,6 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
+const FREE_TIER_DOC_DELAY_MS = 4000
+
 // Input validation constants
 const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 const MAX_FILES = 50
@@ -446,7 +448,8 @@ Deno.serve(async (req) => {
           }
 
           if (i < workItems.length - 1) {
-            await new Promise(r => setTimeout(r, 1500))
+            console.log(`Free tier: waiting ${FREE_TIER_DOC_DELAY_MS}ms before next document`)
+            await new Promise(r => setTimeout(r, FREE_TIER_DOC_DELAY_MS))
           }
         }
       } else {
