@@ -55,6 +55,8 @@ interface Project {
   name: string;
 }
 
+type RecoveryDocument = Pick<Document, 'id' | 'fileName' | 'embeddedChunks' | 'totalChunks' | 'ingestionStatus'>;
+
 interface RepositoryCardProps {
   apiTier?: string;
   onDocumentSelect?: (id: string | null) => void;
@@ -371,10 +373,15 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
   const PAID_RETRY_SWEEP_DELAYS = [30_000, 90_000];
   const PAID_STALLED_EMBEDDING_MS = 90_000;
-  const FREE_QUEUE_POLL_MS = 10_000;
-  const FREE_POST_QUEUE_SETTLE_MS = 20_000;
-  const FREE_STALLED_EMBEDDING_MS = 60_000;
+  const FREE_STALLED_EMBEDDING_MS = 180_000;
+  const FREE_SERIAL_UPLOAD_POLL_MS = 5_000;
+  const FREE_ZERO_CHUNK_STALL_MS = 180_000;
+  const FREE_RETRY_DELAY_MS = 5_000;
+  const FREE_MAX_FILE_ATTEMPTS = 2;
+  const FREE_MAX_DOC_WAIT_MS = 30 * 60_000;
   const PAID_UPLOAD_BATCH_SIZE = 3;
+
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   useEffect(() => {
     reprocessingIdsRef.current = reprocessingIds;
@@ -497,7 +504,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     scheduledRecoveryTimers.current = [];
   };
 
-  const triggerEmbeddingRecovery = async (doc: Document, reason: string) => {
+  const triggerEmbeddingRecovery = async (doc: RecoveryDocument, reason: string) => {
     if (autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) return false;
 
     console.log(`${reason}: retriggering embeddings for "${doc.fileName}"`);
@@ -582,33 +589,166 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       });
       return;
     }
+  };
 
-    const watchFreeQueue = async () => {
-      await fetchDocuments();
+  const uploadBatch = async (batch: File[]) => {
+    const formData = new FormData();
+    batch.forEach((file) => formData.append('files', file));
+    formData.append('uploadDate', new Date().toISOString().split('T')[0]);
+    formData.append('allowedRoles', JSON.stringify(selectedRoles));
+    if (projectId) formData.append('projectId', projectId);
+    formData.append('dynamicMetadata', JSON.stringify(uploadMetadata));
 
-      const targetIds = new Set(uploadedDocIds);
-      const hasQueuedDocuments = documentsRef.current.some((doc) =>
-        targetIds.has(doc.id) && doc.ingestionStatus === 'in_progress' && doc.totalChunks === 0
-      );
+    if (uploadMetadata['Document Type']) formData.append('docType', uploadMetadata['Document Type']);
+    if (uploadMetadata['Site']) formData.append('site', uploadMetadata['Site']);
+    if (uploadMetadata['Equipment Type']) formData.append('equipmentType', uploadMetadata['Equipment Type']);
+    if (uploadMetadata['Make']) formData.append('equipmentMake', uploadMetadata['Make']);
+    if (uploadMetadata['Model']) formData.append('equipmentModel', uploadMetadata['Model']);
 
-      if (hasQueuedDocuments) {
-        const timer = setTimeout(() => {
-          watchFreeQueue();
-        }, FREE_QUEUE_POLL_MS);
-        scheduledRecoveryTimers.current.push(timer);
-        return;
+    await supabase.auth.getSession();
+
+    const { data, error } = await supabase.functions.invoke('ingest', { body: formData });
+    if (error) throw error;
+    if (!data.success) throw new Error(data.error || 'Upload failed');
+
+    return {
+      totalUploaded: data.documents.length as number,
+      uploadedDocIds: data.documents.map((doc: { id: string }) => doc.id) as string[],
+    };
+  };
+
+  const cleanupRetriedDocument = async (docId: string) => {
+    await supabase.from('chunks').delete().eq('document_id', docId);
+    await supabase.from('documents').delete().eq('id', docId);
+  };
+
+  const monitorFreeTierDocument = async (docId: string, fileName: string) => {
+    const startedAt = Date.now();
+    let zeroChunkSince = Date.now();
+    let lastProgressAt = Date.now();
+    let lastEmbeddedChunks = 0;
+    let lastRecoveryAt = 0;
+
+    while (Date.now() - startedAt < FREE_MAX_DOC_WAIT_MS) {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('id, filename, total_chunks, ingested_chunks, ingestion_status, ingestion_error')
+        .eq('id', docId)
+        .single();
+
+      if (error || !data) {
+        console.error(`Free-tier monitor could not load status for "${fileName}"`, error);
+        return 'retry-file' as const;
       }
 
-      const timer = setTimeout(() => {
-        runRecoverySweep(uploadedDocIds, 'Free-tier final retry pass', FREE_STALLED_EMBEDDING_MS);
-      }, FREE_POST_QUEUE_SETTLE_MS);
-      scheduledRecoveryTimers.current.push(timer);
-    };
+      const totalChunks = data.total_chunks ?? 0;
+      const embeddedChunks = data.ingested_chunks ?? 0;
+      const ingestionStatus = data.ingestion_status ?? 'pending';
+      const isComplete = ingestionStatus === 'complete' || (totalChunks > 0 && embeddedChunks >= totalChunks);
 
-    const timer = setTimeout(() => {
-      watchFreeQueue();
-    }, FREE_QUEUE_POLL_MS);
-    scheduledRecoveryTimers.current.push(timer);
+      if (isComplete) {
+        await fetchDocuments();
+        return 'complete' as const;
+      }
+
+      if (totalChunks > 0) {
+        zeroChunkSince = Date.now();
+      }
+
+      if (embeddedChunks > lastEmbeddedChunks) {
+        lastEmbeddedChunks = embeddedChunks;
+        lastProgressAt = Date.now();
+      }
+
+      const recoveryDoc: RecoveryDocument = {
+        id: docId,
+        fileName,
+        embeddedChunks,
+        totalChunks,
+        ingestionStatus,
+      };
+
+      if (ingestionStatus === 'failed') {
+        if (totalChunks > 0 && embeddedChunks < totalChunks && Date.now() - lastRecoveryAt >= FREE_STALLED_EMBEDDING_MS) {
+          const recovered = await triggerEmbeddingRecovery(recoveryDoc, 'Free-tier monitored recovery');
+          lastRecoveryAt = Date.now();
+          if (recovered) {
+            lastProgressAt = Date.now();
+            await wait(FREE_SERIAL_UPLOAD_POLL_MS);
+            continue;
+          }
+        }
+
+        return 'retry-file' as const;
+      }
+
+      const stalledEmbedding =
+        totalChunks > 0 &&
+        embeddedChunks < totalChunks &&
+        (ingestionStatus === 'processing_embeddings' || ingestionStatus === 'in_progress') &&
+        Date.now() - lastProgressAt >= FREE_STALLED_EMBEDDING_MS &&
+        Date.now() - lastRecoveryAt >= FREE_STALLED_EMBEDDING_MS;
+
+      if (stalledEmbedding) {
+        const recovered = await triggerEmbeddingRecovery(recoveryDoc, 'Free-tier stalled document recovery');
+        lastRecoveryAt = Date.now();
+        if (recovered) {
+          lastProgressAt = Date.now();
+        }
+      }
+
+      if (totalChunks === 0 && Date.now() - zeroChunkSince >= FREE_ZERO_CHUNK_STALL_MS) {
+        console.warn(`Free-tier upload stalled before chunking for "${fileName}"; retrying file upload.`);
+        return 'retry-file' as const;
+      }
+
+      await wait(FREE_SERIAL_UPLOAD_POLL_MS);
+    }
+
+    console.warn(`Free-tier monitor timed out for "${fileName}"; retrying file upload.`);
+    return 'retry-file' as const;
+  };
+
+  const uploadFreeTierFile = async (file: File) => {
+    let attempt = 0;
+
+    while (attempt < FREE_MAX_FILE_ATTEMPTS) {
+      attempt += 1;
+
+      let totalUploaded = 0;
+      let uploadedDocIds: string[] = [];
+      let docId = '';
+
+      try {
+        const uploadResult = await uploadBatch([file]);
+        totalUploaded = uploadResult.totalUploaded;
+        uploadedDocIds = uploadResult.uploadedDocIds;
+        docId = uploadedDocIds[0] ?? '';
+
+        if (!docId) {
+          throw new Error(`Upload did not return a document id for "${file.name}".`);
+        }
+
+        await fetchDocuments();
+
+        const result = await monitorFreeTierDocument(docId, file.name);
+        if (result === 'complete') {
+          return { totalUploaded, uploadedDocIds };
+        }
+      } catch (error) {
+        console.error(`Free-tier upload attempt ${attempt} failed for "${file.name}"`, error);
+      }
+
+      if (docId && attempt < FREE_MAX_FILE_ATTEMPTS) {
+        await cleanupRetriedDocument(docId);
+      }
+
+      if (attempt < FREE_MAX_FILE_ATTEMPTS) {
+        await wait(FREE_RETRY_DELAY_MS);
+      }
+    }
+
+    throw new Error(`"${file.name}" could not be fully indexed on the free tier after ${FREE_MAX_FILE_ATTEMPTS} attempts.`);
   };
 
   useEffect(() => {
@@ -699,38 +839,26 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     if (selectedRoles.length === 0) { toast({ title: "Select an access role", variant: "destructive" }); return; }
     setIsUploading(true);
 
-    const batchSize = isPaidTier ? PAID_UPLOAD_BATCH_SIZE : filesToUpload.length;
     let totalUploaded = 0;
     const uploadedDocIds: string[] = [];
 
     try {
-      for (let i = 0; i < filesToUpload.length; i += batchSize) {
-        const batch = filesToUpload.slice(i, i + batchSize);
-        const formData = new FormData();
-        batch.forEach(f => formData.append('files', f));
-        formData.append('uploadDate', new Date().toISOString().split('T')[0]);
-        formData.append('allowedRoles', JSON.stringify(selectedRoles));
-        if (projectId) formData.append('projectId', projectId);
-        
-        // Send dynamic metadata as JSON
-        formData.append('dynamicMetadata', JSON.stringify(uploadMetadata));
-
-        // Also send legacy fields for backward compatibility
-        if (uploadMetadata['Document Type']) formData.append('docType', uploadMetadata['Document Type']);
-        if (uploadMetadata['Site']) formData.append('site', uploadMetadata['Site']);
-        if (uploadMetadata['Equipment Type']) formData.append('equipmentType', uploadMetadata['Equipment Type']);
-        if (uploadMetadata['Make']) formData.append('equipmentMake', uploadMetadata['Make']);
-        if (uploadMetadata['Model']) formData.append('equipmentModel', uploadMetadata['Model']);
-
-        // Refresh session before each batch to avoid stale token
-        await supabase.auth.getSession();
-
-        const { data, error } = await supabase.functions.invoke('ingest', { body: formData });
-        if (error) throw error;
-        if (!data.success) throw new Error(data.error || 'Upload failed');
-        totalUploaded += data.documents.length;
-        uploadedDocIds.push(...data.documents.map((doc: { id: string }) => doc.id));
-        await fetchDocuments();
+      if (isPaidTier) {
+        for (let i = 0; i < filesToUpload.length; i += PAID_UPLOAD_BATCH_SIZE) {
+          const batch = filesToUpload.slice(i, i + PAID_UPLOAD_BATCH_SIZE);
+          const result = await uploadBatch(batch);
+          totalUploaded += result.totalUploaded;
+          uploadedDocIds.push(...result.uploadedDocIds);
+          await fetchDocuments();
+        }
+      } else {
+        for (const file of filesToUpload) {
+          const result = await uploadFreeTierFile(file);
+          totalUploaded += result.totalUploaded;
+          uploadedDocIds.push(...result.uploadedDocIds);
+          await fetchDocuments();
+          await wait(FREE_RETRY_DELAY_MS);
+        }
       }
 
       toast({ title: "Upload successful", description: `${totalUploaded} file(s) queued for indexing.` });
