@@ -617,6 +617,11 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     };
   };
 
+  const cleanupRetriedDocument = async (docId: string) => {
+    await supabase.from('chunks').delete().eq('document_id', docId);
+    await supabase.from('documents').delete().eq('id', docId);
+  };
+
   const monitorFreeTierDocument = async (docId: string, fileName: string) => {
     const startedAt = Date.now();
     let zeroChunkSince = Date.now();
@@ -710,30 +715,35 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     while (attempt < FREE_MAX_FILE_ATTEMPTS) {
       attempt += 1;
 
-      const { totalUploaded, uploadedDocIds } = await uploadBatch([file]);
-      const docId = uploadedDocIds[0];
+      let totalUploaded = 0;
+      let uploadedDocIds: string[] = [];
+      let docId = '';
 
-      if (!docId) {
-        throw new Error(`Upload did not return a document id for "${file.name}".`);
+      try {
+        const uploadResult = await uploadBatch([file]);
+        totalUploaded = uploadResult.totalUploaded;
+        uploadedDocIds = uploadResult.uploadedDocIds;
+        docId = uploadedDocIds[0] ?? '';
+
+        if (!docId) {
+          throw new Error(`Upload did not return a document id for "${file.name}".`);
+        }
+
+        await fetchDocuments();
+
+        const result = await monitorFreeTierDocument(docId, file.name);
+        if (result === 'complete') {
+          return { totalUploaded, uploadedDocIds };
+        }
+      } catch (error) {
+        console.error(`Free-tier upload attempt ${attempt} failed for "${file.name}"`, error);
       }
 
-      await fetchDocuments();
-
-      const result = await monitorFreeTierDocument(docId, file.name);
-      if (result === 'complete') {
-        return { totalUploaded, uploadedDocIds };
+      if (docId && attempt < FREE_MAX_FILE_ATTEMPTS) {
+        await cleanupRetriedDocument(docId);
       }
 
       if (attempt < FREE_MAX_FILE_ATTEMPTS) {
-        await supabase
-          .from('documents')
-          .update({
-            ingestion_status: 'failed',
-            ingestion_error: 'Free-tier upload stalled before completion. Retrying automatically.',
-          })
-          .eq('id', docId)
-          .eq('ingestion_status', 'in_progress');
-
         await wait(FREE_RETRY_DELAY_MS);
       }
     }
