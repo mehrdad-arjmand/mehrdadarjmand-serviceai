@@ -379,9 +379,21 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const FREE_RETRY_DELAY_MS = 5_000;
   const FREE_MAX_FILE_ATTEMPTS = 2;
   const FREE_MAX_DOC_WAIT_MS = 30 * 60_000;
+  const FREE_DEFERRED_RETRY_DELAY_MS = 15_000;
+  const FREE_MAX_EXTRACTION_WAIT_MS = 12 * 60_000;
+  const FREE_EXTRACTION_WAIT_PER_MB_MS = 20_000;
+  const FREE_EXTRACTION_SIZE_BUCKET_BYTES = 1024 * 1024;
   const PAID_UPLOAD_BATCH_SIZE = 3;
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const getFreeExtractionWaitMs = (file: File) => {
+    const sizeBuckets = Math.max(0, Math.ceil(file.size / FREE_EXTRACTION_SIZE_BUCKET_BYTES) - 1);
+    return Math.min(
+      FREE_MAX_EXTRACTION_WAIT_MS,
+      FREE_ZERO_CHUNK_STALL_MS + sizeBuckets * FREE_EXTRACTION_WAIT_PER_MB_MS,
+    );
+  };
 
   useEffect(() => {
     reprocessingIdsRef.current = reprocessingIds;
@@ -622,7 +634,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     await supabase.from('documents').delete().eq('id', docId);
   };
 
-  const monitorFreeTierDocument = async (docId: string, fileName: string) => {
+  const monitorFreeTierDocument = async (docId: string, fileName: string, extractionWaitMs: number) => {
     const startedAt = Date.now();
     let zeroChunkSince = Date.now();
     let lastProgressAt = Date.now();
@@ -697,20 +709,21 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         }
       }
 
-      if (totalChunks === 0 && Date.now() - zeroChunkSince >= FREE_ZERO_CHUNK_STALL_MS) {
-        console.warn(`Free-tier upload stalled before chunking for "${fileName}"; retrying file upload.`);
+      if (totalChunks === 0 && Date.now() - zeroChunkSince >= extractionWaitMs) {
+        console.warn(`Free-tier upload stalled before chunking for "${fileName}" after ${extractionWaitMs}ms; deferring file.`);
         return 'retry-file' as const;
       }
 
       await wait(FREE_SERIAL_UPLOAD_POLL_MS);
     }
 
-    console.warn(`Free-tier monitor timed out for "${fileName}"; retrying file upload.`);
+    console.warn(`Free-tier monitor timed out for "${fileName}"; deferring file.`);
     return 'retry-file' as const;
   };
 
   const uploadFreeTierFile = async (file: File) => {
     let attempt = 0;
+    const extractionWaitMs = getFreeExtractionWaitMs(file);
 
     while (attempt < FREE_MAX_FILE_ATTEMPTS) {
       attempt += 1;
@@ -731,9 +744,9 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
         await fetchDocuments();
 
-        const result = await monitorFreeTierDocument(docId, file.name);
+        const result = await monitorFreeTierDocument(docId, file.name, extractionWaitMs);
         if (result === 'complete') {
-          return { totalUploaded, uploadedDocIds };
+          return { status: 'complete' as const, totalUploaded, uploadedDocIds, fileName: file.name };
         }
       } catch (error) {
         console.error(`Free-tier upload attempt ${attempt} failed for "${file.name}"`, error);
@@ -748,9 +761,14 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
     }
 
-    throw new Error(`"${file.name}" could not be fully indexed on the free tier after ${FREE_MAX_FILE_ATTEMPTS} attempts.`);
+    return {
+      status: 'deferred' as const,
+      totalUploaded: 0,
+      uploadedDocIds: [],
+      fileName: file.name,
+      message: `"${file.name}" took too long on the free-tier serial queue and was deferred so the remaining documents can continue.`
+    };
   };
-
   useEffect(() => {
     setIsLoadingDocuments(true);
     fetchDocuments();
@@ -852,12 +870,43 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           await fetchDocuments();
         }
       } else {
+        const deferredFiles: File[] = [];
+        const deferredMessages: string[] = [];
+
         for (const file of filesToUpload) {
           const result = await uploadFreeTierFile(file);
-          totalUploaded += result.totalUploaded;
-          uploadedDocIds.push(...result.uploadedDocIds);
+
+          if (result.status === 'complete') {
+            totalUploaded += result.totalUploaded;
+            uploadedDocIds.push(...result.uploadedDocIds);
+          } else {
+            deferredFiles.push(file);
+            deferredMessages.push(result.message);
+          }
+
           await fetchDocuments();
           await wait(FREE_RETRY_DELAY_MS);
+        }
+
+        if (deferredFiles.length > 0) {
+          await wait(FREE_DEFERRED_RETRY_DELAY_MS);
+
+          for (const file of deferredFiles) {
+            const retryResult = await uploadFreeTierFile(file);
+            if (retryResult.status === 'complete') {
+              totalUploaded += retryResult.totalUploaded;
+              uploadedDocIds.push(...retryResult.uploadedDocIds);
+            }
+            await fetchDocuments();
+            await wait(FREE_RETRY_DELAY_MS);
+          }
+
+          if (deferredMessages.length > 0) {
+            toast({
+              title: deferredFiles.length === 1 ? 'Large document deferred' : 'Large documents deferred',
+              description: deferredMessages[0],
+            });
+          }
         }
       }
 
