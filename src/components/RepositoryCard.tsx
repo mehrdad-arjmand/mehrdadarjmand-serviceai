@@ -536,10 +536,20 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       if (updateError) throw updateError;
 
       await supabase.auth.getSession();
-      const { error } = await supabase.functions.invoke('generate-embeddings', {
-        body: { documentId: doc.id, mode: 'full' }
+      // Free tier uses 'slice' mode; paid tier uses 'full' mode
+      const mode = isPaidTier ? 'full' : 'slice';
+      const { data, error } = await supabase.functions.invoke('generate-embeddings', {
+        body: { documentId: doc.id, mode }
       });
       if (error) throw error;
+
+      // For free tier, check if we got rate-limited or locked
+      if (!isPaidTier && data?.documents?.[0]) {
+        const result = data.documents[0];
+        if (result.retryAfterMs > 0) {
+          console.log(`Free-tier recovery: document "${doc.fileName}" rate-limited, will retry after ${result.retryAfterMs}ms`);
+        }
+      }
 
       return true;
     } catch (err) {
@@ -637,25 +647,25 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const monitorFreeTierDocument = async (docId: string, fileName: string, extractionWaitMs: number) => {
     const startedAt = Date.now();
     let zeroChunkSince = Date.now();
-    let lastProgressAt = Date.now();
-    let lastEmbeddedChunks = 0;
-    let lastRecoveryAt = 0;
+    let lastSliceTriggeredAt = 0;
+    const SLICE_COOLDOWN_MS = 10_000; // Wait 10s between slice triggers
+    const RATE_LIMIT_EXTRA_WAIT_MS = 5_000; // Extra buffer on top of server-reported wait
 
     while (Date.now() - startedAt < FREE_MAX_DOC_WAIT_MS) {
       const { data, error } = await supabase
         .from('documents')
-        .select('id, filename, total_chunks, ingested_chunks, ingestion_status, ingestion_error')
+        .select('id, filename, total_chunks, ingested_chunks, ingestion_status, ingestion_error, embedding_locked_until, embedding_retry_after')
         .eq('id', docId)
         .single();
 
       if (error || !data) {
         console.error(`Free-tier monitor could not load status for "${fileName}"`, error);
-        return 'retry-file' as const;
+        return 'complete' as const; // Don't retry-file for partially processed docs
       }
 
-      const totalChunks = data.total_chunks ?? 0;
-      const embeddedChunks = data.ingested_chunks ?? 0;
-      const ingestionStatus = data.ingestion_status ?? 'pending';
+      const totalChunks = (data as any).total_chunks ?? 0;
+      const embeddedChunks = (data as any).ingested_chunks ?? 0;
+      const ingestionStatus = (data as any).ingestion_status ?? 'pending';
       const isComplete = ingestionStatus === 'complete' || (totalChunks > 0 && embeddedChunks >= totalChunks);
 
       if (isComplete) {
@@ -667,58 +677,61 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         zeroChunkSince = Date.now();
       }
 
-      if (embeddedChunks > lastEmbeddedChunks) {
-        lastEmbeddedChunks = embeddedChunks;
-        lastProgressAt = Date.now();
-      }
-
-      const recoveryDoc: RecoveryDocument = {
-        id: docId,
-        fileName,
-        embeddedChunks,
-        totalChunks,
-        ingestionStatus,
-      };
-
-      if (ingestionStatus === 'failed') {
-        if (totalChunks > 0 && embeddedChunks < totalChunks && Date.now() - lastRecoveryAt >= FREE_STALLED_EMBEDDING_MS) {
-          const recovered = await triggerEmbeddingRecovery(recoveryDoc, 'Free-tier monitored recovery');
-          lastRecoveryAt = Date.now();
-          if (recovered) {
-            lastProgressAt = Date.now();
-            await wait(FREE_SERIAL_UPLOAD_POLL_MS);
-            continue;
-          }
-        }
-
-        return 'retry-file' as const;
-      }
-
-      const stalledEmbedding =
-        totalChunks > 0 &&
-        embeddedChunks < totalChunks &&
-        (ingestionStatus === 'processing_embeddings' || ingestionStatus === 'in_progress') &&
-        Date.now() - lastProgressAt >= FREE_STALLED_EMBEDDING_MS &&
-        Date.now() - lastRecoveryAt >= FREE_STALLED_EMBEDDING_MS;
-
-      if (stalledEmbedding) {
-        const recovered = await triggerEmbeddingRecovery(recoveryDoc, 'Free-tier stalled document recovery');
-        lastRecoveryAt = Date.now();
-        if (recovered) {
-          lastProgressAt = Date.now();
-        }
-      }
-
+      // Check if extraction stalled (no chunks created yet)
       if (totalChunks === 0 && Date.now() - zeroChunkSince >= extractionWaitMs) {
         console.warn(`Free-tier upload stalled before chunking for "${fileName}" after ${extractionWaitMs}ms; deferring file.`);
         return 'retry-file' as const;
       }
 
+      // If document has chunks but embedding is incomplete, trigger next slice
+      if (totalChunks > 0 && embeddedChunks < totalChunks) {
+        const now = Date.now();
+
+        // Check if locked by another worker
+        const lockedUntil = (data as any).embedding_locked_until ? new Date((data as any).embedding_locked_until).getTime() : 0;
+        const retryAfter = (data as any).embedding_retry_after ? new Date((data as any).embedding_retry_after).getTime() : 0;
+
+        const isLocked = lockedUntil > now;
+        const isRateLimited = retryAfter > now;
+
+        if (isLocked) {
+          // Another worker is processing, just wait
+          console.log(`Free-tier monitor: "${fileName}" locked, waiting...`);
+        } else if (isRateLimited) {
+          // Rate limited, wait until retry_after + buffer
+          const waitUntil = retryAfter - now + RATE_LIMIT_EXTRA_WAIT_MS;
+          console.log(`Free-tier monitor: "${fileName}" rate-limited, waiting ${Math.round(waitUntil/1000)}s`);
+          await wait(Math.min(waitUntil, 30_000));
+          continue;
+        } else if (now - lastSliceTriggeredAt >= SLICE_COOLDOWN_MS) {
+          // No lock, no rate limit, cooldown elapsed — trigger next slice
+          console.log(`Free-tier monitor: triggering next embedding slice for "${fileName}" (${embeddedChunks}/${totalChunks})`);
+          lastSliceTriggeredAt = now;
+
+          try {
+            await supabase.auth.getSession();
+            const { data: result } = await supabase.functions.invoke('generate-embeddings', {
+              body: { documentId: docId, mode: 'slice' }
+            });
+
+            // If rate-limited, wait the specified time
+            if (result?.documents?.[0]?.retryAfterMs > 0) {
+              const retryMs = result.documents[0].retryAfterMs + RATE_LIMIT_EXTRA_WAIT_MS;
+              console.log(`Free-tier monitor: "${fileName}" rate-limited by server, waiting ${Math.round(retryMs/1000)}s`);
+              await wait(Math.min(retryMs, 60_000));
+              continue;
+            }
+          } catch (err) {
+            console.error(`Free-tier monitor: slice trigger failed for "${fileName}"`, err);
+          }
+        }
+      }
+
       await wait(FREE_SERIAL_UPLOAD_POLL_MS);
     }
 
-    console.warn(`Free-tier monitor timed out for "${fileName}"; deferring file.`);
-    return 'retry-file' as const;
+    console.warn(`Free-tier monitor timed out for "${fileName}"; marking as complete to avoid blocking queue.`);
+    return 'complete' as const; // Don't retry — let the polling recovery handle it
   };
 
   const uploadFreeTierFile = async (file: File) => {
@@ -752,8 +765,17 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         console.error(`Free-tier upload attempt ${attempt} failed for "${file.name}"`, error);
       }
 
+      // Only cleanup if extraction failed (no chunks at all) — don't delete partial progress
       if (docId && attempt < FREE_MAX_FILE_ATTEMPTS) {
-        await cleanupRetriedDocument(docId);
+        const { data: docCheck } = await supabase
+          .from('documents')
+          .select('total_chunks, ingested_chunks')
+          .eq('id', docId)
+          .single();
+
+        if (docCheck && (docCheck.total_chunks ?? 0) === 0) {
+          await cleanupRetriedDocument(docId);
+        }
       }
 
       if (attempt < FREE_MAX_FILE_ATTEMPTS) {

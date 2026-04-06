@@ -150,22 +150,19 @@ Deno.serve(async (req) => {
       )
     }
 
-    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: { Authorization: authHeader, apikey: supabaseAnonKey },
+    // Use local JWT validation via getClaims to avoid auth API timeouts
+    const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } }
     })
-    if (!userRes.ok) {
+    const token = authHeader.replace('Bearer ', '')
+    const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(token)
+    if (claimsError || !claimsData?.claims?.sub) {
       return new Response(
         JSON.stringify({ error: 'Unauthorized: Invalid token' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-    const user = await userRes.json()
-    if (!user?.id) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized: Invalid token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+    const user = { id: claimsData.claims.sub as string }
 
     console.log(`Authenticated user: ${user.id}`)
 
@@ -324,7 +321,7 @@ Deno.serve(async (req) => {
                 'Authorization': authHeader!,
                 'apikey': supabaseAnonKey,
               },
-              body: JSON.stringify({ documentIds: docIds, mode: 'full' }),
+              body: JSON.stringify({ documentIds: docIds, mode: 'slice' }),
               signal: controller.signal,
             }
           )
