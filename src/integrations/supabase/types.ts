@@ -138,6 +138,8 @@ export type Database = {
         Row: {
           allowed_roles: string[] | null
           doc_type: string | null
+          embedding_locked_until: string | null
+          embedding_retry_after: string | null
           equipment_make: string | null
           equipment_model: string | null
           filename: string
@@ -156,6 +158,8 @@ export type Database = {
         Insert: {
           allowed_roles?: string[] | null
           doc_type?: string | null
+          embedding_locked_until?: string | null
+          embedding_retry_after?: string | null
           equipment_make?: string | null
           equipment_model?: string | null
           filename: string
@@ -174,6 +178,8 @@ export type Database = {
         Update: {
           allowed_roles?: string[] | null
           doc_type?: string | null
+          embedding_locked_until?: string | null
+          embedding_retry_after?: string | null
           equipment_make?: string | null
           equipment_model?: string | null
           filename?: string
