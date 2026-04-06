@@ -536,10 +536,20 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       if (updateError) throw updateError;
 
       await supabase.auth.getSession();
-      const { error } = await supabase.functions.invoke('generate-embeddings', {
-        body: { documentId: doc.id, mode: 'full' }
+      // Free tier uses 'slice' mode; paid tier uses 'full' mode
+      const mode = isPaidTier ? 'full' : 'slice';
+      const { data, error } = await supabase.functions.invoke('generate-embeddings', {
+        body: { documentId: doc.id, mode }
       });
       if (error) throw error;
+
+      // For free tier, check if we got rate-limited or locked
+      if (!isPaidTier && data?.documents?.[0]) {
+        const result = data.documents[0];
+        if (result.retryAfterMs > 0) {
+          console.log(`Free-tier recovery: document "${doc.fileName}" rate-limited, will retry after ${result.retryAfterMs}ms`);
+        }
+      }
 
       return true;
     } catch (err) {
