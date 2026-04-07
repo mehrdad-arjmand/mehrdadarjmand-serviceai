@@ -380,6 +380,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const FREE_SERIAL_UPLOAD_POLL_MS = 5_000;
   const FREE_ZERO_CHUNK_STALL_MS = 180_000;
   const FREE_RETRY_DELAY_MS = 5_000;
+  const FREE_TIER_DOC_DELAY_MS = 4_000;
   const FREE_MAX_FILE_ATTEMPTS = 2;
   const FREE_MAX_DOC_WAIT_MS = 6 * 60 * 60_000;
   const FREE_MAX_EXTRACTION_WAIT_MS = 12 * 60_000;
