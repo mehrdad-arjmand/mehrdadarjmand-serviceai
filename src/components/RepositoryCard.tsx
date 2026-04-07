@@ -41,6 +41,8 @@ interface Document {
   embeddedChunks: number;
   ingestionStatus: string;
   ingestionError: string | null;
+  embeddingLockedUntil: string | null;
+  embeddingRetryAfter: string | null;
   allowedRoles: string[];
   metadata: Record<string, string>;
 }
@@ -55,7 +57,7 @@ interface Project {
   name: string;
 }
 
-type RecoveryDocument = Pick<Document, 'id' | 'fileName' | 'embeddedChunks' | 'totalChunks' | 'ingestionStatus'>;
+type RecoveryDocument = Pick<Document, 'id' | 'fileName' | 'embeddedChunks' | 'totalChunks' | 'ingestionStatus' | 'embeddingLockedUntil' | 'embeddingRetryAfter' | 'createdAt'>;
 
 interface RepositoryCardProps {
   apiTier?: string;
@@ -370,6 +372,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const autoRetryingIds = useRef<Set<string>>(new Set());
   const scheduledRecoveryTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const docProgressRef = useRef<Record<string, { status: string; statusSince: number; embeddedChunks: number; lastProgressAt: number }>>({});
+  const freeResumeTriggerAtRef = useRef<Record<string, number>>({});
 
   const PAID_RETRY_SWEEP_DELAYS = [30_000, 90_000];
   const PAID_STALLED_EMBEDDING_MS = 90_000;
@@ -377,13 +380,15 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const FREE_SERIAL_UPLOAD_POLL_MS = 5_000;
   const FREE_ZERO_CHUNK_STALL_MS = 180_000;
   const FREE_RETRY_DELAY_MS = 5_000;
+  const FREE_TIER_DOC_DELAY_MS = 4_000;
   const FREE_MAX_FILE_ATTEMPTS = 2;
-  const FREE_MAX_DOC_WAIT_MS = 30 * 60_000;
-  const FREE_DEFERRED_RETRY_DELAY_MS = 15_000;
+  const FREE_MAX_DOC_WAIT_MS = 6 * 60 * 60_000;
   const FREE_MAX_EXTRACTION_WAIT_MS = 12 * 60_000;
   const FREE_EXTRACTION_WAIT_PER_MB_MS = 20_000;
   const FREE_EXTRACTION_SIZE_BUCKET_BYTES = 1024 * 1024;
   const PAID_UPLOAD_BATCH_SIZE = 3;
+  const FREE_RESUME_COOLDOWN_MS = 10_000;
+  const FREE_RATE_LIMIT_EXTRA_WAIT_MS = 3_000;
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -393,6 +398,16 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       FREE_MAX_EXTRACTION_WAIT_MS,
       FREE_ZERO_CHUNK_STALL_MS + sizeBuckets * FREE_EXTRACTION_WAIT_PER_MB_MS,
     );
+  };
+
+  const ensureFreshSession = async () => {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error || !data.session) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        throw error ?? new Error("Session expired. Please sign in again.");
+      }
+    }
   };
 
   useEffect(() => {
@@ -499,6 +514,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         embeddedChunks,
         ingestionStatus: doc.ingestion_status || 'pending',
         ingestionError: doc.ingestion_error || null,
+        embeddingLockedUntil: (doc as any).embedding_locked_until || null,
+        embeddingRetryAfter: (doc as any).embedding_retry_after || null,
         allowedRoles: (doc as any).allowed_roles || ['admin'],
         metadata: (doc as any).metadata || {},
       };
@@ -535,7 +552,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }).eq('id', doc.id);
       if (updateError) throw updateError;
 
-      await supabase.auth.getSession();
+      await ensureFreshSession();
       // Free tier uses 'slice' mode; paid tier uses 'full' mode
       const mode = isPaidTier ? 'full' : 'slice';
       const { data, error } = await supabase.functions.invoke('generate-embeddings', {
@@ -558,6 +575,36 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     } finally {
       autoRetryingIds.current.delete(doc.id);
     }
+  };
+
+  const maybeResumeFreeTierDocument = async (doc: RecoveryDocument, reason: string) => {
+    if (isPaidTier) return { triggered: false, waitMs: 0 };
+    if (autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) {
+      return { triggered: false, waitMs: 0 };
+    }
+    if (doc.totalChunks === 0 || doc.embeddedChunks >= doc.totalChunks) {
+      return { triggered: false, waitMs: 0 };
+    }
+
+    const now = Date.now();
+    const lockedUntilMs = doc.embeddingLockedUntil ? new Date(doc.embeddingLockedUntil).getTime() : 0;
+    if (lockedUntilMs > now) {
+      return { triggered: false, waitMs: lockedUntilMs - now };
+    }
+
+    const retryAfterMs = doc.embeddingRetryAfter ? new Date(doc.embeddingRetryAfter).getTime() : 0;
+    if (retryAfterMs > now) {
+      return { triggered: false, waitMs: retryAfterMs - now + FREE_RATE_LIMIT_EXTRA_WAIT_MS };
+    }
+
+    const lastTriggeredAt = freeResumeTriggerAtRef.current[doc.id] || 0;
+    if (now - lastTriggeredAt < FREE_RESUME_COOLDOWN_MS) {
+      return { triggered: false, waitMs: FREE_RESUME_COOLDOWN_MS - (now - lastTriggeredAt) };
+    }
+
+    freeResumeTriggerAtRef.current[doc.id] = now;
+    const triggered = await triggerEmbeddingRecovery(doc, reason);
+    return { triggered, waitMs: 0 };
   };
 
   const runRecoverySweep = async (
@@ -627,7 +674,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     if (uploadMetadata['Make']) formData.append('equipmentMake', uploadMetadata['Make']);
     if (uploadMetadata['Model']) formData.append('equipmentModel', uploadMetadata['Model']);
 
-    await supabase.auth.getSession();
+    await ensureFreshSession();
 
     const { data, error } = await supabase.functions.invoke('ingest', { body: formData });
     if (error) throw error;
@@ -647,9 +694,6 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const monitorFreeTierDocument = async (docId: string, fileName: string, extractionWaitMs: number) => {
     const startedAt = Date.now();
     let zeroChunkSince = Date.now();
-    let lastSliceTriggeredAt = 0;
-    const SLICE_COOLDOWN_MS = 10_000; // Wait 10s between slice triggers
-    const RATE_LIMIT_EXTRA_WAIT_MS = 5_000; // Extra buffer on top of server-reported wait
 
     while (Date.now() - startedAt < FREE_MAX_DOC_WAIT_MS) {
       const { data, error } = await supabase
@@ -685,45 +729,20 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
       // If document has chunks but embedding is incomplete, trigger next slice
       if (totalChunks > 0 && embeddedChunks < totalChunks) {
-        const now = Date.now();
+        const resume = await maybeResumeFreeTierDocument({
+          id: docId,
+          fileName,
+          embeddedChunks,
+          totalChunks,
+          ingestionStatus,
+          embeddingLockedUntil: (data as any).embedding_locked_until || null,
+          embeddingRetryAfter: (data as any).embedding_retry_after || null,
+          createdAt: new Date().toISOString(),
+        }, `Free serial queue resume for "${fileName}"`);
 
-        // Check if locked by another worker
-        const lockedUntil = (data as any).embedding_locked_until ? new Date((data as any).embedding_locked_until).getTime() : 0;
-        const retryAfter = (data as any).embedding_retry_after ? new Date((data as any).embedding_retry_after).getTime() : 0;
-
-        const isLocked = lockedUntil > now;
-        const isRateLimited = retryAfter > now;
-
-        if (isLocked) {
-          // Another worker is processing, just wait
-          console.log(`Free-tier monitor: "${fileName}" locked, waiting...`);
-        } else if (isRateLimited) {
-          // Rate limited, wait until retry_after + buffer
-          const waitUntil = retryAfter - now + RATE_LIMIT_EXTRA_WAIT_MS;
-          console.log(`Free-tier monitor: "${fileName}" rate-limited, waiting ${Math.round(waitUntil/1000)}s`);
-          await wait(Math.min(waitUntil, 30_000));
+        if (resume.waitMs > 0) {
+          await wait(Math.min(resume.waitMs, 30_000));
           continue;
-        } else if (now - lastSliceTriggeredAt >= SLICE_COOLDOWN_MS) {
-          // No lock, no rate limit, cooldown elapsed — trigger next slice
-          console.log(`Free-tier monitor: triggering next embedding slice for "${fileName}" (${embeddedChunks}/${totalChunks})`);
-          lastSliceTriggeredAt = now;
-
-          try {
-            await supabase.auth.getSession();
-            const { data: result } = await supabase.functions.invoke('generate-embeddings', {
-              body: { documentId: docId, mode: 'slice' }
-            });
-
-            // If rate-limited, wait the specified time
-            if (result?.documents?.[0]?.retryAfterMs > 0) {
-              const retryMs = result.documents[0].retryAfterMs + RATE_LIMIT_EXTRA_WAIT_MS;
-              console.log(`Free-tier monitor: "${fileName}" rate-limited by server, waiting ${Math.round(retryMs/1000)}s`);
-              await wait(Math.min(retryMs, 60_000));
-              continue;
-            }
-          } catch (err) {
-            console.error(`Free-tier monitor: slice trigger failed for "${fileName}"`, err);
-          }
         }
       }
 
@@ -783,13 +802,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
     }
 
-    return {
-      status: 'deferred' as const,
-      totalUploaded: 0,
-      uploadedDocIds: [],
-      fileName: file.name,
-      message: `"${file.name}" took too long on the free-tier serial queue and was deferred so the remaining documents can continue.`
-    };
+    throw new Error(`"${file.name}" could not be completed on the free-tier serial queue.`);
   };
   useEffect(() => {
     setIsLoadingDocuments(true);
@@ -856,6 +869,20 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           triggerEmbeddingRecovery(doc, 'Paid stalled/skipped document recovery');
         }
       }
+
+      if (!isPaidTier) {
+        const freeQueueDoc = [...docs]
+          .filter((doc) => (
+            doc.totalChunks > 0 &&
+            doc.embeddedChunks < doc.totalChunks &&
+            (doc.ingestionStatus === 'processing_embeddings' || doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'failed')
+          ))
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+
+        if (freeQueueDoc) {
+          await maybeResumeFreeTierDocument(freeQueueDoc, 'Free background queue recovery');
+        }
+      }
     }, 10_000); // Check every 10 seconds
 
     return () => {
@@ -892,42 +919,19 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           await fetchDocuments();
         }
       } else {
-        const deferredFiles: File[] = [];
-        const deferredMessages: string[] = [];
-
         for (const file of filesToUpload) {
-          const result = await uploadFreeTierFile(file);
-
-          if (result.status === 'complete') {
+          try {
+            const result = await uploadFreeTierFile(file);
             totalUploaded += result.totalUploaded;
             uploadedDocIds.push(...result.uploadedDocIds);
-          } else {
-            deferredFiles.push(file);
-            deferredMessages.push(result.message);
+          } catch (error: any) {
+            console.error(`Free-tier serial upload failed for "${file.name}"`, error);
+            toast({ title: "Free-tier upload failed", description: error?.message || `"${file.name}" failed to process.`, variant: "destructive" });
           }
 
           await fetchDocuments();
-          await wait(FREE_RETRY_DELAY_MS);
-        }
-
-        if (deferredFiles.length > 0) {
-          await wait(FREE_DEFERRED_RETRY_DELAY_MS);
-
-          for (const file of deferredFiles) {
-            const retryResult = await uploadFreeTierFile(file);
-            if (retryResult.status === 'complete') {
-              totalUploaded += retryResult.totalUploaded;
-              uploadedDocIds.push(...retryResult.uploadedDocIds);
-            }
-            await fetchDocuments();
-            await wait(FREE_RETRY_DELAY_MS);
-          }
-
-          if (deferredMessages.length > 0) {
-            toast({
-              title: deferredFiles.length === 1 ? 'Large document deferred' : 'Large documents deferred',
-              description: deferredMessages[0],
-            });
+          if (file !== filesToUpload[filesToUpload.length - 1]) {
+            await wait(FREE_TIER_DOC_DELAY_MS);
           }
         }
       }
@@ -1328,7 +1332,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       await fetchDocuments();
 
       // Refresh session before invoking to avoid stale token 401s
-      await supabase.auth.getSession();
+      await ensureFreshSession();
       const { data: embedResponse, error: embedError } = await supabase.functions.invoke(
         'generate-embeddings',
         { body: { documentId: doc.id, mode: 'full' } }
