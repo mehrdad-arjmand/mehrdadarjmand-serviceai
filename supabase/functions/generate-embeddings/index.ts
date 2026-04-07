@@ -12,8 +12,7 @@ const MAX_CHUNK_TEXT_LENGTH = 6000
 
 // ── Free tier config (conservative to avoid 429s) ──
 const BATCH_EMBED_SIZE_FREE = 3            // Very small batches
-const FREE_CHUNKS_PER_SLICE = 15           // Process at most 15 chunks per invocation (5 API calls × 3)
-const FREE_BATCH_DELAY_MS = 5000           // 5s between API calls
+const FREE_CHUNKS_PER_SLICE = BATCH_EMBED_SIZE_FREE // Exactly one API request per invocation for free tier
 const FREE_TIER_DOC_DELAY_MS = 4000
 const FREE_LOCK_DURATION_MS = 5 * 60_000   // 5 minute lock window
 
@@ -179,6 +178,7 @@ async function processFreeTier(
 
     let totalProcessed = 0
     let hitRateLimit = false
+    let retryAfterMs = 0
 
     try {
       // Fetch only a small slice of un-embedded chunks
@@ -193,32 +193,27 @@ async function processFreeTier(
       if (chunksError) throw chunksError
 
       if (chunks && chunks.length > 0) {
-        // Process in small batches of BATCH_EMBED_SIZE_FREE
-        for (let i = 0; i < chunks.length; i += BATCH_EMBED_SIZE_FREE) {
-          const batch = chunks.slice(i, i + BATCH_EMBED_SIZE_FREE)
-          const texts = batch.map(c => {
-            const text = c.text
-            if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
-            return text.slice(0, MAX_CHUNK_TEXT_LENGTH)
-          })
+        const batch = chunks.slice(0, BATCH_EMBED_SIZE_FREE)
+        const texts = batch.map(c => {
+          const text = c.text
+          if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
+          return text.slice(0, MAX_CHUNK_TEXT_LENGTH)
+        })
 
-          const embedResult = await batchEmbedTexts(apiKey, texts)
+        const embedResult = await batchEmbedTexts(apiKey, texts, { maxRetries: 1 })
 
-          if (embedResult.rateLimited) {
-            // Store retry_after and stop processing this document
-            const retryAt = new Date(Date.now() + embedResult.retryAfterMs).toISOString()
-            await supabase
-              .from('documents')
-              .update({ embedding_retry_after: retryAt, embedding_locked_until: null })
-              .eq('id', docId)
-            hitRateLimit = true
-            console.log(`Document ${docId}: hit rate limit, will retry after ${embedResult.retryAfterMs}ms`)
-            break
-          }
-
+        if (embedResult.rateLimited) {
+          retryAfterMs = embedResult.retryAfterMs
+          const retryAt = new Date(Date.now() + retryAfterMs).toISOString()
+          await supabase
+            .from('documents')
+            .update({ embedding_retry_after: retryAt, embedding_locked_until: null })
+            .eq('id', docId)
+          hitRateLimit = true
+          console.log(`Document ${docId}: hit rate limit, will retry after ${retryAfterMs}ms`)
+        } else {
           if (!embedResult.embeddings) throw new Error('Embedding failed without rate limit')
 
-          // Save embeddings
           await Promise.all(
             batch.map((chunk, idx) =>
               supabase
@@ -230,11 +225,6 @@ async function processFreeTier(
           )
 
           totalProcessed += batch.length
-
-          // Delay between batches
-          if (i + BATCH_EMBED_SIZE_FREE < chunks.length) {
-            await new Promise(r => setTimeout(r, FREE_BATCH_DELAY_MS))
-          }
         }
       }
 
@@ -253,7 +243,8 @@ async function processFreeTier(
         .from('documents')
         .update({
           ingested_chunks: embedded,
-          ingestion_status: isComplete ? 'complete' : (hitRateLimit ? 'processing_embeddings' : 'processing_embeddings'),
+          ingestion_status: isComplete ? 'complete' : 'processing_embeddings',
+          ingestion_error: null,
           embedding_locked_until: null, // Release lock
         })
         .eq('id', docId)
@@ -267,7 +258,7 @@ async function processFreeTier(
         total: totalChunks,
         complete: isComplete,
         locked: false,
-        retryAfterMs: hitRateLimit ? 30000 : 0,
+        retryAfterMs,
       })
     } catch (docError) {
       console.error(`Error embedding document ${docId}:`, docError)
@@ -450,10 +441,14 @@ interface BatchEmbedResult {
   retryAfterMs: number
 }
 
-async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<BatchEmbedResult> {
-  const MAX_RETRIES = 5
+async function batchEmbedTexts(
+  apiKey: string,
+  texts: string[],
+  options?: { maxRetries?: number }
+): Promise<BatchEmbedResult> {
+  const maxRetries = Math.max(1, options?.maxRetries ?? 5)
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents?key=${apiKey}`,
@@ -470,7 +465,7 @@ async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<BatchEm
         }
       )
 
-      if (response.status === 429) {
+        if (response.status === 429) {
         const errorData = await response.json().catch(() => ({}))
         const retryDelay = errorData?.error?.details?.find(
           (d: { '@type': string }) => d['@type']?.includes('RetryInfo')
@@ -484,12 +479,12 @@ async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<BatchEm
         waitMs = Math.min(waitMs, 60000)
 
         // On last attempt, return rate-limited instead of throwing
-        if (attempt === MAX_RETRIES) {
-          console.log(`Rate limited after ${MAX_RETRIES} attempts, returning rate-limited status`)
+          if (attempt === maxRetries) {
+            console.log(`Rate limited after ${maxRetries} attempt(s), returning rate-limited status`)
           return { embeddings: null, rateLimited: true, retryAfterMs: waitMs }
         }
 
-        console.log(`Rate limited on batch of ${texts.length}, waiting ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`)
+          console.log(`Rate limited on batch of ${texts.length}, waiting ${waitMs}ms (attempt ${attempt}/${maxRetries})`)
         await new Promise(r => setTimeout(r, waitMs))
         continue
       }
@@ -505,7 +500,7 @@ async function batchEmbedTexts(apiKey: string, texts: string[]): Promise<BatchEm
       return { embeddings, rateLimited: false, retryAfterMs: 0 }
 
     } catch (err) {
-      if (attempt === MAX_RETRIES) {
+      if (attempt === maxRetries) {
         // Check if it's a rate limit that bubbled up
         if (err instanceof Error && err.message.includes('429')) {
           return { embeddings: null, rateLimited: true, retryAfterMs: 60000 }
