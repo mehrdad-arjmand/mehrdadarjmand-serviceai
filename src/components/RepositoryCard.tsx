@@ -388,7 +388,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const FREE_EXTRACTION_SIZE_BUCKET_BYTES = 1024 * 1024;
   const PAID_UPLOAD_BATCH_SIZE = 3;
   const FREE_RESUME_COOLDOWN_MS = 10_000;
-  const FREE_RATE_LIMIT_EXTRA_WAIT_MS = 3_000;
+  const FREE_RATE_LIMIT_EXTRA_WAIT_MS = 0;
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -919,21 +919,10 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           await fetchDocuments();
         }
       } else {
-        for (const file of filesToUpload) {
-          try {
-            const result = await uploadFreeTierFile(file);
-            totalUploaded += result.totalUploaded;
-            uploadedDocIds.push(...result.uploadedDocIds);
-          } catch (error: any) {
-            console.error(`Free-tier serial upload failed for "${file.name}"`, error);
-            toast({ title: "Free-tier upload failed", description: error?.message || `"${file.name}" failed to process.`, variant: "destructive" });
-          }
-
-          await fetchDocuments();
-          if (file !== filesToUpload[filesToUpload.length - 1]) {
-            await wait(FREE_TIER_DOC_DELAY_MS);
-          }
-        }
+        const result = await uploadBatch(filesToUpload);
+        totalUploaded += result.totalUploaded;
+        uploadedDocIds.push(...result.uploadedDocIds);
+        await fetchDocuments();
       }
 
       toast({ title: "Upload successful", description: `${totalUploaded} file(s) queued for indexing.` });
