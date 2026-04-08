@@ -10,11 +10,12 @@ const BATCH_EMBED_SIZE_PAID = 100
 const CHUNKS_PER_FETCH = 500
 const MAX_CHUNK_TEXT_LENGTH = 6000
 
-// ── Free tier config (conservative to avoid 429s) ──
-const BATCH_EMBED_SIZE_FREE = 3            // Very small batches
-const FREE_CHUNKS_PER_SLICE = BATCH_EMBED_SIZE_FREE // Exactly one API request per invocation for free tier
+// ── Free tier config (serial + resumable) ──
+const BATCH_EMBED_SIZE_FREE = 15
+const FREE_CHUNKS_PER_SLICE = BATCH_EMBED_SIZE_FREE
 const FREE_TIER_DOC_DELAY_MS = 4000
 const FREE_LOCK_DURATION_MS = 5 * 60_000   // 5 minute lock window
+const FREE_TIER_RATE_LIMIT_WAIT_MS = 60_000
 
 function isValidUUID(value: unknown): value is string {
   if (typeof value !== 'string') return false
@@ -203,7 +204,7 @@ async function processFreeTier(
         const embedResult = await batchEmbedTexts(apiKey, texts, { maxRetries: 1 })
 
         if (embedResult.rateLimited) {
-          retryAfterMs = embedResult.retryAfterMs
+          retryAfterMs = Math.max(embedResult.retryAfterMs, FREE_TIER_RATE_LIMIT_WAIT_MS)
           const retryAt = new Date(Date.now() + retryAfterMs).toISOString()
           await supabase
             .from('documents')

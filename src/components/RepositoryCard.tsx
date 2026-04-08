@@ -388,7 +388,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const FREE_EXTRACTION_SIZE_BUCKET_BYTES = 1024 * 1024;
   const PAID_UPLOAD_BATCH_SIZE = 3;
   const FREE_RESUME_COOLDOWN_MS = 10_000;
-  const FREE_RATE_LIMIT_EXTRA_WAIT_MS = 3_000;
+  const FREE_RATE_LIMIT_EXTRA_WAIT_MS = 0;
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -584,6 +584,20 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     }
     if (doc.totalChunks === 0 || doc.embeddedChunks >= doc.totalChunks) {
       return { triggered: false, waitMs: 0 };
+    }
+
+    const olderBlockingDoc = documentsRef.current
+      .filter((candidate) => candidate.id !== doc.id)
+      .filter((candidate) => new Date(candidate.createdAt).getTime() < new Date(doc.createdAt).getTime())
+      .find((candidate) => {
+        if (candidate.ingestionStatus === 'complete') return false;
+        if (candidate.ingestionStatus === 'failed' && candidate.totalChunks === 0) return false;
+        if (candidate.totalChunks === 0) return true;
+        return candidate.embeddedChunks < candidate.totalChunks;
+      });
+
+    if (olderBlockingDoc) {
+      return { triggered: false, waitMs: FREE_SERIAL_UPLOAD_POLL_MS };
     }
 
     const now = Date.now();
@@ -919,21 +933,10 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           await fetchDocuments();
         }
       } else {
-        for (const file of filesToUpload) {
-          try {
-            const result = await uploadFreeTierFile(file);
-            totalUploaded += result.totalUploaded;
-            uploadedDocIds.push(...result.uploadedDocIds);
-          } catch (error: any) {
-            console.error(`Free-tier serial upload failed for "${file.name}"`, error);
-            toast({ title: "Free-tier upload failed", description: error?.message || `"${file.name}" failed to process.`, variant: "destructive" });
-          }
-
-          await fetchDocuments();
-          if (file !== filesToUpload[filesToUpload.length - 1]) {
-            await wait(FREE_TIER_DOC_DELAY_MS);
-          }
-        }
+        const result = await uploadBatch(filesToUpload);
+        totalUploaded += result.totalUploaded;
+        uploadedDocIds.push(...result.uploadedDocIds);
+        await fetchDocuments();
       }
 
       toast({ title: "Upload successful", description: `${totalUploaded} file(s) queued for indexing.` });
