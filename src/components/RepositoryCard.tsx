@@ -586,6 +586,20 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       return { triggered: false, waitMs: 0 };
     }
 
+    const olderBlockingDoc = documentsRef.current
+      .filter((candidate) => candidate.id !== doc.id)
+      .filter((candidate) => new Date(candidate.createdAt).getTime() < new Date(doc.createdAt).getTime())
+      .find((candidate) => {
+        if (candidate.ingestionStatus === 'complete') return false;
+        if (candidate.ingestionStatus === 'failed' && candidate.totalChunks === 0) return false;
+        if (candidate.totalChunks === 0) return true;
+        return candidate.embeddedChunks < candidate.totalChunks;
+      });
+
+    if (olderBlockingDoc) {
+      return { triggered: false, waitMs: FREE_SERIAL_UPLOAD_POLL_MS };
+    }
+
     const now = Date.now();
     const lockedUntilMs = doc.embeddingLockedUntil ? new Date(doc.embeddingLockedUntil).getTime() : 0;
     if (lockedUntilMs > now) {

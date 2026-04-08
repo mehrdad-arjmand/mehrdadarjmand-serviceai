@@ -432,17 +432,14 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Free tier: interleave chunking + embeddings per document to spread RPM/TPM usage
+      // Free tier: register all documents immediately, then chunk them sequentially.
+      // The client-side supervisor resumes embeddings strictly one document at a time.
       if (apiTier === 'free') {
-        console.log('Free tier: processing files sequentially with immediate embedding triggers per document...')
+        console.log('Free tier: processing files sequentially and leaving embedding orchestration to the serial supervisor...')
 
         for (let i = 0; i < workItems.length; i++) {
           const { fileData, doc } = workItems[i]
-          const processed = await processFile(fileData, doc)
-
-          if (processed) {
-            await triggerEmbeddings([doc.id], `document ${doc.fileName}`)
-          }
+          await processFile(fileData, doc)
 
           if (i < workItems.length - 1) {
             console.log(`Free tier: waiting ${FREE_TIER_DOC_DELAY_MS}ms before next document`)
