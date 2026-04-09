@@ -1,91 +1,132 @@
 
-Goal: explain the real failure mode shown in your screenshots, then outline the fix before changing anything.
+Goal: provide a root-cause analysis of the free-tier workflow before making any more changes.
 
-What the screenshots are telling us
-- The stuck document is already at 500/940 chunks, so upload and chunk creation succeeded. The failure is in the embedding stage, not in the initial upload stage.
-- The graph shows repeated 429 TooManyRequests errors on the free API, which means the system is still re-hitting the embedding API too aggressively during the same document lifecycle.
-- So the current “retry” logic did not solve the real bottleneck. It only changed some queue behavior around uploads, while the large-document embedding path still breaks.
+Do I know what the issue is?
+Yes.
 
-Root cause in the current code
-1. Free-tier uploads are serial, but free-tier embeddings are still not truly “small-step” serial.
-   - `supabase/functions/ingest/index.ts` triggers `generate-embeddings` with `mode: 'full'` for each free-tier document.
-   - `supabase/functions/generate-embeddings/index.ts` then tries to process the whole document in one long-running function call.
+What I reviewed
+- Current free-tier frontend orchestration in `src/components/RepositoryCard.tsx`
+- Current free-tier backend flow in `supabase/functions/ingest/index.ts`
+- Current embedding worker in `supabase/functions/generate-embeddings/index.ts`
+- Recent database state for the failed batch
 
-2. Large documents are too big for that design.
-   - Free tier currently uses `BATCH_EMBED_SIZE_FREE = 10` and loops until all remaining chunks are embedded.
-   - A 940-chunk document needs about 94 embedding API calls minimum, plus delays and retries.
-   - That is exactly the kind of workload that can stall, timeout, or get abandoned mid-run in an edge-function environment.
+Confirmed evidence
+- In the recent failed batch, only the first 3 documents completed.
+- The remaining documents were left as:
+  - `ingestion_status = 'in_progress'`
+  - `total_chunks = 0`
+  - `ingested_chunks = 0`
+  - no retry timestamps, no locks, no explicit error
+- That means the queue is not dying in embeddings for those later files.
+- It is dying earlier, during free-tier extraction/chunking.
 
-3. The current recovery logic makes the free-tier problem worse.
-   - `src/components/RepositoryCard.tsx` watches for no progress for 180s and then re-triggers `generate-embeddings`.
-   - But during 429 backoff, the original run may still be alive or waiting.
-   - So the client can start a second embedding run for the same document while the first one has not truly finished.
-   - That explains the graph: more requests, more 429s, and still no clean completion.
+Root cause analysis
+1. The real bottleneck is still inside `ingest`, not the embedding slicer
+- Free tier currently registers all docs, then processes `workItems` one-by-one inside a single background `waitUntil` loop in `supabase/functions/ingest/index.ts`.
+- If that worker stalls, gets reclaimed, times out, or hangs on one document, the later documents never start.
+- Those later documents remain forever at `in_progress + total_chunks=0`, which is exactly what the database shows.
 
-4. Recovery is still too “restart-oriented” instead of “resume-oriented”.
-   - The free-tier upload monitor can delete/retry or defer entire files.
-   - That is the wrong recovery unit for a big document that already has hundreds of embedded chunks.
-   - The right unit is: resume only the remaining unembedded chunks, without duplicating work.
+2. The free-tier “retry/monitor” logic that was supposed to protect this is mostly dead code
+- `RepositoryCard.tsx` still contains `uploadFreeTierFile()` and `monitorFreeTierDocument()`.
+- But `handleUpload()` no longer uses that path for free tier.
+- It now does a single `uploadBatch(filesToUpload)` call for the whole batch.
+- So the file-level extraction watchdog/retry logic is not actually running.
 
-Why the previous fix did not help
-- It improved the upload queue shape, but it did not change the core issue that a big free-tier document is still embedded inside one long, retry-heavy function run.
-- So once the document is large enough, the same failure pattern remains: partial progress, 429 loops, then abandonment.
+3. The active free-tier recovery loop ignores the documents that are truly stuck
+- The free queue recovery only considers docs with `total_chunks > 0`.
+- `maybeResumeFreeTierDocument()` also exits immediately when `total_chunks === 0`.
+- So once a document gets stuck before chunk creation, it is invisible to recovery.
+- Worse: because the queue is FIFO, that zero-chunk document blocks every later document behind it.
 
-Implementation plan
-1. Rebuild the free-tier embedding flow as incremental slices
-- Change `generate-embeddings` so free tier does only a small slice per invocation, then returns immediately.
-- Example shape: process only the next 1-3 API requests worth of chunks, save progress, stop.
-- Keep the paid-tier path unchanged.
+4. Previous fixes were aimed at the wrong stage
+- The recent work improved embedding slicing, lock handling, and 429 cooldowns.
+- That may help once a document reaches `processing_embeddings`.
+- But the latest failures are happening before that stage.
+- So the main failure mode was misdiagnosed as “embedding retry logic” when the current batch evidence shows “extraction/chunking queue death”.
 
-2. Add a document-level lock/heartbeat for free-tier embedding
-- Prevent overlapping free-tier embedding runs on the same document.
-- Use a lightweight backend claim mechanism so only one worker can own a document at a time.
-- If a document is already being worked on, later retries should skip instead of launching another run.
+5. Observability is too weak
+- Recent function logs were not available.
+- The system has no durable free-tier job ledger showing:
+  - which document is currently being extracted
+  - last heartbeat
+  - last successful stage
+  - why the queue stopped
+- That is why repeated “surface fixes” have been hard to validate.
 
-3. Convert free-tier recovery from “restart file” to “resume remaining chunks”
-- In `RepositoryCard`, stop treating a large partially indexed document like a fresh upload problem.
-- The monitor should only:
-  - poll status,
-  - wait for the retry window,
-  - trigger the next small embedding slice if the document is idle and incomplete.
-- Do not auto-delete partially processed docs/chunks for this case.
+Why the current design keeps failing
+```text
+Upload 21 docs
+-> ingest registers all rows
+-> ingest background loop starts doc 1, doc 2, doc 3...
+-> one doc stalls/hangs/fails before chunks are written
+-> later docs are never reached
+-> frontend recovery only resumes docs with total_chunks > 0
+-> blocked doc is never resumed
+-> queue appears to "die out"
+```
 
-4. Treat 429 as a waiting state, not a failed state
-- When the embedding API returns rate-limit guidance, store that as an internal wait/retry condition.
-- The document should remain in processing/waiting, not flip into failure logic that causes duplicate retries.
-- The client supervisor should respect that wait window before invoking the next slice.
+What needs to be fixed
+1. Stop treating free-tier extraction/chunking as one long background loop
+- Free tier needs a durable one-document-at-a-time queue, not a single `waitUntil` batch runner.
 
-5. Reduce free-tier aggressiveness based on the graph evidence
-- Lower the free-tier embedding batch size from the current 10 to a safer value.
-- Increase or make adaptive the delay between free-tier calls.
-- The graph clearly shows the current free-tier throughput is still too aggressive for large documents.
+2. Persist queue state for free tier
+- Each document needs explicit stage state such as:
+  - `queued`
+  - `extracting`
+  - `chunking`
+  - `embedding`
+  - `cooldown`
+  - `complete`
+  - `failed`
+- Also store heartbeat / started_at / last_error / retry_after.
 
-6. Leave paid-tier workflow alone
-- No behavioral changes to paid-tier recovery logic unless there is a shared helper that must be touched safely.
-- This work should be scoped specifically to the free-tier path shown in your screenshots.
+3. Make recovery include zero-chunk stuck documents
+- The supervisor must detect documents stuck in `queued/extracting` with `total_chunks=0`.
+- Those are currently the blind spot causing the queue to freeze.
 
-7. Secondary hardening
-- Align `ingest` auth verification with the newer local-claims approach already used in `generate-embeddings`.
-- This is not the root cause shown by the graph, but it removes a remaining fragile auth path.
+4. Move free-tier orchestration to a true resume model
+- Register all docs immediately.
+- Process exactly one free-tier document at a time.
+- When it finishes extraction/chunking, then start embedding slices.
+- If it stalls, retry that document from its current stage instead of abandoning the queue.
 
-Technical details
-Files to update
-- `supabase/functions/generate-embeddings/index.ts`
-  - split free-tier “full document” processing into bounded slices
-  - add lock/heartbeat/retry-after handling
-  - keep paid path as-is
+5. Remove the split-brain orchestration
+- Right now some logic lives in `ingest`, some in the UI poller, and part of the older retry logic is unused.
+- Free-tier orchestration should have one clear owner.
+
+Files that need to change
 - `src/components/RepositoryCard.tsx`
-  - change free-tier monitor to resume slices instead of launching overlapping full reruns
-  - remove destructive retry behavior for partially indexed large docs
+  - remove/replace the current broken free-tier control flow
+  - stop relying on batch upload as the effective orchestrator
+  - poll queue state instead of guessing from partial document fields
 - `supabase/functions/ingest/index.ts`
-  - free-tier should queue/trigger only the first bounded embedding step, not assume a full-run worker
-  - harden auth verification
-- `supabase/migrations/...`
-  - add minimal state needed for free-tier lock/heartbeat/retry scheduling if current schema does not already support it
+  - stop running the whole free-tier batch inside one fragile sequential background loop
+  - turn it into per-document stage execution
+- `supabase/functions/generate-embeddings/index.ts`
+  - keep paid path unchanged
+  - keep free-tier slice behavior, but make it run only after extraction/chunking state is ready
+- database migration
+  - add proper free-tier queue state / heartbeat / retry metadata
+
+Implementation direction I recommend
+- Keep paid workflow untouched.
+- Rebuild only the free-tier pipeline as:
+  1. enqueue all documents immediately
+  2. backend claims the oldest queued free-tier doc
+  3. extract/chunk that one doc
+  4. embed it in 15-chunk slices with 60s cooldown on 429
+  5. when complete, backend advances to the next queued doc
+  6. if a doc stalls, mark it retryable and continue deterministic recovery
 
 Success criteria
-- A very large free-tier document can pause and resume without ever restarting from zero.
-- Only one free-tier embedding worker can run per document at a time.
-- 429s no longer create overlapping retries.
-- The document keeps progressing after waits instead of freezing at a partial count like 500/940.
-- The free-tier API error graph should show fewer spikes and materially fewer repeated 429 bars for the same upload run.
+- All uploaded free-tier documents appear immediately in the list.
+- Only one free-tier document is actively processed at a time.
+- If a document stalls before chunk creation, it is detected and retried.
+- Later documents do not disappear behind a stuck zero-chunk document.
+- 429 handling remains limited to embedding cooldowns, not repeated queue restarts.
+- Paid API behavior remains unchanged.
+
+Bottom line
+- The main root cause is not “free-tier embeddings are too fast”.
+- The main root cause is that the free-tier batch still depends on a fragile single background `ingest` loop, while the active recovery logic cannot see or recover the documents that stall before chunk creation.
+- That is why the first few documents finish and the rest die out.
