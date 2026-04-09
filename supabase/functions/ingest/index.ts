@@ -264,6 +264,10 @@ Deno.serve(async (req) => {
 
     for (const fileData of fileDataList) {
       const docId = crypto.randomUUID()
+      // Free tier: register as 'queued' so client supervisor can drive extraction one-by-one
+      // Paid tier: register as 'in_progress' for immediate background processing
+      const initialStatus = apiTier === 'free' ? 'pending' : 'in_progress'
+      const initialStage = apiTier === 'free' ? 'queued' : 'extracting'
       const { error: docError } = await supabase
         .from('documents')
         .insert({
@@ -277,7 +281,8 @@ Deno.serve(async (req) => {
           page_count: 0,
           total_chunks: 0,
           ingested_chunks: 0,
-          ingestion_status: 'in_progress',
+          ingestion_status: initialStatus,
+          ingestion_stage: initialStage,
           allowed_roles: allowedRoles,
           project_id: projectIdRaw ? String(projectIdRaw) : null,
           metadata: dynamicMetadata,
@@ -288,7 +293,7 @@ Deno.serve(async (req) => {
         continue
       }
 
-      const docRecord = { id: docId, fileName: fileData.name, status: 'in_progress' }
+      const docRecord = { id: docId, fileName: fileData.name, status: initialStatus }
       documents.push(docRecord)
       workItems.push({ fileData, doc: docRecord })
     }
