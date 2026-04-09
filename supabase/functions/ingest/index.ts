@@ -366,6 +366,12 @@ Deno.serve(async (req) => {
         doc: { id: string; fileName: string; status: string }
       ): Promise<boolean> => {
         try {
+          // Mark as extracting
+          await supabase.from('documents').update({ 
+            ingestion_status: 'in_progress', 
+            ingestion_stage: 'extracting' 
+          }).eq('id', doc.id)
+
           let extractedText = ''
           let pageCount = 0
 
@@ -389,6 +395,9 @@ Deno.serve(async (req) => {
           }
 
           console.log(`Extracted ${extractedText.length} chars, ${pageCount} pages from ${fileData.name}`)
+
+          // Mark as chunking
+          await supabase.from('documents').update({ ingestion_stage: 'chunking' }).eq('id', doc.id)
 
           const chunkSize = 800
           const overlapSize = 200
@@ -421,7 +430,7 @@ Deno.serve(async (req) => {
 
           await supabase
             .from('documents')
-            .update({ ingested_chunks: 0, ingestion_status: 'processing_embeddings' })
+            .update({ ingested_chunks: 0, ingestion_status: 'processing_embeddings', ingestion_stage: 'embedding' })
             .eq('id', doc.id)
 
           console.log(`Chunks saved for ${fileData.name}`)
@@ -431,7 +440,7 @@ Deno.serve(async (req) => {
           const errorMsg = err instanceof Error ? err.message : 'Unknown error'
           await supabase
             .from('documents')
-            .update({ ingestion_status: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
+            .update({ ingestion_status: 'failed', ingestion_stage: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
             .eq('id', doc.id)
           return false
         }
