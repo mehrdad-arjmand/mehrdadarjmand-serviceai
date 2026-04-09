@@ -895,6 +895,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
 
       if (!isPaidTier) {
+        // Find the oldest free-tier doc that needs embedding (has chunks but not fully embedded)
         const freeQueueDoc = [...docs]
           .filter((doc) => (
             doc.totalChunks > 0 &&
@@ -905,6 +906,25 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
         if (freeQueueDoc) {
           await maybeResumeFreeTierDocument(freeQueueDoc, 'Free background queue recovery');
+        }
+
+        // Also check for docs stuck at pending/queued with zero chunks (extraction never happened)
+        // These can't be recovered from client — mark them as failed so they don't block the queue
+        const stuckQueuedDocs = docs.filter((doc) => (
+          doc.totalChunks === 0 &&
+          doc.ingestionStatus !== 'complete' &&
+          doc.ingestionStatus !== 'failed' &&
+          // Only mark as failed if stuck for more than 10 minutes
+          (Date.now() - new Date(doc.createdAt).getTime()) > 10 * 60_000
+        ));
+
+        for (const stuckDoc of stuckQueuedDocs) {
+          console.warn(`Free tier: marking stuck doc "${stuckDoc.fileName}" (0 chunks, status=${stuckDoc.ingestionStatus}) as failed`);
+          await supabase.from('documents').update({
+            ingestion_status: 'failed',
+            ingestion_stage: 'failed',
+            ingestion_error: 'Extraction stalled — document was never processed. Please re-upload.',
+          }).eq('id', stuckDoc.id);
         }
       }
     }, 10_000); // Check every 10 seconds
