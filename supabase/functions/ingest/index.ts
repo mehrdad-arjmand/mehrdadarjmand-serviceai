@@ -446,19 +446,13 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Free tier: register all documents immediately, then chunk them sequentially.
-      // The client-side supervisor resumes embeddings strictly one document at a time.
+      // Free tier: process ONLY THE FIRST file in this call.
+      // Remaining files stay as 'queued' — the client supervisor will send them one-by-one.
       if (apiTier === 'free') {
-        console.log('Free tier: processing files sequentially and leaving embedding orchestration to the serial supervisor...')
-
-        for (let i = 0; i < workItems.length; i++) {
-          const { fileData, doc } = workItems[i]
+        if (workItems.length > 0) {
+          const { fileData, doc } = workItems[0]
+          console.log(`Free tier: processing first file "${fileData.name}" only (${workItems.length - 1} remain queued)`)
           await processFile(fileData, doc)
-
-          if (i < workItems.length - 1) {
-            console.log(`Free tier: waiting ${FREE_TIER_DOC_DELAY_MS}ms before next document`)
-            await new Promise(r => setTimeout(r, FREE_TIER_DOC_DELAY_MS))
-          }
         }
       } else {
         // Paid tier: process files in small batches to avoid Edge Function timeout
