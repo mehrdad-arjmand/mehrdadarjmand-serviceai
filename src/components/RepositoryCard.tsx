@@ -943,10 +943,24 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           await fetchDocuments();
         }
       } else {
-        const result = await uploadBatch(filesToUpload);
-        totalUploaded += result.totalUploaded;
-        uploadedDocIds.push(...result.uploadedDocIds);
-        await fetchDocuments();
+        // FREE TIER: Upload one file at a time, monitor each to completion before the next.
+        // This ensures extraction happens per-file and avoids the waitUntil batch stall.
+        for (let i = 0; i < filesToUpload.length; i++) {
+          const file = filesToUpload[i];
+          try {
+            console.log(`Free tier: uploading file ${i + 1}/${filesToUpload.length}: "${file.name}"`);
+            const result = await uploadFreeTierFile(file);
+            totalUploaded += result.totalUploaded;
+            uploadedDocIds.push(...result.uploadedDocIds);
+          } catch (err) {
+            console.error(`Free tier: file "${file.name}" failed after all attempts:`, err);
+            // Continue to next file instead of stopping the entire batch
+          }
+
+          if (i < filesToUpload.length - 1) {
+            await wait(FREE_TIER_DOC_DELAY_MS);
+          }
+        }
       }
 
       toast({ title: "Upload successful", description: `${totalUploaded} file(s) queued for indexing.` });
