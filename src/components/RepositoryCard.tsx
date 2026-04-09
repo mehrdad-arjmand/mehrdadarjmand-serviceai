@@ -582,17 +582,27 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     if (autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) {
       return { triggered: false, waitMs: 0 };
     }
-    if (doc.totalChunks === 0 || doc.embeddedChunks >= doc.totalChunks) {
+
+    // Skip docs that are already complete
+    if (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks) {
       return { triggered: false, waitMs: 0 };
     }
 
+    // For docs with totalChunks === 0: they're stuck at extraction — nothing to do from client
+    // (extraction requires file bytes which only happen during upload)
+    // We can only resume embedding for docs that already have chunks
+    if (doc.totalChunks === 0) {
+      return { triggered: false, waitMs: 0 };
+    }
+
+    // Check FIFO: only process the oldest incomplete doc
     const olderBlockingDoc = documentsRef.current
       .filter((candidate) => candidate.id !== doc.id)
       .filter((candidate) => new Date(candidate.createdAt).getTime() < new Date(doc.createdAt).getTime())
       .find((candidate) => {
         if (candidate.ingestionStatus === 'complete') return false;
-        if (candidate.ingestionStatus === 'failed' && candidate.totalChunks === 0) return false;
-        if (candidate.totalChunks === 0) return true;
+        if (candidate.ingestionStatus === 'failed') return false;
+        if (candidate.totalChunks === 0) return false; // Don't block on zero-chunk docs
         return candidate.embeddedChunks < candidate.totalChunks;
       });
 
