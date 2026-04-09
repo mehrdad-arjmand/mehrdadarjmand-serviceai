@@ -582,17 +582,27 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     if (autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) {
       return { triggered: false, waitMs: 0 };
     }
-    if (doc.totalChunks === 0 || doc.embeddedChunks >= doc.totalChunks) {
+
+    // Skip docs that are already complete
+    if (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks) {
       return { triggered: false, waitMs: 0 };
     }
 
+    // For docs with totalChunks === 0: they're stuck at extraction — nothing to do from client
+    // (extraction requires file bytes which only happen during upload)
+    // We can only resume embedding for docs that already have chunks
+    if (doc.totalChunks === 0) {
+      return { triggered: false, waitMs: 0 };
+    }
+
+    // Check FIFO: only process the oldest incomplete doc
     const olderBlockingDoc = documentsRef.current
       .filter((candidate) => candidate.id !== doc.id)
       .filter((candidate) => new Date(candidate.createdAt).getTime() < new Date(doc.createdAt).getTime())
       .find((candidate) => {
         if (candidate.ingestionStatus === 'complete') return false;
-        if (candidate.ingestionStatus === 'failed' && candidate.totalChunks === 0) return false;
-        if (candidate.totalChunks === 0) return true;
+        if (candidate.ingestionStatus === 'failed') return false;
+        if (candidate.totalChunks === 0) return false; // Don't block on zero-chunk docs
         return candidate.embeddedChunks < candidate.totalChunks;
       });
 
@@ -885,6 +895,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
 
       if (!isPaidTier) {
+        // Find the oldest free-tier doc that needs embedding (has chunks but not fully embedded)
         const freeQueueDoc = [...docs]
           .filter((doc) => (
             doc.totalChunks > 0 &&
@@ -895,6 +906,25 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
         if (freeQueueDoc) {
           await maybeResumeFreeTierDocument(freeQueueDoc, 'Free background queue recovery');
+        }
+
+        // Also check for docs stuck at pending/queued with zero chunks (extraction never happened)
+        // These can't be recovered from client — mark them as failed so they don't block the queue
+        const stuckQueuedDocs = docs.filter((doc) => (
+          doc.totalChunks === 0 &&
+          doc.ingestionStatus !== 'complete' &&
+          doc.ingestionStatus !== 'failed' &&
+          // Only mark as failed if stuck for more than 10 minutes
+          (Date.now() - new Date(doc.createdAt).getTime()) > 10 * 60_000
+        ));
+
+        for (const stuckDoc of stuckQueuedDocs) {
+          console.warn(`Free tier: marking stuck doc "${stuckDoc.fileName}" (0 chunks, status=${stuckDoc.ingestionStatus}) as failed`);
+          await supabase.from('documents').update({
+            ingestion_status: 'failed',
+            ingestion_stage: 'failed',
+            ingestion_error: 'Extraction stalled — document was never processed. Please re-upload.',
+          }).eq('id', stuckDoc.id);
         }
       }
     }, 10_000); // Check every 10 seconds
@@ -933,10 +963,24 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           await fetchDocuments();
         }
       } else {
-        const result = await uploadBatch(filesToUpload);
-        totalUploaded += result.totalUploaded;
-        uploadedDocIds.push(...result.uploadedDocIds);
-        await fetchDocuments();
+        // FREE TIER: Upload one file at a time, monitor each to completion before the next.
+        // This ensures extraction happens per-file and avoids the waitUntil batch stall.
+        for (let i = 0; i < filesToUpload.length; i++) {
+          const file = filesToUpload[i];
+          try {
+            console.log(`Free tier: uploading file ${i + 1}/${filesToUpload.length}: "${file.name}"`);
+            const result = await uploadFreeTierFile(file);
+            totalUploaded += result.totalUploaded;
+            uploadedDocIds.push(...result.uploadedDocIds);
+          } catch (err) {
+            console.error(`Free tier: file "${file.name}" failed after all attempts:`, err);
+            // Continue to next file instead of stopping the entire batch
+          }
+
+          if (i < filesToUpload.length - 1) {
+            await wait(FREE_TIER_DOC_DELAY_MS);
+          }
+        }
       }
 
       toast({ title: "Upload successful", description: `${totalUploaded} file(s) queued for indexing.` });

@@ -264,6 +264,10 @@ Deno.serve(async (req) => {
 
     for (const fileData of fileDataList) {
       const docId = crypto.randomUUID()
+      // Free tier: register as 'queued' so client supervisor can drive extraction one-by-one
+      // Paid tier: register as 'in_progress' for immediate background processing
+      const initialStatus = apiTier === 'free' ? 'pending' : 'in_progress'
+      const initialStage = apiTier === 'free' ? 'queued' : 'extracting'
       const { error: docError } = await supabase
         .from('documents')
         .insert({
@@ -277,7 +281,8 @@ Deno.serve(async (req) => {
           page_count: 0,
           total_chunks: 0,
           ingested_chunks: 0,
-          ingestion_status: 'in_progress',
+          ingestion_status: initialStatus,
+          ingestion_stage: initialStage,
           allowed_roles: allowedRoles,
           project_id: projectIdRaw ? String(projectIdRaw) : null,
           metadata: dynamicMetadata,
@@ -288,7 +293,7 @@ Deno.serve(async (req) => {
         continue
       }
 
-      const docRecord = { id: docId, fileName: fileData.name, status: 'in_progress' }
+      const docRecord = { id: docId, fileName: fileData.name, status: initialStatus }
       documents.push(docRecord)
       workItems.push({ fileData, doc: docRecord })
     }
@@ -361,6 +366,12 @@ Deno.serve(async (req) => {
         doc: { id: string; fileName: string; status: string }
       ): Promise<boolean> => {
         try {
+          // Mark as extracting
+          await supabase.from('documents').update({ 
+            ingestion_status: 'in_progress', 
+            ingestion_stage: 'extracting' 
+          }).eq('id', doc.id)
+
           let extractedText = ''
           let pageCount = 0
 
@@ -384,6 +395,9 @@ Deno.serve(async (req) => {
           }
 
           console.log(`Extracted ${extractedText.length} chars, ${pageCount} pages from ${fileData.name}`)
+
+          // Mark as chunking
+          await supabase.from('documents').update({ ingestion_stage: 'chunking' }).eq('id', doc.id)
 
           const chunkSize = 800
           const overlapSize = 200
@@ -416,7 +430,7 @@ Deno.serve(async (req) => {
 
           await supabase
             .from('documents')
-            .update({ ingested_chunks: 0, ingestion_status: 'processing_embeddings' })
+            .update({ ingested_chunks: 0, ingestion_status: 'processing_embeddings', ingestion_stage: 'embedding' })
             .eq('id', doc.id)
 
           console.log(`Chunks saved for ${fileData.name}`)
@@ -426,25 +440,19 @@ Deno.serve(async (req) => {
           const errorMsg = err instanceof Error ? err.message : 'Unknown error'
           await supabase
             .from('documents')
-            .update({ ingestion_status: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
+            .update({ ingestion_status: 'failed', ingestion_stage: 'failed', ingestion_error: errorMsg.slice(0, 1000) })
             .eq('id', doc.id)
           return false
         }
       }
 
-      // Free tier: register all documents immediately, then chunk them sequentially.
-      // The client-side supervisor resumes embeddings strictly one document at a time.
+      // Free tier: process ONLY THE FIRST file in this call.
+      // Remaining files stay as 'queued' — the client supervisor will send them one-by-one.
       if (apiTier === 'free') {
-        console.log('Free tier: processing files sequentially and leaving embedding orchestration to the serial supervisor...')
-
-        for (let i = 0; i < workItems.length; i++) {
-          const { fileData, doc } = workItems[i]
+        if (workItems.length > 0) {
+          const { fileData, doc } = workItems[0]
+          console.log(`Free tier: processing first file "${fileData.name}" only (${workItems.length - 1} remain queued)`)
           await processFile(fileData, doc)
-
-          if (i < workItems.length - 1) {
-            console.log(`Free tier: waiting ${FREE_TIER_DOC_DELAY_MS}ms before next document`)
-            await new Promise(r => setTimeout(r, FREE_TIER_DOC_DELAY_MS))
-          }
         }
       } else {
         // Paid tier: process files in small batches to avoid Edge Function timeout

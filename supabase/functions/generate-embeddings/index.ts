@@ -245,6 +245,7 @@ async function processFreeTier(
         .update({
           ingested_chunks: embedded,
           ingestion_status: isComplete ? 'complete' : 'processing_embeddings',
+          ingestion_stage: isComplete ? 'complete' : 'embedding',
           ingestion_error: null,
           embedding_locked_until: null, // Release lock
         })
