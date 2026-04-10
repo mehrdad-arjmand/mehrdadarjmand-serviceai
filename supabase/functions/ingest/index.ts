@@ -553,6 +553,13 @@ function applyRegexNormalization(pageTexts: string[]): string {
 }
 
 async function cleanGarbledText(pageTexts: string[], googleApiKey: string, apiTier?: string): Promise<string> {
+  // Free tier: skip Gemini cleaning for large PDFs to avoid Edge Function CPU timeout
+  const FREE_TIER_MAX_CLEAN_PAGES = 30
+  if (apiTier === 'free' && pageTexts.length > FREE_TIER_MAX_CLEAN_PAGES) {
+    console.log(`Free tier: PDF has ${pageTexts.length} pages (>${FREE_TIER_MAX_CLEAN_PAGES}), skipping Gemini cleaning to avoid timeout. Using regex fallback.`)
+    return applyRegexNormalization(pageTexts)
+  }
+
   const BATCH_SIZE = 15
   const batches: string[][] = []
   for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
