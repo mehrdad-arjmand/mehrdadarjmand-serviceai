@@ -564,7 +564,10 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       if (!isPaidTier && data?.documents?.[0]) {
         const result = data.documents[0];
         if (result.retryAfterMs > 0) {
-          console.log(`Free-tier recovery: document "${doc.fileName}" rate-limited, will retry after ${result.retryAfterMs}ms`);
+          // Update the local trigger timestamp to prevent premature re-triggering
+          const effectiveWait = Math.max(result.retryAfterMs, 60_000);
+          freeResumeTriggerAtRef.current[doc.id] = Date.now() + effectiveWait - FREE_RESUME_COOLDOWN_MS;
+          console.log(`Free-tier recovery: document "${doc.fileName}" rate-limited, will retry after ${effectiveWait}ms`);
         }
       }
 

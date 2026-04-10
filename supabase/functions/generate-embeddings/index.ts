@@ -204,14 +204,65 @@ async function processFreeTier(
         const embedResult = await batchEmbedTexts(apiKey, texts, { maxRetries: 1 })
 
         if (embedResult.rateLimited) {
-          retryAfterMs = Math.max(embedResult.retryAfterMs, FREE_TIER_RATE_LIMIT_WAIT_MS)
+          // ── Exponential backoff for consecutive 429s ──
+          // If ingested_chunks is still 0, we've never made progress — increase wait exponentially
+          const { count: currentEmbedded } = await supabase
+            .from('chunks')
+            .select('id', { count: 'exact', head: true })
+            .eq('document_id', docId)
+            .not('embedding', 'is', null)
+
+          const embedded = currentEmbedded || 0
+          const totalChunks = docMeta.total_chunks || 0
+
+          // Calculate consecutive failure backoff based on document age
+          const { data: docCreated } = await supabase
+            .from('documents')
+            .select('uploaded_at')
+            .eq('id', docId)
+            .single()
+
+          const docAgeMs = docCreated?.uploaded_at
+            ? Date.now() - new Date(docCreated.uploaded_at).getTime()
+            : 0
+
+          // If zero progress and doc has been around for > 30 minutes, mark as failed
+          const MAX_ZERO_PROGRESS_AGE_MS = 30 * 60_000
+          if (embedded === 0 && docAgeMs > MAX_ZERO_PROGRESS_AGE_MS) {
+            console.log(`Document ${docId}: zero embedding progress after ${Math.round(docAgeMs / 60_000)}min — marking as failed`)
+            await supabase
+              .from('documents')
+              .update({
+                ingestion_status: 'failed',
+                ingestion_stage: 'failed',
+                ingestion_error: 'Embedding rate limit exceeded repeatedly. Please retry later.',
+                embedding_locked_until: null,
+                embedding_retry_after: null,
+              })
+              .eq('id', docId)
+            results.push({ documentId: docId, processed: 0, embedded: 0, total: totalChunks, complete: false, locked: false, retryAfterMs: 0 })
+            continue
+          }
+
+          // Exponential backoff: 60s, 120s, 240s, 480s, capped at 15 min
+          // Use doc age as a proxy for how many times we've retried
+          let backoffMultiplier = 1
+          if (embedded === 0 && docAgeMs > 10 * 60_000) backoffMultiplier = 8  // 8 min
+          else if (embedded === 0 && docAgeMs > 5 * 60_000) backoffMultiplier = 4  // 4 min
+          else if (embedded === 0 && docAgeMs > 2 * 60_000) backoffMultiplier = 2  // 2 min
+
+          retryAfterMs = Math.min(
+            15 * 60_000,  // Cap at 15 minutes
+            Math.max(embedResult.retryAfterMs, FREE_TIER_RATE_LIMIT_WAIT_MS) * backoffMultiplier
+          )
+
           const retryAt = new Date(Date.now() + retryAfterMs).toISOString()
           await supabase
             .from('documents')
             .update({ embedding_retry_after: retryAt, embedding_locked_until: null })
             .eq('id', docId)
           hitRateLimit = true
-          console.log(`Document ${docId}: hit rate limit, will retry after ${retryAfterMs}ms`)
+          console.log(`Document ${docId}: hit rate limit (${embedded}/${totalChunks} embedded, age ${Math.round(docAgeMs / 60_000)}min), backoff ${backoffMultiplier}x, retry after ${retryAfterMs}ms`)
         } else {
           if (!embedResult.embeddings) throw new Error('Embedding failed without rate limit')
 
