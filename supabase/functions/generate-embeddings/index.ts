@@ -205,7 +205,6 @@ async function processFreeTier(
 
         if (embedResult.rateLimited) {
           // ── Exponential backoff for consecutive 429s ──
-          // If ingested_chunks is still 0, we've never made progress — increase wait exponentially
           const { count: currentEmbedded } = await supabase
             .from('chunks')
             .select('id', { count: 'exact', head: true })
@@ -215,44 +214,52 @@ async function processFreeTier(
           const embedded = currentEmbedded || 0
           const totalChunks = docMeta.total_chunks || 0
 
-          // Calculate consecutive failure backoff based on document age
-          const { data: docCreated } = await supabase
-            .from('documents')
-            .select('uploaded_at')
-            .eq('id', docId)
-            .single()
+          // Detect consecutive failures: if embedding_retry_after was set recently,
+          // we're in a retry loop. Count how many consecutive 429s by checking
+          // if the previous retry_after was within the last 5 minutes.
+          let consecutiveFailures = 1
+          if (docMeta.embedding_retry_after) {
+            const prevRetryAfter = new Date(docMeta.embedding_retry_after)
+            const timeSincePrevRetry = Date.now() - prevRetryAfter.getTime()
+            // If previous retry_after was within last 10 minutes, we're in a loop
+            if (timeSincePrevRetry < 10 * 60_000) {
+              // Estimate consecutive failures from time since first 429
+              const { data: docCreated } = await supabase
+                .from('documents')
+                .select('uploaded_at')
+                .eq('id', docId)
+                .single()
+              const docAgeMs = docCreated?.uploaded_at
+                ? Date.now() - new Date(docCreated.uploaded_at).getTime()
+                : 0
+              // Rough estimate: failures ≈ time_in_loop / 60s
+              consecutiveFailures = Math.max(2, Math.floor(Math.min(docAgeMs, 30 * 60_000) / 60_000))
+            }
+          }
 
-          const docAgeMs = docCreated?.uploaded_at
-            ? Date.now() - new Date(docCreated.uploaded_at).getTime()
-            : 0
-
-          // If zero progress and doc has been around for > 30 minutes, mark as failed
-          const MAX_ZERO_PROGRESS_AGE_MS = 30 * 60_000
-          if (embedded === 0 && docAgeMs > MAX_ZERO_PROGRESS_AGE_MS) {
-            console.log(`Document ${docId}: zero embedding progress after ${Math.round(docAgeMs / 60_000)}min — marking as failed`)
+          // Circuit breaker: after 15 consecutive failures (~15 min of looping), mark as failed
+          const MAX_CONSECUTIVE_FAILURES = 15
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            console.log(`Document ${docId}: ${consecutiveFailures} consecutive rate-limit failures (${embedded}/${totalChunks} embedded) — marking as failed`)
             await supabase
               .from('documents')
               .update({
                 ingestion_status: 'failed',
                 ingestion_stage: 'failed',
-                ingestion_error: 'Embedding rate limit exceeded repeatedly. Please retry later.',
+                ingestion_error: `Embedding rate-limited ${consecutiveFailures} times. ${embedded}/${totalChunks} chunks embedded. Click Reprocess to retry.`,
                 embedding_locked_until: null,
                 embedding_retry_after: null,
               })
               .eq('id', docId)
-            results.push({ documentId: docId, processed: 0, embedded: 0, total: totalChunks, complete: false, locked: false, retryAfterMs: 0 })
+            results.push({ documentId: docId, processed: 0, embedded, total: totalChunks, complete: false, locked: false, retryAfterMs: 0 })
             continue
           }
 
-          // Exponential backoff: 60s, 120s, 240s, 480s, capped at 15 min
-          // Use doc age as a proxy for how many times we've retried
-          let backoffMultiplier = 1
-          if (embedded === 0 && docAgeMs > 10 * 60_000) backoffMultiplier = 8  // 8 min
-          else if (embedded === 0 && docAgeMs > 5 * 60_000) backoffMultiplier = 4  // 4 min
-          else if (embedded === 0 && docAgeMs > 2 * 60_000) backoffMultiplier = 2  // 2 min
-
+          // Exponential backoff based on consecutive failures (works regardless of embedded count)
+          // 60s → 120s → 240s → 480s → capped at 15 min
+          const backoffMultiplier = Math.pow(2, Math.min(consecutiveFailures - 1, 4))
           retryAfterMs = Math.min(
-            15 * 60_000,  // Cap at 15 minutes
+            15 * 60_000,
             Math.max(embedResult.retryAfterMs, FREE_TIER_RATE_LIMIT_WAIT_MS) * backoffMultiplier
           )
 
@@ -262,7 +269,7 @@ async function processFreeTier(
             .update({ embedding_retry_after: retryAt, embedding_locked_until: null })
             .eq('id', docId)
           hitRateLimit = true
-          console.log(`Document ${docId}: hit rate limit (${embedded}/${totalChunks} embedded, age ${Math.round(docAgeMs / 60_000)}min), backoff ${backoffMultiplier}x, retry after ${retryAfterMs}ms`)
+          console.log(`Document ${docId}: hit rate limit (${embedded}/${totalChunks} embedded, consecutive=${consecutiveFailures}), backoff ${backoffMultiplier}x, retry after ${retryAfterMs}ms`)
         } else {
           if (!embedResult.embeddings) throw new Error('Embedding failed without rate limit')
 
