@@ -388,7 +388,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   const FREE_EXTRACTION_SIZE_BUCKET_BYTES = 1024 * 1024;
   const PAID_UPLOAD_BATCH_SIZE = 3;
   const FREE_RESUME_COOLDOWN_MS = 10_000;
-  const FREE_RATE_LIMIT_EXTRA_WAIT_MS = 0;
+  const FREE_RATE_LIMIT_EXTRA_WAIT_MS = 30_000; // 30s buffer after retry_after expires
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
