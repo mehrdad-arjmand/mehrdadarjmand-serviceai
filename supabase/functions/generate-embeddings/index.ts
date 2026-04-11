@@ -290,6 +290,8 @@ async function processFreeTier(
           ingestion_stage: isComplete ? 'complete' : 'embedding',
           ingestion_error: null,
           embedding_locked_until: null, // Release lock
+          // Reset failure counter on successful embed + clear retry_after
+          ...(totalProcessed > 0 ? { embedding_failure_count: 0, embedding_retry_after: null } : {}),
         })
         .eq('id', docId)
 

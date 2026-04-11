@@ -899,11 +899,12 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
       if (!isPaidTier) {
         // Find the oldest free-tier doc that needs embedding (has chunks but not fully embedded)
+        // IMPORTANT: Do NOT include 'failed' docs — those must only be retried via manual Reprocess
         const freeQueueDoc = [...docs]
           .filter((doc) => (
             doc.totalChunks > 0 &&
             doc.embeddedChunks < doc.totalChunks &&
-            (doc.ingestionStatus === 'processing_embeddings' || doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'failed')
+            (doc.ingestionStatus === 'processing_embeddings' || doc.ingestionStatus === 'in_progress')
           ))
           .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
 
@@ -1377,6 +1378,9 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         ingestion_status: 'processing_embeddings',
         ingestion_error: null,
         ingested_chunks: 0,
+        embedding_failure_count: 0,
+        embedding_retry_after: null,
+        embedding_locked_until: null,
       }).eq('id', doc.id);
 
       await fetchDocuments();
