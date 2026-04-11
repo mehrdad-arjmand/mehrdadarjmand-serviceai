@@ -1,132 +1,131 @@
 
-Goal: provide a root-cause analysis of the free-tier workflow before making any more changes.
 
-Do I know what the issue is?
-Yes.
+## Root Cause Analysis — Three Distinct Bugs
 
-What I reviewed
-- Current free-tier frontend orchestration in `src/components/RepositoryCard.tsx`
-- Current free-tier backend flow in `supabase/functions/ingest/index.ts`
-- Current embedding worker in `supabase/functions/generate-embeddings/index.ts`
-- Recent database state for the failed batch
+### Evidence from logs (live, right now)
 
-Confirmed evidence
-- In the recent failed batch, only the first 3 documents completed.
-- The remaining documents were left as:
-  - `ingestion_status = 'in_progress'`
-  - `total_chunks = 0`
-  - `ingested_chunks = 0`
-  - no retry timestamps, no locks, no explicit error
-- That means the queue is not dying in embeddings for those later files.
-- It is dying earlier, during free-tier extraction/chunking.
+The `generate-embeddings` logs show this repeating pattern for Hyundai-complete.pdf (doc `dce3bfbc`):
 
-Root cause analysis
-1. The real bottleneck is still inside `ingest`, not the embedding slicer
-- Free tier currently registers all docs, then processes `workItems` one-by-one inside a single background `waitUntil` loop in `supabase/functions/ingest/index.ts`.
-- If that worker stalls, gets reclaimed, times out, or hangs on one document, the later documents never start.
-- Those later documents remain forever at `in_progress + total_chunks=0`, which is exactly what the database shows.
-
-2. The free-tier “retry/monitor” logic that was supposed to protect this is mostly dead code
-- `RepositoryCard.tsx` still contains `uploadFreeTierFile()` and `monitorFreeTierDocument()`.
-- But `handleUpload()` no longer uses that path for free tier.
-- It now does a single `uploadBatch(filesToUpload)` call for the whole batch.
-- So the file-level extraction watchdog/retry logic is not actually running.
-
-3. The active free-tier recovery loop ignores the documents that are truly stuck
-- The free queue recovery only considers docs with `total_chunks > 0`.
-- `maybeResumeFreeTierDocument()` also exits immediately when `total_chunks === 0`.
-- So once a document gets stuck before chunk creation, it is invisible to recovery.
-- Worse: because the queue is FIFO, that zero-chunk document blocks every later document behind it.
-
-4. Previous fixes were aimed at the wrong stage
-- The recent work improved embedding slicing, lock handling, and 429 cooldowns.
-- That may help once a document reaches `processing_embeddings`.
-- But the latest failures are happening before that stage.
-- So the main failure mode was misdiagnosed as “embedding retry logic” when the current batch evidence shows “extraction/chunking queue death”.
-
-5. Observability is too weak
-- Recent function logs were not available.
-- The system has no durable free-tier job ledger showing:
-  - which document is currently being extracted
-  - last heartbeat
-  - last successful stage
-  - why the queue stopped
-- That is why repeated “surface fixes” have been hard to validate.
-
-Why the current design keeps failing
 ```text
-Upload 21 docs
--> ingest registers all rows
--> ingest background loop starts doc 1, doc 2, doc 3...
--> one doc stalls/hangs/fails before chunks are written
--> later docs are never reached
--> frontend recovery only resumes docs with total_chunks > 0
--> blocked doc is never resumed
--> queue appears to "die out"
+1. Rate limited after 1 attempt(s), returning rate-limited status
+2. Document dce3bfbc: hit rate limit (555/940 embedded, consecutive=1), backoff 1x, retry after 60000ms
+3. Free-tier slice: 555/940 chunks ... (processed 0 this call)
+   ... ~20 seconds later ...
+4. Rate limited after 1 attempt(s), returning rate-limited status
+5. Document dce3bfbc: 30 consecutive rate-limit failures — marking as failed
+   ... ~10 seconds later ...
+6. Back to step 1 — cycle repeats
 ```
 
-What needs to be fixed
-1. Stop treating free-tier extraction/chunking as one long background loop
-- Free tier needs a durable one-document-at-a-time queue, not a single `waitUntil` batch runner.
+This loop has been running continuously. Here are the three bugs causing it:
 
-2. Persist queue state for free tier
-- Each document needs explicit stage state such as:
-  - `queued`
-  - `extracting`
-  - `chunking`
-  - `embedding`
-  - `cooldown`
-  - `complete`
-  - `failed`
-- Also store heartbeat / started_at / last_error / retry_after.
+---
 
-3. Make recovery include zero-chunk stuck documents
-- The supervisor must detect documents stuck in `queued/extracting` with `total_chunks=0`.
-- Those are currently the blind spot causing the queue to freeze.
+### Bug 1: Consecutive failure counter always resets to 1
 
-4. Move free-tier orchestration to a true resume model
-- Register all docs immediately.
-- Process exactly one free-tier document at a time.
-- When it finishes extraction/chunking, then start embedding slices.
-- If it stalls, retry that document from its current stage instead of abandoning the queue.
+**Location:** `generate-embeddings/index.ts`, lines 177 and 220-237
 
-5. Remove the split-brain orchestration
-- Right now some logic lives in `ingest`, some in the UI poller, and part of the older retry logic is unused.
-- Free-tier orchestration should have one clear owner.
+When the function acquires the lock (line 177), it does:
+```typescript
+.update({ embedding_locked_until: lockUntil, embedding_retry_after: null })
+```
 
-Files that need to change
-- `src/components/RepositoryCard.tsx`
-  - remove/replace the current broken free-tier control flow
-  - stop relying on batch upload as the effective orchestrator
-  - poll queue state instead of guessing from partial document fields
-- `supabase/functions/ingest/index.ts`
-  - stop running the whole free-tier batch inside one fragile sequential background loop
-  - turn it into per-document stage execution
-- `supabase/functions/generate-embeddings/index.ts`
-  - keep paid path unchanged
-  - keep free-tier slice behavior, but make it run only after extraction/chunking state is ready
-- database migration
-  - add proper free-tier queue state / heartbeat / retry metadata
+It **clears `embedding_retry_after`** before attempting the embed. Then, when a 429 occurs, the consecutive failure detection (line 221) checks:
+```typescript
+if (docMeta.embedding_retry_after) { // <-- always null because we just cleared it!
+```
 
-Implementation direction I recommend
-- Keep paid workflow untouched.
-- Rebuild only the free-tier pipeline as:
-  1. enqueue all documents immediately
-  2. backend claims the oldest queued free-tier doc
-  3. extract/chunk that one doc
-  4. embed it in 15-chunk slices with 60s cooldown on 429
-  5. when complete, backend advances to the next queued doc
-  6. if a doc stalls, mark it retryable and continue deterministic recovery
+Since it was just cleared, `consecutiveFailures` always equals 1. The exponential backoff (`backoff 1x`) never escalates. Every single call waits only 60 seconds regardless of how many times it has failed.
 
-Success criteria
-- All uploaded free-tier documents appear immediately in the list.
-- Only one free-tier document is actively processed at a time.
-- If a document stalls before chunk creation, it is detected and retried.
-- Later documents do not disappear behind a stuck zero-chunk document.
-- 429 handling remains limited to embedding cooldowns, not repeated queue restarts.
-- Paid API behavior remains unchanged.
+### Bug 2: Circuit breaker triggers via wrong heuristic, then gets immediately overridden
 
-Bottom line
-- The main root cause is not “free-tier embeddings are too fast”.
-- The main root cause is that the free-tier batch still depends on a fragile single background `ingest` loop, while the active recovery logic cannot see or recover the documents that stall before chunk creation.
-- That is why the first few documents finish and the rest die out.
+The circuit breaker at line 241 checks `consecutiveFailures >= 15`. Since the counter is always 1 (Bug 1), the circuit breaker should never fire. But it does fire — with `consecutive=30` — because of the fallback heuristic at line 236:
+```typescript
+consecutiveFailures = Math.max(2, Math.floor(Math.min(docAgeMs, 30 * 60_000) / 60_000))
+```
+
+This estimates failures from the **document age**, not actual failure count. For a document uploaded hours ago, it computes 30 and immediately trips the breaker. So the document oscillates between "1 consecutive failure" (backoff 1x = 60s) and "30 consecutive failures" (instant fail) on alternating calls.
+
+### Bug 3: Client poller auto-retries `failed` documents every 10 seconds
+
+**Location:** `RepositoryCard.tsx`, lines 900-912
+
+The background polling loop runs every 10 seconds and picks up documents for retry:
+```typescript
+const freeQueueDoc = [...docs]
+  .filter((doc) => (
+    doc.ingestionStatus === 'failed'  // <-- failed docs get auto-retried!
+  ))
+```
+
+When a document is marked `failed` by the circuit breaker (Bug 2), the poller immediately calls `triggerEmbeddingRecovery`, which:
+- Sets `ingestion_status = 'processing_embeddings'` and clears `ingestion_error`
+- Calls `generate-embeddings` again
+- That call gets 429 (API still exhausted)
+- Backend marks it failed again
+- Poller picks it up 10 seconds later → infinite loop
+
+### Why 429s happen even after API limits reset
+
+The Gemini Embedding API free tier has a **1,000 Requests Per Day (RPD)** rolling window. Processing 11+ documents with 15-chunk batches can consume 500+ requests. Even after "a few hours," the RPD hasn't fully rolled over (it's a 24-hour window). The RPM chart showing 0/100 only shows per-minute usage, not the daily quota.
+
+---
+
+## Fix Plan
+
+### Change 1: Add persistent failure counter (database migration)
+
+Add an `embedding_failure_count` integer column to `documents`. This replaces the broken heuristic that tries to infer consecutive failures from stale timestamps.
+
+```sql
+ALTER TABLE public.documents
+ADD COLUMN IF NOT EXISTS embedding_failure_count integer DEFAULT 0;
+```
+
+### Change 2: Fix the backend consecutive failure tracking (`generate-embeddings/index.ts`)
+
+- **Stop clearing `embedding_retry_after` on lock acquisition.** Instead, only clear it after a successful embed.
+- **Use the new `embedding_failure_count` column** instead of the broken timestamp heuristic.
+- On 429: increment `embedding_failure_count`, compute backoff from it.
+- On success: reset `embedding_failure_count` to 0.
+- Circuit breaker: after 10 consecutive failures, mark as `failed` and stop.
+
+### Change 3: Stop auto-retrying `failed` documents from the client poller (`RepositoryCard.tsx`)
+
+Remove `ingestionStatus === 'failed'` from the free-tier background queue filter (line 906). A `failed` document should only be retried via the manual "Reprocess" button. This is the single most important change — it breaks the infinite loop.
+
+### Change 4: Reprocess clears the failure counter
+
+When the user clicks "Reprocess," reset `embedding_failure_count` to 0 and clear `embedding_retry_after` so the document starts fresh.
+
+---
+
+### What is different from previous attempts
+
+| Previous approach | Why it failed | This fix |
+|---|---|---|
+| Estimated consecutive failures from timestamps | `embedding_retry_after` gets cleared before the check, so count is always 1 | Persistent integer counter in DB |
+| Exponential backoff on retry_after | Backoff never escalated because counter was always 1 | Counter survives across invocations |
+| Circuit breaker after 15 failures | Fired via doc-age heuristic (wrong), then client immediately retried | Circuit breaker uses real counter + client stops retrying failed docs |
+| 30s client buffer (`FREE_RATE_LIMIT_EXTRA_WAIT_MS`) | Client poller bypasses this via `triggerEmbeddingRecovery` for failed docs | Failed docs are excluded from auto-retry entirely |
+
+### Testing plan
+
+1. Upload 21 documents on free tier
+2. Verify all appear immediately in the list
+3. Watch the first 11 process serially to completion
+4. When the 12th (large) document hits rate limits, verify:
+   - Failure count increments (1, 2, 3...) in logs
+   - Backoff escalates (60s, 120s, 240s...)
+   - After 10 failures, document shows as "Failed" and **stays** failed
+   - No infinite retry loop in console logs
+5. Click "Reprocess" after waiting for API reset
+6. Verify it resumes from chunk 555 (not from 0) and completes
+
+### Files to change
+
+- New migration: add `embedding_failure_count` column
+- `supabase/functions/generate-embeddings/index.ts`: use persistent counter, stop clearing retry_after on lock
+- `src/components/RepositoryCard.tsx`: remove `failed` from auto-retry filter, reset counter on Reprocess
+- Paid tier: untouched
+
