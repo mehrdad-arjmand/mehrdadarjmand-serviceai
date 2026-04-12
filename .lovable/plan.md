@@ -1,131 +1,135 @@
 
+Goal: identify why free-tier documents still hit immediate 429 loops after an apparent pause, and define a fix that applies only to the free API workflow.
 
-## Root Cause Analysis — Three Distinct Bugs
+Do I know what the issue is?
+Yes.
 
-### Evidence from logs (live, right now)
+What I reviewed
+- `src/components/RepositoryCard.tsx`
+- `supabase/functions/generate-embeddings/index.ts`
+- `supabase/functions/ingest/index.ts`
+- live `generate-embeddings` logs
+- live browser network requests
+- Gemini rate-limit docs
 
-The `generate-embeddings` logs show this repeating pattern for Hyundai-complete.pdf (doc `dce3bfbc`):
+Confirmed evidence
+- The backend is still receiving free-tier embedding requests for the same failed document even after backoff/failure:
+  - logs show document `c00cc69f...` climbing to 7, 8, 9 consecutive 429s, then 10 and 11, and being marked failed
+  - browser network still shows new `POST /functions/v1/generate-embeddings` calls for that same document afterwards
+- Those requests return HTTP 200 with:
+  ```text
+  complete: false
+  retryAfterMs: 0
+  ```
+  even when the backend has just marked the document failed.
+- So the loop is not just “provider quota did not reset”. The app is still actively re-sending embedding requests.
 
-```text
-1. Rate limited after 1 attempt(s), returning rate-limited status
-2. Document dce3bfbc: hit rate limit (555/940 embedded, consecutive=1), backoff 1x, retry after 60000ms
-3. Free-tier slice: 555/940 chunks ... (processed 0 this call)
-   ... ~20 seconds later ...
-4. Rate limited after 1 attempt(s), returning rate-limited status
-5. Document dce3bfbc: 30 consecutive rate-limit failures — marking as failed
-   ... ~10 seconds later ...
-6. Back to step 1 — cycle repeats
-```
+Root cause analysis
+1. Client resurrects failed free-tier docs before every retry
+- In `triggerEmbeddingRecovery()` the client updates the row to:
+  ```ts
+  ingestion_status: 'processing_embeddings',
+  ingestion_error: null
+  ```
+  before it even knows whether the backend accepted more work.
+- That means a document the backend just failed can be flipped back into “processing” by the client.
 
-This loop has been running continuously. Here are the three bugs causing it:
+2. Backend circuit-breaker failure is invisible to the client
+- In `generate-embeddings`, when consecutive 429s hit the threshold, the backend marks the row failed.
+- But the function still responds with a normal success payload and `retryAfterMs: 0`.
+- So the caller cannot distinguish:
+  - “document failed, stop retrying”
+  from
+  - “document still processing, try again soon”
 
----
+3. The upload monitor keeps retrying failed docs
+- `monitorFreeTierDocument()` does not stop when `ingestion_status === 'failed'`.
+- It can continue for up to 6 hours and keep calling `maybeResumeFreeTierDocument()` on a terminally failed doc.
+- This is a separate retry path from the 10-second background poller, which explains why the loop can still happen even though failed docs were removed from the background filter.
 
-### Bug 1: Consecutive failure counter always resets to 1
+4. FIFO logic is being fed the wrong timestamp during free-tier monitoring
+- `monitorFreeTierDocument()` passes:
+  ```ts
+  createdAt: new Date().toISOString()
+  ```
+  instead of the document’s real creation/upload timestamp.
+- That breaks the free-tier “oldest incomplete doc first” logic and can let the wrong document re-enter recovery.
 
-**Location:** `generate-embeddings/index.ts`, lines 177 and 220-237
+5. “Limits reset” is being inferred incorrectly
+- Right now the system behaves like “chart shows low/zero usage” means “safe to retry”.
+- That is not reliable. The provider docs explicitly say rate limits are not guaranteed and actual capacity may vary.
+- For this workflow, the only valid definition of “reset” is: a fresh embedding call is actually accepted and makes progress.
+- So the system must stop auto-assuming reset and stop auto-retrying terminal free-tier failures.
 
-When the function acquires the lock (line 177), it does:
-```typescript
-.update({ embedding_locked_until: lockUntil, embedding_retry_after: null })
-```
+What needs to change
+1. Fix the free-tier response contract in `generate-embeddings`
+- When the circuit breaker marks a doc failed, return an explicit terminal result, for example:
+  ```ts
+  status: 'failed'
+  stopRetrying: true
+  retryAfterMs: 0
+  ```
+- Also short-circuit early if the document is already failed, so the function does not attempt another embedding call for terminal free-tier docs.
+- Paid path remains unchanged.
 
-It **clears `embedding_retry_after`** before attempting the embed. Then, when a 429 occurs, the consecutive failure detection (line 221) checks:
-```typescript
-if (docMeta.embedding_retry_after) { // <-- always null because we just cleared it!
-```
+2. Stop pre-emptively rewriting failed docs to “processing” on the client
+- In `triggerEmbeddingRecovery()` for free tier:
+  - do not update `ingestion_status` to `processing_embeddings` before the backend confirms real work/progress
+  - use local in-memory flags/spinners instead of mutating the database first
+- Only clear error state / mark processing when the backend response says the doc is actively resumable.
 
-Since it was just cleared, `consecutiveFailures` always equals 1. The exponential backoff (`backoff 1x`) never escalates. Every single call waits only 60 seconds regardless of how many times it has failed.
+3. Make free-tier monitors respect terminal failure
+- In `monitorFreeTierDocument()`:
+  - if `ingestion_status === 'failed'`, stop immediately
+  - do not keep re-entering resume logic for failed docs
+- In `maybeResumeFreeTierDocument()`:
+  - immediately return if `doc.ingestionStatus === 'failed'`
 
-### Bug 2: Circuit breaker triggers via wrong heuristic, then gets immediately overridden
+4. Fix FIFO ordering bug
+- Pass the document’s real `createdAt` from the database into `maybeResumeFreeTierDocument()`
+- Never use `new Date().toISOString()` as a substitute for queue ordering
 
-The circuit breaker at line 241 checks `consecutiveFailures >= 15`. Since the counter is always 1 (Bug 1), the circuit breaker should never fire. But it does fire — with `consecutive=30` — because of the fallback heuristic at line 236:
-```typescript
-consecutiveFailures = Math.max(2, Math.floor(Math.min(docAgeMs, 30 * 60_000) / 60_000))
-```
+5. Tighten manual Reprocess for free tier
+- Free-tier Reprocess should:
+  - reset failure metadata
+  - clear retry/lock timestamps
+  - resume from remaining unembedded chunks
+- It should not blindly recreate the same auto-loop conditions.
+- Paid reprocess behavior stays untouched.
 
-This estimates failures from the **document age**, not actual failure count. For a document uploaded hours ago, it computes 30 and immediately trips the breaker. So the document oscillates between "1 consecutive failure" (backoff 1x = 60s) and "30 consecutive failures" (instant fail) on alternating calls.
+Why this is different from previous attempts
+- Previous fixes focused on backoff math only.
+- The deeper bug is now clear: free-tier retries still have multiple client-side paths that can re-animate a terminally failed document.
+- This plan fixes the contract between backend and client, not just the delay values.
 
-### Bug 3: Client poller auto-retries `failed` documents every 10 seconds
+Files to change
+- `supabase/functions/generate-embeddings/index.ts`
+  - return explicit terminal failure state for free-tier circuit-breaker
+  - short-circuit already-failed free-tier docs
+- `src/components/RepositoryCard.tsx`
+  - stop writing `processing_embeddings` before backend acceptance
+  - stop free-tier monitoring when status is failed
+  - fix FIFO timestamp usage
+  - make Reprocess resume safely for free tier
+- No paid-tier logic changes
 
-**Location:** `RepositoryCard.tsx`, lines 900-912
+Testing plan
+1. Reproduce with a free-tier doc that hits 429s.
+2. Verify logs show the document being marked failed once.
+3. Verify no further `generate-embeddings` network requests are sent for that doc after failure.
+4. Leave the tab open for at least 20-30 minutes:
+   - no repeated free-tier embedding calls
+   - status remains failed
+5. Close the browser, wait, reopen:
+   - document should stay failed
+   - no automatic request should fire just because the page reopened
+6. Click Reprocess manually:
+   - exactly one new free-tier resume attempt starts
+   - if provider still rejects, it fails once and stays failed
+   - if provider accepts, progress resumes
+7. Run the 21-document benchmark again on free tier.
+8. Confirm paid upload/embedding flow is unchanged.
 
-The background polling loop runs every 10 seconds and picks up documents for retry:
-```typescript
-const freeQueueDoc = [...docs]
-  .filter((doc) => (
-    doc.ingestionStatus === 'failed'  // <-- failed docs get auto-retried!
-  ))
-```
-
-When a document is marked `failed` by the circuit breaker (Bug 2), the poller immediately calls `triggerEmbeddingRecovery`, which:
-- Sets `ingestion_status = 'processing_embeddings'` and clears `ingestion_error`
-- Calls `generate-embeddings` again
-- That call gets 429 (API still exhausted)
-- Backend marks it failed again
-- Poller picks it up 10 seconds later → infinite loop
-
-### Why 429s happen even after API limits reset
-
-The Gemini Embedding API free tier has a **1,000 Requests Per Day (RPD)** rolling window. Processing 11+ documents with 15-chunk batches can consume 500+ requests. Even after "a few hours," the RPD hasn't fully rolled over (it's a 24-hour window). The RPM chart showing 0/100 only shows per-minute usage, not the daily quota.
-
----
-
-## Fix Plan
-
-### Change 1: Add persistent failure counter (database migration)
-
-Add an `embedding_failure_count` integer column to `documents`. This replaces the broken heuristic that tries to infer consecutive failures from stale timestamps.
-
-```sql
-ALTER TABLE public.documents
-ADD COLUMN IF NOT EXISTS embedding_failure_count integer DEFAULT 0;
-```
-
-### Change 2: Fix the backend consecutive failure tracking (`generate-embeddings/index.ts`)
-
-- **Stop clearing `embedding_retry_after` on lock acquisition.** Instead, only clear it after a successful embed.
-- **Use the new `embedding_failure_count` column** instead of the broken timestamp heuristic.
-- On 429: increment `embedding_failure_count`, compute backoff from it.
-- On success: reset `embedding_failure_count` to 0.
-- Circuit breaker: after 10 consecutive failures, mark as `failed` and stop.
-
-### Change 3: Stop auto-retrying `failed` documents from the client poller (`RepositoryCard.tsx`)
-
-Remove `ingestionStatus === 'failed'` from the free-tier background queue filter (line 906). A `failed` document should only be retried via the manual "Reprocess" button. This is the single most important change — it breaks the infinite loop.
-
-### Change 4: Reprocess clears the failure counter
-
-When the user clicks "Reprocess," reset `embedding_failure_count` to 0 and clear `embedding_retry_after` so the document starts fresh.
-
----
-
-### What is different from previous attempts
-
-| Previous approach | Why it failed | This fix |
-|---|---|---|
-| Estimated consecutive failures from timestamps | `embedding_retry_after` gets cleared before the check, so count is always 1 | Persistent integer counter in DB |
-| Exponential backoff on retry_after | Backoff never escalated because counter was always 1 | Counter survives across invocations |
-| Circuit breaker after 15 failures | Fired via doc-age heuristic (wrong), then client immediately retried | Circuit breaker uses real counter + client stops retrying failed docs |
-| 30s client buffer (`FREE_RATE_LIMIT_EXTRA_WAIT_MS`) | Client poller bypasses this via `triggerEmbeddingRecovery` for failed docs | Failed docs are excluded from auto-retry entirely |
-
-### Testing plan
-
-1. Upload 21 documents on free tier
-2. Verify all appear immediately in the list
-3. Watch the first 11 process serially to completion
-4. When the 12th (large) document hits rate limits, verify:
-   - Failure count increments (1, 2, 3...) in logs
-   - Backoff escalates (60s, 120s, 240s...)
-   - After 10 failures, document shows as "Failed" and **stays** failed
-   - No infinite retry loop in console logs
-5. Click "Reprocess" after waiting for API reset
-6. Verify it resumes from chunk 555 (not from 0) and completes
-
-### Files to change
-
-- New migration: add `embedding_failure_count` column
-- `supabase/functions/generate-embeddings/index.ts`: use persistent counter, stop clearing retry_after on lock
-- `src/components/RepositoryCard.tsx`: remove `failed` from auto-retry filter, reset counter on Reprocess
-- Paid tier: untouched
-
+Bottom line
+The current bug is not simply “the provider still thinks quota is exhausted”.
+The actual bug is that the free-tier client and backend still disagree about terminal failure: the backend marks a doc failed, but the client can revive it and keep sending more embedding requests. That is why you can still see immediate 429s after an apparent pause, and that is the part I would fix next without touching the paid workflow.
