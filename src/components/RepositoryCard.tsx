@@ -740,7 +740,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     while (Date.now() - startedAt < FREE_MAX_DOC_WAIT_MS) {
       const { data, error } = await supabase
         .from('documents')
-        .select('id, filename, total_chunks, ingested_chunks, ingestion_status, ingestion_error, embedding_locked_until, embedding_retry_after')
+        .select('id, filename, total_chunks, ingested_chunks, ingestion_status, ingestion_error, embedding_locked_until, embedding_retry_after, uploaded_at')
         .eq('id', docId)
         .single();
 
