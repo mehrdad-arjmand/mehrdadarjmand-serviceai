@@ -132,7 +132,7 @@ async function processFreeTier(
   docIds: string[],
   userId: string,
 ) {
-  const results: { documentId: string; processed: number; embedded: number; total: number; complete: boolean; locked: boolean; retryAfterMs: number }[] = []
+  const results: { documentId: string; processed: number; embedded: number; total: number; complete: boolean; locked: boolean; retryAfterMs: number; status?: string; stopRetrying?: boolean }[] = []
 
   for (const docId of docIds) {
     // Check retry_after — if rate-limited, skip and tell client when to come back
@@ -143,7 +143,14 @@ async function processFreeTier(
       .single()
 
     if (!docMeta) {
-      results.push({ documentId: docId, processed: 0, embedded: 0, total: 0, complete: false, locked: false, retryAfterMs: 0 })
+      results.push({ documentId: docId, processed: 0, embedded: 0, total: 0, complete: false, locked: false, retryAfterMs: 0, status: 'not_found', stopRetrying: true })
+      continue
+    }
+
+    // Short-circuit: if document is already terminally failed, do NOT attempt another embed
+    if (docMeta.ingestion_status === 'failed') {
+      console.log(`Document ${docId}: already failed, short-circuiting (no embed attempt)`)
+      results.push({ documentId: docId, processed: 0, embedded: 0, total: docMeta.total_chunks || 0, complete: false, locked: false, retryAfterMs: 0, status: 'failed', stopRetrying: true })
       continue
     }
 
@@ -232,7 +239,7 @@ async function processFreeTier(
                 embedding_failure_count: consecutiveFailures,
               })
               .eq('id', docId)
-            results.push({ documentId: docId, processed: 0, embedded, total: totalChunks, complete: false, locked: false, retryAfterMs: 0 })
+            results.push({ documentId: docId, processed: 0, embedded, total: totalChunks, complete: false, locked: false, retryAfterMs: 0, status: 'failed', stopRetrying: true })
             continue
           }
 
