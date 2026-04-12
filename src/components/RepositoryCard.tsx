@@ -1411,7 +1411,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       await ensureFreshSession();
       const { data: embedResponse, error: embedError } = await supabase.functions.invoke(
         'generate-embeddings',
-        { body: { documentId: doc.id, mode: 'full' } }
+        { body: { documentId: doc.id, mode: isPaidTier ? 'full' : 'slice' } }
       );
 
       if (embedError) {
