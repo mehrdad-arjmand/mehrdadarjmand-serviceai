@@ -546,11 +546,15 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     };
 
     try {
-      const { error: updateError } = await supabase.from('documents').update({
-        ingestion_status: 'processing_embeddings',
-        ingestion_error: null,
-      }).eq('id', doc.id);
-      if (updateError) throw updateError;
+      // For free tier: do NOT pre-emptively write 'processing_embeddings' to the DB.
+      // Let the backend decide the status. Only paid tier overwrites status eagerly.
+      if (isPaidTier) {
+        const { error: updateError } = await supabase.from('documents').update({
+          ingestion_status: 'processing_embeddings',
+          ingestion_error: null,
+        }).eq('id', doc.id);
+        if (updateError) throw updateError;
+      }
 
       await ensureFreshSession();
       // Free tier uses 'slice' mode; paid tier uses 'full' mode
@@ -560,9 +564,17 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       });
       if (error) throw error;
 
-      // For free tier, check if we got rate-limited or locked
+      // For free tier, check if we got rate-limited, locked, or terminal failure
       if (!isPaidTier && data?.documents?.[0]) {
         const result = data.documents[0];
+
+        // If backend says stop retrying (circuit breaker or already failed), respect it
+        if (result.stopRetrying) {
+          console.log(`Free-tier recovery: document "${doc.fileName}" terminal failure — stopping retries`);
+          autoRetryingIds.current.delete(doc.id);
+          return false;
+        }
+
         if (result.retryAfterMs > 0) {
           // Update the local trigger timestamp to prevent premature re-triggering
           const effectiveWait = Math.max(result.retryAfterMs, 60_000);
@@ -586,14 +598,17 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       return { triggered: false, waitMs: 0 };
     }
 
+    // CRITICAL: Never auto-resume a failed document — only manual Reprocess can do that
+    if (doc.ingestionStatus === 'failed') {
+      return { triggered: false, waitMs: 0 };
+    }
+
     // Skip docs that are already complete
     if (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks) {
       return { triggered: false, waitMs: 0 };
     }
 
     // For docs with totalChunks === 0: they're stuck at extraction — nothing to do from client
-    // (extraction requires file bytes which only happen during upload)
-    // We can only resume embedding for docs that already have chunks
     if (doc.totalChunks === 0) {
       return { triggered: false, waitMs: 0 };
     }
