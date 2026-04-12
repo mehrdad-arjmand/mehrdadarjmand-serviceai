@@ -759,6 +759,13 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         return 'complete' as const;
       }
 
+      // CRITICAL: If backend marked this document as failed, stop monitoring immediately
+      if (ingestionStatus === 'failed') {
+        console.log(`Free-tier monitor: "${fileName}" marked as failed — stopping monitor`);
+        await fetchDocuments();
+        return 'complete' as const; // Return 'complete' to avoid retry-file loop
+      }
+
       if (totalChunks > 0) {
         zeroChunkSince = Date.now();
       }
@@ -779,7 +786,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           ingestionStatus,
           embeddingLockedUntil: (data as any).embedding_locked_until || null,
           embeddingRetryAfter: (data as any).embedding_retry_after || null,
-          createdAt: new Date().toISOString(),
+          createdAt: (data as any).uploaded_at || new Date().toISOString(),
         }, `Free serial queue resume for "${fileName}"`);
 
         if (resume.waitMs > 0) {
