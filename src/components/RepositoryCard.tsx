@@ -770,15 +770,11 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         zeroChunkSince = Date.now();
       }
 
-      // Check if extraction stalled (no chunks created yet)
-      if (totalChunks === 0 && Date.now() - zeroChunkSince >= extractionWaitMs) {
-        console.warn(`Free-tier upload stalled before chunking for "${fileName}" after ${extractionWaitMs}ms; deferring file.`);
-        return 'retry-file' as const;
-      }
-
-      // If document has chunks but embedding is incomplete, trigger next slice
-      if (totalChunks > 0 && embeddedChunks < totalChunks) {
-        const resume = await maybeResumeFreeTierDocument({
+      // Once extraction + chunking have finished, this file is safely queued.
+      // Do not wait here for full embedding completion or free-tier rate-limit recovery,
+      // otherwise one large document blocks the rest of the upload batch.
+      if (totalChunks > 0 && ingestionStatus === 'processing_embeddings') {
+        await maybeResumeFreeTierDocument({
           id: docId,
           fileName,
           embeddedChunks,
@@ -787,12 +783,16 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           embeddingLockedUntil: (data as any).embedding_locked_until || null,
           embeddingRetryAfter: (data as any).embedding_retry_after || null,
           createdAt: (data as any).uploaded_at || new Date().toISOString(),
-        }, `Free serial queue resume for "${fileName}"`);
+        }, `Free queue handoff for "${fileName}"`);
 
-        if (resume.waitMs > 0) {
-          await wait(Math.min(resume.waitMs, 30_000));
-          continue;
-        }
+        await fetchDocuments();
+        return 'queued' as const;
+      }
+
+      // Check if extraction stalled (no chunks created yet)
+      if (totalChunks === 0 && Date.now() - zeroChunkSince >= extractionWaitMs) {
+        console.warn(`Free-tier upload stalled before chunking for "${fileName}" after ${extractionWaitMs}ms; deferring file.`);
+        return 'retry-file' as const;
       }
 
       await wait(FREE_SERIAL_UPLOAD_POLL_MS);
@@ -826,8 +826,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         await fetchDocuments();
 
         const result = await monitorFreeTierDocument(docId, file.name, extractionWaitMs);
-        if (result === 'complete') {
-          return { status: 'complete' as const, totalUploaded, uploadedDocIds, fileName: file.name };
+        if (result === 'complete' || result === 'queued') {
+          return { status: result, totalUploaded, uploadedDocIds, fileName: file.name };
         }
       } catch (error) {
         console.error(`Free-tier upload attempt ${attempt} failed for "${file.name}"`, error);
@@ -851,7 +851,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
     }
 
-    throw new Error(`"${file.name}" could not be completed on the free-tier serial queue.`);
+    throw new Error(`"${file.name}" could not be queued on the free-tier upload flow.`);
   };
   useEffect(() => {
     setIsLoadingDocuments(true);
@@ -989,8 +989,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           await fetchDocuments();
         }
       } else {
-        // FREE TIER: Upload one file at a time, monitor each to completion before the next.
-        // This ensures extraction happens per-file and avoids the waitUntil batch stall.
+        // FREE TIER: Upload one file at a time, but only wait until extraction/chunking
+        // hands off to the embedding queue before moving to the next file.
         for (let i = 0; i < filesToUpload.length; i++) {
           const file = filesToUpload[i];
           try {
