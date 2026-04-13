@@ -397,10 +397,19 @@ Deno.serve(async (req) => {
           console.log(`Extracted ${extractedText.length} chars, ${pageCount} pages from ${fileData.name}`)
 
           // Mark as chunking
-          await supabase.from('documents').update({ ingestion_stage: 'chunking' }).eq('id', doc.id)
+          await supabase.from('documents').update({ ingestion_stage: 'chunking', page_count: pageCount }).eq('id', doc.id)
 
           const chunkSize = 800
           const overlapSize = 200
+
+          // Pre-compute expected chunk count so if worker dies mid-insert, DB knows total
+          let expectedChunks = 0
+          for (let j = 0; j < extractedText.length; j += (chunkSize - overlapSize)) {
+            const chunkText = extractedText.slice(j, j + chunkSize)
+            if (chunkText.trim().length > 0) expectedChunks++
+          }
+          await supabase.from('documents').update({ total_chunks: expectedChunks, ingested_chunks: 0 }).eq('id', doc.id)
+          console.log(`Expected ${expectedChunks} chunks for ${fileData.name}, starting insertion...`)
 
           // Stream chunks directly to DB in batches to minimize CPU/memory usage
           // This avoids building a huge array in memory which can cause CPU Time exceeded
@@ -435,10 +444,6 @@ Deno.serve(async (req) => {
             if (chunksError) throw chunksError
           }
 
-          await supabase
-            .from('documents')
-            .update({ page_count: pageCount, total_chunks: totalChunks, ingested_chunks: 0 })
-            .eq('id', doc.id)
 
           await supabase
             .from('documents')
