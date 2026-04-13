@@ -402,12 +402,9 @@ Deno.serve(async (req) => {
           const chunkSize = 800
           const overlapSize = 200
 
-          // Pre-compute expected chunk count so if worker dies mid-insert, DB knows total
-          let expectedChunks = 0
-          for (let j = 0; j < extractedText.length; j += (chunkSize - overlapSize)) {
-            const chunkText = extractedText.slice(j, j + chunkSize)
-            if (chunkText.trim().length > 0) expectedChunks++
-          }
+          // Pre-compute expected chunk count so if worker dies mid-insert, DB knows total expected
+          const step = chunkSize - overlapSize
+          const expectedChunks = Math.ceil(extractedText.length / step)
           await supabase.from('documents').update({ total_chunks: expectedChunks, ingested_chunks: 0 }).eq('id', doc.id)
           console.log(`Expected ${expectedChunks} chunks for ${fileData.name}, starting insertion...`)
 
