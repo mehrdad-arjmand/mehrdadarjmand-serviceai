@@ -415,7 +415,6 @@ Deno.serve(async (req) => {
           // This avoids building a huge array in memory which can cause CPU Time exceeded
           const CHUNK_BATCH = 100 // Larger batches = fewer DB round-trips = less CPU overhead
           let chunkIndex = 0
-          let totalChunks = 0
           let batch: { document_id: string; chunk_index: number; text: string; equipment: string | null }[] = []
 
           for (let j = 0; j < extractedText.length; j += (chunkSize - overlapSize)) {
@@ -427,7 +426,6 @@ Deno.serve(async (req) => {
                 text: chunkText,
                 equipment: sanitizedEquipmentType || null,
               })
-              totalChunks++
             }
 
             // Flush batch when full
@@ -443,7 +441,6 @@ Deno.serve(async (req) => {
             const { error: chunksError } = await supabase.from('chunks').insert(batch)
             if (chunksError) throw chunksError
           }
-
 
           await supabase
             .from('documents')
