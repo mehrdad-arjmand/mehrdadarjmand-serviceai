@@ -397,33 +397,44 @@ Deno.serve(async (req) => {
           console.log(`Extracted ${extractedText.length} chars, ${pageCount} pages from ${fileData.name}`)
 
           // Mark as chunking
-          await supabase.from('documents').update({ ingestion_stage: 'chunking' }).eq('id', doc.id)
+          await supabase.from('documents').update({ ingestion_stage: 'chunking', page_count: pageCount }).eq('id', doc.id)
 
           const chunkSize = 800
           const overlapSize = 200
-          const chunks: { document_id: string; chunk_index: number; text: string; equipment: string | null }[] = []
+
+          // Pre-compute expected chunk count so if worker dies mid-insert, DB knows total expected
+          const step = chunkSize - overlapSize
+          const expectedChunks = Math.ceil(extractedText.length / step)
+          await supabase.from('documents').update({ total_chunks: expectedChunks, ingested_chunks: 0 }).eq('id', doc.id)
+          console.log(`Expected ${expectedChunks} chunks for ${fileData.name}, starting insertion...`)
+
+          // Stream chunks directly to DB in batches to minimize CPU/memory usage
+          // This avoids building a huge array in memory which can cause CPU Time exceeded
+          const CHUNK_BATCH = 100 // Larger batches = fewer DB round-trips = less CPU overhead
           let chunkIndex = 0
+          let batch: { document_id: string; chunk_index: number; text: string; equipment: string | null }[] = []
 
           for (let j = 0; j < extractedText.length; j += (chunkSize - overlapSize)) {
             const chunkText = extractedText.slice(j, j + chunkSize)
             if (chunkText.trim().length > 0) {
-              chunks.push({
+              batch.push({
                 document_id: doc.id,
                 chunk_index: chunkIndex++,
                 text: chunkText,
                 equipment: sanitizedEquipmentType || null,
               })
             }
+
+            // Flush batch when full
+            if (batch.length >= CHUNK_BATCH) {
+              const { error: chunksError } = await supabase.from('chunks').insert(batch)
+              if (chunksError) throw chunksError
+              batch = []
+            }
           }
 
-          await supabase
-            .from('documents')
-            .update({ page_count: pageCount, total_chunks: chunks.length, ingested_chunks: 0 })
-            .eq('id', doc.id)
-
-          const CHUNK_BATCH = 50
-          for (let j = 0; j < chunks.length; j += CHUNK_BATCH) {
-            const batch = chunks.slice(j, j + CHUNK_BATCH)
+          // Flush remaining
+          if (batch.length > 0) {
             const { error: chunksError } = await supabase.from('chunks').insert(batch)
             if (chunksError) throw chunksError
           }
