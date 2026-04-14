@@ -626,6 +626,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       return { triggered: false, waitMs: 0 };
     }
 
+    const now = Date.now();
+
     // CRITICAL: Never auto-resume a failed document — only manual Reprocess can do that
     if (doc.ingestionStatus === 'failed') {
       return { triggered: false, waitMs: 0 };
