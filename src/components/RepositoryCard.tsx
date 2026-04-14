@@ -392,6 +392,34 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const getFreeTierDocBlockedUntil = (doc: RecoveryDocument, now: number) => {
+    const retryAfterMs = doc.embeddingRetryAfter ? new Date(doc.embeddingRetryAfter).getTime() : 0;
+    if (retryAfterMs > now) {
+      return retryAfterMs + FREE_RATE_LIMIT_EXTRA_WAIT_MS;
+    }
+
+    const lockedUntilMs = doc.embeddingLockedUntil ? new Date(doc.embeddingLockedUntil).getTime() : 0;
+    if (lockedUntilMs > now) {
+      return lockedUntilMs;
+    }
+
+    return 0;
+  };
+
+  const isFreeTierDocIncomplete = (doc: RecoveryDocument) => {
+    if (doc.ingestionStatus === 'failed' || doc.ingestionStatus === 'complete') return false;
+    if (doc.totalChunks === 0) return false;
+    return doc.embeddedChunks < doc.totalChunks;
+  };
+
+  const findNextRunnableFreeTierDoc = (docs: RecoveryDocument[], now = Date.now()) => {
+    const incompleteDocs = [...docs]
+      .filter(isFreeTierDocIncomplete)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    return incompleteDocs.find((doc) => getFreeTierDocBlockedUntil(doc, now) <= now) ?? null;
+  };
+
   const getFreeExtractionWaitMs = (file: File) => {
     const sizeBuckets = Math.max(0, Math.ceil(file.size / FREE_EXTRACTION_SIZE_BUCKET_BYTES) - 1);
     return Math.min(
@@ -613,22 +641,20 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       return { triggered: false, waitMs: 0 };
     }
 
-    // Check FIFO: only process the oldest incomplete doc
-    const olderBlockingDoc = documentsRef.current
+    // Keep FIFO among runnable docs, but do not let an older doc in retry/lock backoff
+    // starve every newer document behind it.
+    const olderRunnableBlockingDoc = documentsRef.current
       .filter((candidate) => candidate.id !== doc.id)
       .filter((candidate) => new Date(candidate.createdAt).getTime() < new Date(doc.createdAt).getTime())
       .find((candidate) => {
-        if (candidate.ingestionStatus === 'complete') return false;
-        if (candidate.ingestionStatus === 'failed') return false;
-        if (candidate.totalChunks === 0) return false; // Don't block on zero-chunk docs
-        return candidate.embeddedChunks < candidate.totalChunks;
+        if (!isFreeTierDocIncomplete(candidate)) return false;
+        return getFreeTierDocBlockedUntil(candidate, now) <= now;
       });
 
-    if (olderBlockingDoc) {
+    if (olderRunnableBlockingDoc) {
       return { triggered: false, waitMs: FREE_SERIAL_UPLOAD_POLL_MS };
     }
 
-    const now = Date.now();
     const lockedUntilMs = doc.embeddingLockedUntil ? new Date(doc.embeddingLockedUntil).getTime() : 0;
     if (lockedUntilMs > now) {
       return { triggered: false, waitMs: lockedUntilMs - now };
@@ -920,15 +946,9 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
 
       if (!isPaidTier) {
-        // Find the oldest free-tier doc that needs embedding (has chunks but not fully embedded)
-        // IMPORTANT: Do NOT include 'failed' docs — those must only be retried via manual Reprocess
-        const freeQueueDoc = [...docs]
-          .filter((doc) => (
-            doc.totalChunks > 0 &&
-            doc.embeddedChunks < doc.totalChunks &&
-            (doc.ingestionStatus === 'processing_embeddings' || doc.ingestionStatus === 'in_progress')
-          ))
-          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+        // Pick the oldest runnable doc, not just the oldest incomplete one.
+        // Otherwise a doc sleeping in retry_after starves the whole queue.
+        const freeQueueDoc = findNextRunnableFreeTierDoc(docs, now);
 
         if (freeQueueDoc) {
           await maybeResumeFreeTierDocument(freeQueueDoc, 'Free background queue recovery');
