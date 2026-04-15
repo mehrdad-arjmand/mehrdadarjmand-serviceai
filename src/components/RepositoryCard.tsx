@@ -1541,6 +1541,17 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     return tags;
   };
 
+  const handleSkipProcessing = async (doc: Document, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await supabase.from('documents').update({
+      ingestion_status: 'failed',
+      ingestion_stage: 'failed',
+      ingestion_error: 'Processing skipped by user. Click Reprocess to retry.',
+    }).eq('id', doc.id);
+    toast({ title: "Processing skipped", description: `"${doc.fileName}" has been skipped. You can reprocess it later.` });
+    await fetchDocuments();
+  };
+
   const StatusBadge = ({ doc }: { doc: Document }) => {
     const effectivelyComplete = doc.ingestionStatus === 'complete' || (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks);
     if (effectivelyComplete) return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
@@ -1548,18 +1559,42 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
       const progress = doc.totalChunks > 0 ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100) : 0;
       return (
-        <span className="inline-flex items-center text-xs font-medium rounded-full border overflow-hidden min-w-[90px]" style={{ borderColor: 'hsl(38 80% 75%)' }}>
-          <span className="relative h-[26px] w-full flex items-center justify-center" style={{ background: 'hsl(0 0% 100%)' }}>
-            <span
-              className="absolute inset-y-0 left-0 transition-all duration-700 ease-out rounded-full"
-              style={{ width: `${progress}%`, background: 'hsl(32 95% 84%)' }}
-            />
-            <span className="relative z-10 px-2.5" style={{ color: 'hsl(32 95% 35%)' }}>Processing</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-flex items-center text-xs font-medium rounded-full border overflow-hidden min-w-[90px]" style={{ borderColor: 'hsl(38 80% 75%)' }}>
+            <span className="relative h-[26px] w-full flex items-center justify-center" style={{ background: 'hsl(0 0% 100%)' }}>
+              <span
+                className="absolute inset-y-0 left-0 transition-all duration-700 ease-out rounded-full"
+                style={{ width: `${progress}%`, background: 'hsl(32 95% 84%)' }}
+              />
+              <span className="relative z-10 px-2.5" style={{ color: 'hsl(32 95% 35%)' }}>Processing</span>
+            </span>
           </span>
+          {canWrite && (
+            <button
+              onClick={(e) => handleSkipProcessing(doc, e)}
+              className="h-5 w-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title="Skip processing"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
         </span>
       );
     }
-    return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>;
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground border border-border"><Clock className="h-3 w-3" />Pending</span>
+        {canWrite && (
+          <button
+            onClick={(e) => handleSkipProcessing(doc, e)}
+            className="h-5 w-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            title="Skip processing"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </span>
+    );
   };
 
   // Compute grid columns based on field count + Documents
