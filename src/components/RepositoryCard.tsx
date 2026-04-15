@@ -1645,10 +1645,13 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
             {/* Mobile: 2x2 grid with equal-width buttons; Desktop: flex row */}
             <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-center sm:justify-center">
               <button
-                onClick={() => setMetadataOpen(!metadataOpen)}
+                onClick={() => projectFields.length > 0 && setMetadataOpen(!metadataOpen)}
+                disabled={projectFields.length === 0}
                 className={cn(
                   "inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full text-sm font-medium border transition-colors whitespace-nowrap sm:px-5 sm:gap-2",
-                  metadataOpen ? "bg-muted border-border text-foreground" : "bg-background border-border text-foreground hover:bg-muted/50"
+                  projectFields.length === 0
+                    ? "bg-muted/40 border-border/50 text-muted-foreground cursor-not-allowed opacity-50"
+                    : metadataOpen ? "bg-muted border-border text-foreground" : "bg-background border-border text-foreground hover:bg-muted/50"
                 )}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5 flex-shrink-0" />
@@ -1865,7 +1868,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
                       ) : (
                         <button onClick={() => openEditContent(doc)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Edit</button>
                       )}
-                      {canWrite && <button onClick={() => openEdit(doc)} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Metadata</button>}
+                      {canWrite && <button onClick={() => openEdit(doc)} disabled={projectFields.length === 0} className={cn("px-4 py-1.5 rounded-full text-sm border transition-colors", projectFields.length === 0 ? "border-border/50 bg-muted/40 text-muted-foreground cursor-not-allowed opacity-50" : "border-border bg-background hover:bg-muted/50 text-foreground")}>Metadata</button>}
                       {canDelete && <button onClick={() => setDeleteTarget({ id: doc.id, fileName: doc.fileName })} className="px-4 py-1.5 rounded-full text-sm border border-border bg-background hover:bg-muted/50 transition-colors text-foreground">Delete</button>}
                       {canWrite && <button onClick={() => handleReprocess(doc)} className="px-4 py-1.5 rounded-full text-sm bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium">Reprocess</button>}
                     </div>
