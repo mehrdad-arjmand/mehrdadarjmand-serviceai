@@ -1543,12 +1543,17 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
   const handleSkipProcessing = async (doc: Document, e: React.MouseEvent) => {
     e.stopPropagation();
+    // Use a distinct 'skipped' status so auto-recovery never resurrects this doc
     await supabase.from('documents').update({
-      ingestion_status: 'failed',
-      ingestion_stage: 'failed',
-      ingestion_error: 'Processing skipped by user. Click Reprocess to retry.',
+      ingestion_status: 'skipped',
+      ingestion_stage: 'paused',
+      ingestion_error: 'Processing paused by user. Click Reprocess to resume.',
     }).eq('id', doc.id);
-    toast({ title: "Processing skipped", description: `"${doc.fileName}" has been skipped. You can reprocess it later.` });
+    // Also remove from any in-memory recovery sets so the poller won't re-trigger
+    autoRetryingIds.current.delete(doc.id);
+    delete docProgressRef.current[doc.id];
+    delete freeResumeTriggerAtRef.current[doc.id];
+    toast({ title: "Processing paused", description: `"${doc.fileName}" has been paused. You can reprocess it anytime.` });
     await fetchDocuments();
   };
 
@@ -1556,6 +1561,11 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     const effectivelyComplete = doc.ingestionStatus === 'complete' || (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks);
     if (effectivelyComplete) return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
     if (doc.ingestionStatus === 'failed') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(0 86% 97%)', color: 'hsl(0 72% 51%)', borderColor: 'hsl(0 72% 80%)' }}><AlertCircle className="h-3 w-3" />Failed</span>;
+    if (doc.ingestionStatus === 'skipped') return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(220 14% 96%)', color: 'hsl(220 9% 46%)', borderColor: 'hsl(220 13% 80%)' }} title="Processing was paused by user. Click Reprocess to resume.">
+        <Clock className="h-3 w-3" />Paused
+      </span>
+    );
     if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
       const progress = doc.totalChunks > 0 ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100) : 0;
       return (
@@ -1573,7 +1583,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
             <button
               onClick={(e) => handleSkipProcessing(doc, e)}
               className="h-5 w-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-              title="Skip processing"
+              title="Pause processing"
             >
               <X className="h-3 w-3" />
             </button>
@@ -1588,7 +1598,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           <button
             onClick={(e) => handleSkipProcessing(doc, e)}
             className="h-5 w-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-            title="Skip processing"
+            title="Pause processing"
           >
             <X className="h-3 w-3" />
           </button>
