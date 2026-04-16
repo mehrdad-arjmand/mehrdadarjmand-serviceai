@@ -563,6 +563,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
   const triggerEmbeddingRecovery = async (doc: RecoveryDocument, reason: string) => {
     if (autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) return false;
+    // Never auto-recover a user-paused document
+    if (doc.ingestionStatus === 'skipped') return false;
 
     console.log(`${reason}: retriggering embeddings for "${doc.fileName}"`);
     autoRetryingIds.current.add(doc.id);
