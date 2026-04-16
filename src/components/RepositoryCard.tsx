@@ -628,8 +628,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
     const now = Date.now();
 
-    // CRITICAL: Never auto-resume a failed document — only manual Reprocess can do that
-    if (doc.ingestionStatus === 'failed') {
+    // CRITICAL: Never auto-resume a failed or user-skipped document — only manual Reprocess can do that
+    if (doc.ingestionStatus === 'failed' || doc.ingestionStatus === 'skipped') {
       return { triggered: false, waitMs: 0 };
     }
 
@@ -787,9 +787,9 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         return 'complete' as const;
       }
 
-      // CRITICAL: If backend marked this document as failed, stop monitoring immediately
-      if (ingestionStatus === 'failed') {
-        console.log(`Free-tier monitor: "${fileName}" marked as failed — stopping monitor`);
+      // CRITICAL: If backend marked this document as failed or user skipped it, stop monitoring immediately
+      if (ingestionStatus === 'failed' || ingestionStatus === 'skipped') {
+        console.log(`Free-tier monitor: "${fileName}" marked as ${ingestionStatus} — stopping monitor`);
         await fetchDocuments();
         return 'complete' as const; // Return 'complete' to avoid retry-file loop
       }
