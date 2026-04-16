@@ -899,6 +899,9 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
 
       for (const doc of docs) {
+        // Never auto-recover user-skipped (paused) documents
+        if (doc.ingestionStatus === 'skipped') continue;
+
         if (isPaidTier && !autoRetryingIds.current.has(doc.id) && !reprocessingIdsRef.current.has(doc.id)) {
           if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
             triggerEmbeddingRecovery(doc, 'Paid live recovery');
