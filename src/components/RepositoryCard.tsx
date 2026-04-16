@@ -407,7 +407,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   };
 
   const isFreeTierDocIncomplete = (doc: RecoveryDocument) => {
-    if (doc.ingestionStatus === 'failed' || doc.ingestionStatus === 'complete') return false;
+    if (doc.ingestionStatus === 'failed' || doc.ingestionStatus === 'skipped' || doc.ingestionStatus === 'complete') return false;
     if (doc.totalChunks === 0) return false;
     return doc.embeddedChunks < doc.totalChunks;
   };
@@ -563,6 +563,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
   const triggerEmbeddingRecovery = async (doc: RecoveryDocument, reason: string) => {
     if (autoRetryingIds.current.has(doc.id) || reprocessingIdsRef.current.has(doc.id)) return false;
+    // Never auto-recover a user-paused document
+    if (doc.ingestionStatus === 'skipped') return false;
 
     console.log(`${reason}: retriggering embeddings for "${doc.fileName}"`);
     autoRetryingIds.current.add(doc.id);
@@ -628,8 +630,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
     const now = Date.now();
 
-    // CRITICAL: Never auto-resume a failed document — only manual Reprocess can do that
-    if (doc.ingestionStatus === 'failed') {
+    // CRITICAL: Never auto-resume a failed or user-skipped document — only manual Reprocess can do that
+    if (doc.ingestionStatus === 'failed' || doc.ingestionStatus === 'skipped') {
       return { triggered: false, waitMs: 0 };
     }
 
@@ -787,9 +789,9 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         return 'complete' as const;
       }
 
-      // CRITICAL: If backend marked this document as failed, stop monitoring immediately
-      if (ingestionStatus === 'failed') {
-        console.log(`Free-tier monitor: "${fileName}" marked as failed — stopping monitor`);
+      // CRITICAL: If backend marked this document as failed or user skipped it, stop monitoring immediately
+      if (ingestionStatus === 'failed' || ingestionStatus === 'skipped') {
+        console.log(`Free-tier monitor: "${fileName}" marked as ${ingestionStatus} — stopping monitor`);
         await fetchDocuments();
         return 'complete' as const; // Return 'complete' to avoid retry-file loop
       }
@@ -899,6 +901,9 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       }
 
       for (const doc of docs) {
+        // Never auto-recover user-skipped (paused) documents
+        if (doc.ingestionStatus === 'skipped') continue;
+
         if (isPaidTier && !autoRetryingIds.current.has(doc.id) && !reprocessingIdsRef.current.has(doc.id)) {
           if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
             triggerEmbeddingRecovery(doc, 'Paid live recovery');
@@ -1373,7 +1378,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   };
 
   const handleReprocess = async (doc: Document) => {
-    toast({ title: "Reprocessing", description: `Reindexing "${doc.fileName}"...` });
+    const isResume = doc.ingestionStatus === 'skipped';
+    toast({ title: isResume ? "Resuming" : "Reprocessing", description: `${isResume ? 'Resuming' : 'Reindexing'} "${doc.fileName}"...` });
     setReprocessingIds(prev => new Set(prev).add(doc.id));
 
     try {
@@ -1411,21 +1417,34 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         return;
       }
 
-      // Has chunks — clear embeddings and regenerate
-      const { error: clearError } = await supabase
-        .from('chunks')
-        .update({ embedding: null })
-        .eq('document_id', doc.id);
-      if (clearError) throw clearError;
+      const isResumeFromPause = doc.ingestionStatus === 'skipped';
 
-      await supabase.from('documents').update({
-        ingestion_status: 'processing_embeddings',
-        ingestion_error: null,
-        ingested_chunks: 0,
-        embedding_failure_count: 0,
-        embedding_retry_after: null,
-        embedding_locked_until: null,
-      }).eq('id', doc.id);
+      if (isResumeFromPause) {
+        // Resume from where we left off — don't clear existing embeddings
+        await supabase.from('documents').update({
+          ingestion_status: 'processing_embeddings',
+          ingestion_error: null,
+          embedding_failure_count: 0,
+          embedding_retry_after: null,
+          embedding_locked_until: null,
+        }).eq('id', doc.id);
+      } else {
+        // Full reprocess — clear embeddings and regenerate
+        const { error: clearError } = await supabase
+          .from('chunks')
+          .update({ embedding: null })
+          .eq('document_id', doc.id);
+        if (clearError) throw clearError;
+
+        await supabase.from('documents').update({
+          ingestion_status: 'processing_embeddings',
+          ingestion_error: null,
+          ingested_chunks: 0,
+          embedding_failure_count: 0,
+          embedding_retry_after: null,
+          embedding_locked_until: null,
+        }).eq('id', doc.id);
+      }
 
       await fetchDocuments();
 
@@ -1543,12 +1562,17 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
   const handleSkipProcessing = async (doc: Document, e: React.MouseEvent) => {
     e.stopPropagation();
+    // Use a distinct 'skipped' status so auto-recovery never resurrects this doc
     await supabase.from('documents').update({
-      ingestion_status: 'failed',
-      ingestion_stage: 'failed',
-      ingestion_error: 'Processing skipped by user. Click Reprocess to retry.',
+      ingestion_status: 'skipped',
+      ingestion_stage: 'paused',
+      ingestion_error: 'Processing paused by user. Click Reprocess to resume.',
     }).eq('id', doc.id);
-    toast({ title: "Processing skipped", description: `"${doc.fileName}" has been skipped. You can reprocess it later.` });
+    // Also remove from any in-memory recovery sets so the poller won't re-trigger
+    autoRetryingIds.current.delete(doc.id);
+    delete docProgressRef.current[doc.id];
+    delete freeResumeTriggerAtRef.current[doc.id];
+    toast({ title: "Processing paused", description: `"${doc.fileName}" has been paused. You can reprocess it anytime.` });
     await fetchDocuments();
   };
 
@@ -1556,6 +1580,11 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     const effectivelyComplete = doc.ingestionStatus === 'complete' || (doc.totalChunks > 0 && doc.embeddedChunks >= doc.totalChunks);
     if (effectivelyComplete) return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(142 76% 96%)', color: 'hsl(142 72% 29%)', borderColor: 'hsl(142 60% 75%)' }}>Indexed</span>;
     if (doc.ingestionStatus === 'failed') return <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(0 86% 97%)', color: 'hsl(0 72% 51%)', borderColor: 'hsl(0 72% 80%)' }}><AlertCircle className="h-3 w-3" />Failed</span>;
+    if (doc.ingestionStatus === 'skipped') return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border" style={{ background: 'hsl(220 14% 96%)', color: 'hsl(220 9% 46%)', borderColor: 'hsl(220 13% 80%)' }} title="Processing was paused by user. Click Reprocess to resume.">
+        <Clock className="h-3 w-3" />Paused
+      </span>
+    );
     if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
       const progress = doc.totalChunks > 0 ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100) : 0;
       return (
@@ -1573,7 +1602,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
             <button
               onClick={(e) => handleSkipProcessing(doc, e)}
               className="h-5 w-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-              title="Skip processing"
+              title="Pause processing"
             >
               <X className="h-3 w-3" />
             </button>
@@ -1588,7 +1617,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
           <button
             onClick={(e) => handleSkipProcessing(doc, e)}
             className="h-5 w-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-            title="Skip processing"
+            title="Pause processing"
           >
             <X className="h-3 w-3" />
           </button>
