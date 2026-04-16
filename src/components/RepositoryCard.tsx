@@ -1378,7 +1378,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
   };
 
   const handleReprocess = async (doc: Document) => {
-    toast({ title: "Reprocessing", description: `Reindexing "${doc.fileName}"...` });
+    const isResume = doc.ingestionStatus === 'skipped';
+    toast({ title: isResume ? "Resuming" : "Reprocessing", description: `${isResume ? 'Resuming' : 'Reindexing'} "${doc.fileName}"...` });
     setReprocessingIds(prev => new Set(prev).add(doc.id));
 
     try {
