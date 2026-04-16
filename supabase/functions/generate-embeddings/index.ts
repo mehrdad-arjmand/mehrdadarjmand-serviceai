@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 
-  const authHeader = req.headers.get('Authorization')
+  const supabase = createClient(supabaseUrl, supabaseServiceKey)
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(
       JSON.stringify({ error: 'Missing or invalid authorization header' }),
@@ -39,29 +39,37 @@ Deno.serve(async (req) => {
     )
   }
 
-  const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: authHeader } }
-  })
   const token = authHeader.replace('Bearer ', '')
-  const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(token)
-  if (claimsError || !claimsData?.claims?.sub) {
-    return new Response(
-      JSON.stringify({ error: 'Unauthorized: Invalid token' }),
-      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-  const user = { id: claimsData.claims.sub as string }
+  const isServiceRoleCall = token === supabaseServiceKey
 
-  const supabase = createClient(supabaseUrl, supabaseServiceKey)
+  let userId: string | null = null
 
-  const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
-    p_tab: 'repository', p_action: 'write', p_user_id: user.id
-  })
-  if (permError || !hasPermission) {
-    return new Response(
-      JSON.stringify({ error: 'Forbidden: repository.write permission required' }),
-      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  if (isServiceRoleCall) {
+    // Trusted service-to-service call (from ingest / ingest-text edge functions)
+    // Skip permission check — the calling function already verified the user
+    userId = null
+  } else {
+    const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } }
+    })
+    const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(token)
+    if (claimsError || !claimsData?.claims?.sub) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: Invalid token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    userId = claimsData.claims.sub as string
+
+    const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
+      p_tab: 'repository', p_action: 'write', p_user_id: userId
+    })
+    if (permError || !hasPermission) {
+      return new Response(
+        JSON.stringify({ error: 'Forbidden: repository.write permission required' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
   }
 
   try {
