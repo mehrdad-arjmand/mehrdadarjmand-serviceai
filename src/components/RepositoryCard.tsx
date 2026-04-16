@@ -1414,21 +1414,34 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         return;
       }
 
-      // Has chunks — clear embeddings and regenerate
-      const { error: clearError } = await supabase
-        .from('chunks')
-        .update({ embedding: null })
-        .eq('document_id', doc.id);
-      if (clearError) throw clearError;
+      const isResumeFromPause = doc.ingestionStatus === 'skipped';
 
-      await supabase.from('documents').update({
-        ingestion_status: 'processing_embeddings',
-        ingestion_error: null,
-        ingested_chunks: 0,
-        embedding_failure_count: 0,
-        embedding_retry_after: null,
-        embedding_locked_until: null,
-      }).eq('id', doc.id);
+      if (isResumeFromPause) {
+        // Resume from where we left off — don't clear existing embeddings
+        await supabase.from('documents').update({
+          ingestion_status: 'processing_embeddings',
+          ingestion_error: null,
+          embedding_failure_count: 0,
+          embedding_retry_after: null,
+          embedding_locked_until: null,
+        }).eq('id', doc.id);
+      } else {
+        // Full reprocess — clear embeddings and regenerate
+        const { error: clearError } = await supabase
+          .from('chunks')
+          .update({ embedding: null })
+          .eq('document_id', doc.id);
+        if (clearError) throw clearError;
+
+        await supabase.from('documents').update({
+          ingestion_status: 'processing_embeddings',
+          ingestion_error: null,
+          ingested_chunks: 0,
+          embedding_failure_count: 0,
+          embedding_retry_after: null,
+          embedding_locked_until: null,
+        }).eq('id', doc.id);
+      }
 
       await fetchDocuments();
 
