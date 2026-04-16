@@ -900,7 +900,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
       for (const doc of docs) {
         if (isPaidTier && !autoRetryingIds.current.has(doc.id) && !reprocessingIdsRef.current.has(doc.id)) {
-          if (doc.ingestionStatus === 'failed' && doc.ingestionStatus !== 'skipped' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
+          if (doc.ingestionStatus === 'failed' && doc.totalChunks > 0 && doc.embeddedChunks < doc.totalChunks) {
             triggerEmbeddingRecovery(doc, 'Paid live recovery');
             continue;
           }
