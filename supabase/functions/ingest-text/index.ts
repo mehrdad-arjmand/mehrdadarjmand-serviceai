@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
         // Trigger embeddings
         const embRes = await fetch(`${supabaseUrl}/functions/v1/generate-embeddings`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader!, 'apikey': supabaseAnonKey },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseServiceKey}`, 'apikey': supabaseAnonKey },
           body: JSON.stringify({ documentId: docId, mode: 'full' }),
         })
         await embRes.text()
