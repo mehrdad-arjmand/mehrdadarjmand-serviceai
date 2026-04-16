@@ -1381,6 +1381,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     const isResume = doc.ingestionStatus === 'skipped';
     toast({ title: isResume ? "Resuming" : "Reprocessing", description: `${isResume ? 'Resuming' : 'Reindexing'} "${doc.fileName}"...` });
     setReprocessingIds(prev => new Set(prev).add(doc.id));
+    // Optimistic UI update — show Processing immediately
+    setDocuments(prev => prev.map(d => d.id === doc.id ? { ...d, ingestionStatus: 'processing_embeddings', ingestionStage: 'processing_embeddings' } : d));
 
     try {
       // Check if document has chunks at all
@@ -1562,18 +1564,19 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
   const handleSkipProcessing = async (doc: Document, e: React.MouseEvent) => {
     e.stopPropagation();
+    // Optimistic UI update — show Paused immediately
+    setDocuments(prev => prev.map(d => d.id === doc.id ? { ...d, ingestionStatus: 'skipped', ingestionStage: 'paused' } : d));
+    // Also remove from any in-memory recovery sets so the poller won't re-trigger
+    autoRetryingIds.current.delete(doc.id);
+    delete docProgressRef.current[doc.id];
+    delete freeResumeTriggerAtRef.current[doc.id];
     // Use a distinct 'skipped' status so auto-recovery never resurrects this doc
     await supabase.from('documents').update({
       ingestion_status: 'skipped',
       ingestion_stage: 'paused',
       ingestion_error: 'Processing paused by user. Click Reprocess to resume.',
     }).eq('id', doc.id);
-    // Also remove from any in-memory recovery sets so the poller won't re-trigger
-    autoRetryingIds.current.delete(doc.id);
-    delete docProgressRef.current[doc.id];
-    delete freeResumeTriggerAtRef.current[doc.id];
     toast({ title: "Processing paused", description: `"${doc.fileName}" has been paused. You can reprocess it anytime.` });
-    await fetchDocuments();
   };
 
   const StatusBadge = ({ doc }: { doc: Document }) => {
