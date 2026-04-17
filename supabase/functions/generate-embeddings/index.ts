@@ -171,10 +171,10 @@ async function processFreeTier(
       continue
     }
 
-    // Short-circuit: if document is already terminally failed, do NOT attempt another embed
-    if (docMeta.ingestion_status === 'failed') {
-      console.log(`Document ${docId}: already failed, short-circuiting (no embed attempt)`)
-      results.push({ documentId: docId, processed: 0, embedded: 0, total: docMeta.total_chunks || 0, complete: false, locked: false, retryAfterMs: 0, status: 'failed', stopRetrying: true })
+    // Short-circuit terminal free-tier states so client and worker agree.
+    if (docMeta.ingestion_status === 'failed' || docMeta.ingestion_status === 'skipped') {
+      console.log(`Document ${docId}: already ${docMeta.ingestion_status}, short-circuiting (no embed attempt)`)
+      results.push({ documentId: docId, processed: 0, embedded: 0, total: docMeta.total_chunks || 0, complete: false, locked: false, retryAfterMs: 0, status: docMeta.ingestion_status, stopRetrying: true })
       continue
     }
 
@@ -207,6 +207,32 @@ async function processFreeTier(
       .from('documents')
       .update({ embedding_locked_until: lockUntil })
       .eq('id', docId)
+
+    const { data: docMetaAfterLock } = await supabase
+      .from('documents')
+      .select('ingestion_status')
+      .eq('id', docId)
+      .single()
+
+    if (docMetaAfterLock?.ingestion_status === 'failed' || docMetaAfterLock?.ingestion_status === 'skipped') {
+      await supabase
+        .from('documents')
+        .update({ embedding_locked_until: null })
+        .eq('id', docId)
+
+      results.push({
+        documentId: docId,
+        processed: 0,
+        embedded: 0,
+        total: docMeta.total_chunks || 0,
+        complete: false,
+        locked: false,
+        retryAfterMs: 0,
+        status: docMetaAfterLock.ingestion_status,
+        stopRetrying: true,
+      })
+      continue
+    }
 
     let totalProcessed = 0
     let hitRateLimit = false
@@ -313,6 +339,36 @@ async function processFreeTier(
       const embedded = embeddedCount || 0
       const isComplete = embedded >= totalChunks && totalChunks > 0
 
+      const { data: latestDocState } = await supabase
+        .from('documents')
+        .select('ingestion_status')
+        .eq('id', docId)
+        .single()
+
+      if (latestDocState?.ingestion_status === 'failed' || latestDocState?.ingestion_status === 'skipped') {
+        await supabase
+          .from('documents')
+          .update({
+            ingested_chunks: embedded,
+            embedding_locked_until: null,
+          })
+          .eq('id', docId)
+
+        console.log(`Document ${docId}: ${latestDocState.ingestion_status} during active slice, preserving terminal state`)
+        results.push({
+          documentId: docId,
+          processed: totalProcessed,
+          embedded,
+          total: totalChunks,
+          complete: false,
+          locked: false,
+          retryAfterMs,
+          status: latestDocState.ingestion_status,
+          stopRetrying: true,
+        })
+        continue
+      }
+
       await supabase
         .from('documents')
         .update({
@@ -339,15 +395,28 @@ async function processFreeTier(
       })
     } catch (docError) {
       console.error(`Error embedding document ${docId}:`, docError)
-      // On error: release lock, set status but do NOT set failed (let client retry)
-      await supabase
+      const { data: latestDocState } = await supabase
         .from('documents')
-        .update({
-          embedding_locked_until: null,
-          ingestion_status: 'processing_embeddings', // Keep as processing so client can retry
-          ingestion_error: docError instanceof Error ? docError.message.slice(0, 1000) : 'Unknown error'
-        })
+        .select('ingestion_status')
         .eq('id', docId)
+        .single()
+
+      if (latestDocState?.ingestion_status === 'failed' || latestDocState?.ingestion_status === 'skipped') {
+        await supabase
+          .from('documents')
+          .update({ embedding_locked_until: null })
+          .eq('id', docId)
+      } else {
+        // On error: release lock, set status but do NOT set failed (let client retry)
+        await supabase
+          .from('documents')
+          .update({
+            embedding_locked_until: null,
+            ingestion_status: 'processing_embeddings',
+            ingestion_error: docError instanceof Error ? docError.message.slice(0, 1000) : 'Unknown error'
+          })
+          .eq('id', docId)
+      }
 
       results.push({
         documentId: docId,
