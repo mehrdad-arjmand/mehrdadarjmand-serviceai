@@ -32,6 +32,7 @@ Deno.serve(async (req) => {
   const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
+  const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(
       JSON.stringify({ error: 'Missing or invalid authorization header' }),
