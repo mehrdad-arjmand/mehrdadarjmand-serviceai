@@ -93,8 +93,23 @@ Deno.serve(async (req) => {
 
     const isFullMode = mode === 'full'
 
-    const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: userId })
-    const apiTier = userApiTier || 'free'
+    let apiTier: string = 'free'
+    if (userId) {
+      const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: userId })
+      apiTier = userApiTier || 'free'
+    } else {
+      // Service-role call: derive tier from document owner
+      const { data: docRow } = await supabase
+        .from('documents')
+        .select('projects!inner(created_by)')
+        .eq('id', docIds[0])
+        .single()
+      const ownerId = (docRow as { projects?: { created_by?: string } } | null)?.projects?.created_by
+      if (ownerId) {
+        const { data: ownerTier } = await supabase.rpc('get_user_api_tier', { p_user_id: ownerId })
+        apiTier = ownerTier || 'free'
+      }
+    }
 
     const apiKey = apiTier === 'paid'
       ? Deno.env.get('GOOGLE_API_KEY')
