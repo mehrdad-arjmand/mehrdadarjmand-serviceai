@@ -32,6 +32,7 @@ Deno.serve(async (req) => {
   const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
+  const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return new Response(
       JSON.stringify({ error: 'Missing or invalid authorization header' }),
@@ -92,8 +93,23 @@ Deno.serve(async (req) => {
 
     const isFullMode = mode === 'full'
 
-    const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
-    const apiTier = userApiTier || 'free'
+    let apiTier: string = 'free'
+    if (userId) {
+      const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: userId })
+      apiTier = userApiTier || 'free'
+    } else {
+      // Service-role call: derive tier from document owner
+      const { data: docRow } = await supabase
+        .from('documents')
+        .select('projects!inner(created_by)')
+        .eq('id', docIds[0])
+        .single()
+      const ownerId = (docRow as { projects?: { created_by?: string } } | null)?.projects?.created_by
+      if (ownerId) {
+        const { data: ownerTier } = await supabase.rpc('get_user_api_tier', { p_user_id: ownerId })
+        apiTier = ownerTier || 'free'
+      }
+    }
 
     const apiKey = apiTier === 'paid'
       ? Deno.env.get('GOOGLE_API_KEY')
@@ -106,7 +122,7 @@ Deno.serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════════
       // FREE TIER: Small bounded slice per invocation, with lock mechanism
       // ═══════════════════════════════════════════════════════════════════
-      const results = await processFreeTier(supabase, apiKey, docIds, user.id)
+      const results = await processFreeTier(supabase, apiKey, docIds, userId)
       return new Response(
         JSON.stringify({ success: true, tier: 'free', documents: results }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -115,7 +131,7 @@ Deno.serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════════
       // PAID TIER: Original full-document processing (unchanged)
       // ═══════════════════════════════════════════════════════════════════
-      const results = await processPaidTier(supabase, apiKey, docIds, isFullMode, user.id)
+      const results = await processPaidTier(supabase, apiKey, docIds, isFullMode, userId)
       return new Response(
         JSON.stringify({ success: true, tier: 'paid', documents: results }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
