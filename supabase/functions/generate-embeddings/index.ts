@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
 
     const isFullMode = mode === 'full'
 
-    const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
+    const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: userId })
     const apiTier = userApiTier || 'free'
 
     const apiKey = apiTier === 'paid'
@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════════
       // FREE TIER: Small bounded slice per invocation, with lock mechanism
       // ═══════════════════════════════════════════════════════════════════
-      const results = await processFreeTier(supabase, apiKey, docIds, user.id)
+      const results = await processFreeTier(supabase, apiKey, docIds, userId)
       return new Response(
         JSON.stringify({ success: true, tier: 'free', documents: results }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════════
       // PAID TIER: Original full-document processing (unchanged)
       // ═══════════════════════════════════════════════════════════════════
-      const results = await processPaidTier(supabase, apiKey, docIds, isFullMode, user.id)
+      const results = await processPaidTier(supabase, apiKey, docIds, isFullMode, userId)
       return new Response(
         JSON.stringify({ success: true, tier: 'paid', documents: results }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
