@@ -884,6 +884,8 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     throw new Error(`"${file.name}" could not be queued on the free-tier upload flow.`);
   };
   useEffect(() => {
+    // Clear stale documents from previous project immediately to avoid flash
+    setDocuments([]);
     setIsLoadingDocuments(true);
     fetchDocuments();
     const docsChannel = supabase.channel('repository-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).subscribe();
