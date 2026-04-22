@@ -16,6 +16,8 @@ interface AnalyticsData {
   cost: { avg: string; p95: string; total: string };
   retrieval_eval: {
     evaluated_count: number;
+    total_queries: number;
+    abstention_rate: number;
     avg_precision_at_k: number;
     avg_recall_at_k: number;
     avg_hit_rate: number;
@@ -173,7 +175,7 @@ const QueryAnalytics = () => {
         .not('total_relevant_chunks', 'is', null)
         .not('first_relevant_rank', 'is', null)
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(1000);
       
       if (error || !logs || logs.length === 0) return;
 
@@ -409,7 +411,7 @@ const QueryAnalytics = () => {
                 <CardContent className="space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_precision_at_k * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Recall@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_recall_at_k * 100).toFixed(1)}%</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Hit Rate</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_hit_rate * 100).toFixed(1)}%</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Abstention</span><span className="font-mono font-medium">{(analytics.retrieval_eval.abstention_rate * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">MRR</span><span className="font-mono font-medium">{analytics.retrieval_eval.mrr.toFixed(4)}</span></div>
                 </CardContent>
               </Card>

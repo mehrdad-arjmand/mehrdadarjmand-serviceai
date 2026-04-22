@@ -165,6 +165,8 @@ Deno.serve(async (req) => {
         },
         retrieval_eval: eligible.length > 0 ? {
           evaluated_count: eligible.length,
+          total_queries: logs.length,
+          abstention_rate: parseFloat(((logs.length - eligible.length) / logs.length).toFixed(4)),
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
           avg_hit_rate: avgHitRate,
