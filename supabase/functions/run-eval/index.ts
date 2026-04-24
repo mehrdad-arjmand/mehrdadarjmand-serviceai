@@ -148,6 +148,16 @@ Deno.serve(async (req) => {
       const avgHitRate = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)) : 0
       const mrr = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)) : 0
 
+      // Macro-F1: compute F1 per query (2·p·r/(p+r)), then average. More accurate
+      // than F1 of the aggregated precision/recall — consistent with how avg
+      // precision/recall are presented per-query and averaged.
+      const perQueryF1 = eligible.map(l => {
+        const p = l.precision_at_k ?? 0
+        const r = l.recall_at_k ?? 0
+        return (p + r) > 0 ? (2 * p * r) / (p + r) : 0
+      })
+      const avgF1 = eligible.length > 0 ? parseFloat(avg(perQueryF1).toFixed(4)) : 0
+
       const analytics = {
         sample_size: logs.length,
         latency: {
@@ -170,6 +180,7 @@ Deno.serve(async (req) => {
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
           avg_hit_rate: avgHitRate,
+          avg_f1: avgF1,
           mrr: mrr,
         } : null,
       }

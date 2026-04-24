@@ -21,6 +21,7 @@ interface AnalyticsData {
     avg_precision_at_k: number;
     avg_recall_at_k: number;
     avg_hit_rate: number;
+    avg_f1: number;
     mrr: number;
   } | null;
 }
@@ -91,11 +92,12 @@ interface ConfusionRow {
   accuracy: number;
   precision: number;
   recall: number;
+  f1: number;
 }
 
 interface ConfusionMatrix {
   rows: ConfusionRow[];
-  totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number };
+  totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number; f1: number };
 }
 
 const SQL_REFERENCE = `-- Latency percentiles
@@ -185,6 +187,9 @@ const QueryAnalytics = () => {
         const fn = (l.total_relevant_chunks ?? 0) - tp;
         const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
         const total = tp + fp + fn + tn;
+        const precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
+        const recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
+        const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
         return {
           query: l.query_text?.slice(0, 80) || '',
           top_k: l.top_k ?? 0,
@@ -193,8 +198,9 @@ const QueryAnalytics = () => {
           total_relevant_chunks: l.total_relevant_chunks ?? 0,
           tp, fp, fn, tn,
           accuracy: total > 0 ? (tp + tn) / total : 0,
-          precision: (tp + fp) > 0 ? tp / (tp + fp) : 0,
-          recall: (tp + fn) > 0 ? tp / (tp + fn) : 0,
+          precision,
+          recall,
+          f1,
         };
       });
 
@@ -203,6 +209,8 @@ const QueryAnalytics = () => {
       const sumFn = rows.reduce((s, r) => s + r.fn, 0);
       const sumTn = rows.reduce((s, r) => s + r.tn, 0);
       const totalAll = sumTp + sumFp + sumFn + sumTn;
+      // Macro-F1: average of per-query F1 (consistent with per-query precision/recall averaging)
+      const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
 
       setConfusionMatrix({
         rows,
@@ -211,6 +219,7 @@ const QueryAnalytics = () => {
           accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
           precision: (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0,
           recall: (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0,
+          f1: macroF1,
         },
       });
     } catch {
@@ -411,6 +420,7 @@ const QueryAnalytics = () => {
                 <CardContent className="space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_precision_at_k * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Recall@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_recall_at_k * 100).toFixed(1)}%</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">F1 (macro)</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_f1 * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Abstention</span><span className="font-mono font-medium">{(analytics.retrieval_eval.abstention_rate * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">MRR</span><span className="font-mono font-medium">{analytics.retrieval_eval.mrr.toFixed(4)}</span></div>
                 </CardContent>
@@ -583,7 +593,7 @@ const QueryAnalytics = () => {
             </CardHeader>
             <CardContent>
               {/* Aggregate KPIs */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
                 <div className="bg-muted/30 rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-0.5">Accuracy</p>
                   <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
@@ -595,6 +605,10 @@ const QueryAnalytics = () => {
                 <div className="bg-muted/30 rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-0.5">Recall</p>
                   <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground mb-0.5">F1 (macro)</p>
+                  <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.f1 * 100).toFixed(1)}%</p>
                 </div>
                 <div className="bg-muted/30 rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-0.5">TP / FP / FN / TN</p>
@@ -615,6 +629,7 @@ const QueryAnalytics = () => {
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Acc</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Prec</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Recall</TableHead>
+                      <TableHead className="text-right text-muted-foreground text-xs w-[65px]">F1</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -634,6 +649,7 @@ const QueryAnalytics = () => {
                         <TableCell className="text-right font-mono text-sm py-2.5">{(r.accuracy * 100).toFixed(1)}%</TableCell>
                         <TableCell className="text-right font-mono text-sm py-2.5">{(r.precision * 100).toFixed(1)}%</TableCell>
                         <TableCell className="text-right font-mono text-sm py-2.5">{(r.recall * 100).toFixed(1)}%</TableCell>
+                        <TableCell className="text-right font-mono text-sm py-2.5">{(r.f1 * 100).toFixed(1)}%</TableCell>
                       </TableRow>
                     ))}
                     {/* Aggregate row */}
@@ -652,6 +668,7 @@ const QueryAnalytics = () => {
                       <TableCell className="text-right font-mono text-sm py-2.5">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</TableCell>
                       <TableCell className="text-right font-mono text-sm py-2.5">{(confusionMatrix.totals.precision * 100).toFixed(1)}%</TableCell>
                       <TableCell className="text-right font-mono text-sm py-2.5">{(confusionMatrix.totals.recall * 100).toFixed(1)}%</TableCell>
+                      <TableCell className="text-right font-mono text-sm py-2.5">{(confusionMatrix.totals.f1 * 100).toFixed(1)}%</TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
