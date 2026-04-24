@@ -21,6 +21,7 @@ interface AnalyticsData {
     avg_precision_at_k: number;
     avg_recall_at_k: number;
     avg_hit_rate: number;
+    avg_f1: number;
     mrr: number;
   } | null;
 }
@@ -91,11 +92,12 @@ interface ConfusionRow {
   accuracy: number;
   precision: number;
   recall: number;
+  f1: number;
 }
 
 interface ConfusionMatrix {
   rows: ConfusionRow[];
-  totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number };
+  totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number; f1: number };
 }
 
 const SQL_REFERENCE = `-- Latency percentiles
@@ -185,6 +187,9 @@ const QueryAnalytics = () => {
         const fn = (l.total_relevant_chunks ?? 0) - tp;
         const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
         const total = tp + fp + fn + tn;
+        const precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
+        const recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
+        const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
         return {
           query: l.query_text?.slice(0, 80) || '',
           top_k: l.top_k ?? 0,
@@ -193,8 +198,9 @@ const QueryAnalytics = () => {
           total_relevant_chunks: l.total_relevant_chunks ?? 0,
           tp, fp, fn, tn,
           accuracy: total > 0 ? (tp + tn) / total : 0,
-          precision: (tp + fp) > 0 ? tp / (tp + fp) : 0,
-          recall: (tp + fn) > 0 ? tp / (tp + fn) : 0,
+          precision,
+          recall,
+          f1,
         };
       });
 
@@ -203,6 +209,8 @@ const QueryAnalytics = () => {
       const sumFn = rows.reduce((s, r) => s + r.fn, 0);
       const sumTn = rows.reduce((s, r) => s + r.tn, 0);
       const totalAll = sumTp + sumFp + sumFn + sumTn;
+      // Macro-F1: average of per-query F1 (consistent with per-query precision/recall averaging)
+      const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
 
       setConfusionMatrix({
         rows,
@@ -211,6 +219,7 @@ const QueryAnalytics = () => {
           accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
           precision: (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0,
           recall: (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0,
+          f1: macroF1,
         },
       });
     } catch {
