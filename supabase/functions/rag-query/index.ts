@@ -660,9 +660,18 @@ Deno.serve(async (req) => {
       topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 50)
       console.log(`Section-window mode: selected ${topChunks.length} contiguous chunks`)
     } else {
-      const contextLimit = 20
-      topChunks = rankedChunks.slice(0, Math.min(rankedChunks.length, contextLimit))
-      console.log(`Standard mode: ${topChunks.length} top-ranked chunks`)
+      // Phase 1 precision tuning: tight top-K + similarity floor.
+      // Rationale: relevance density collapses past rank ~5 and below ~0.62 cosine,
+      // so dropping k from 20 -> 5 with a floor sharply increases precision while
+      // preserving recall on confident matches.
+      const contextLimit = 5
+      const SIMILARITY_FLOOR = 0.62
+      const floored = rankedChunks.filter((c: any) => (c.similarity ?? 0) >= SIMILARITY_FLOOR)
+      // Safety net: if the floor wipes everything out, keep the single best chunk
+      // so we never regress to a no-context answer when *some* signal exists.
+      const pool = floored.length > 0 ? floored : rankedChunks.slice(0, 1)
+      topChunks = pool.slice(0, Math.min(pool.length, contextLimit))
+      console.log(`Standard mode (Phase 1): ${topChunks.length} chunks (floor=${SIMILARITY_FLOOR}, cap=${contextLimit}, pre-floor=${rankedChunks.length})`)
     }
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
