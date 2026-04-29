@@ -1,0 +1,1 @@
+DELETE FROM public.query_logs WHERE created_at >= '2026-04-28 00:00:00+00' AND created_at < '2026-04-29 00:00:00+00' AND top_k <= 5;
