@@ -665,7 +665,7 @@ Deno.serve(async (req) => {
       // so dropping k from 20 -> 5 with a floor sharply increases precision while
       // preserving recall on confident matches.
       const contextLimit = 5
-      const SIMILARITY_FLOOR = 0.62
+      const SIMILARITY_FLOOR = 0.55
       const floored = rankedChunks.filter((c: any) => (c.similarity ?? 0) >= SIMILARITY_FLOOR)
       // Safety net: if the floor wipes everything out, keep the single best chunk
       // so we never regress to a no-context answer when *some* signal exists.
