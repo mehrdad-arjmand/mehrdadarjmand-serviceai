@@ -1094,51 +1094,51 @@ function rerankChunks(chunks: any[], question: string, targetDocIds: string[] | 
       score *= 0.3
     }
     
-    // ── Document match boost/penalty ──
+    // ── Document match boost/penalty (softened to let embedding similarity dominate) ──
     if (targetDocIds && targetDocIds.length > 0) {
       if (targetDocIds.includes(chunk.document_id)) {
-        score += 0.2
+        score += 0.10
       } else {
-        score *= 0.4
+        score *= 0.6
       }
     }
     
-    // ── Year match boost/penalty ──
+    // ── Year match boost/penalty (softened) ──
     if (queryYears.length > 0) {
       const hasMatchingYear = queryYears.some(y => text.includes(y) || filename.includes(y))
       const hasWrongYear = !hasMatchingYear && /\b(20[0-2]\d|19\d{2})\b/.test(text)
-      if (hasMatchingYear) score += 0.15
-      if (hasWrongYear) score *= 0.5
+      if (hasMatchingYear) score += 0.08
+      if (hasWrongYear) score *= 0.7
     }
     
-    // ── Make/model keyword boost (including short tokens like BMW) ──
+    // ── Make/model keyword boost (softened, capped) ──
     const makeModelHits = combinedMakeModel.filter(t => text.includes(t)).length
-    if (makeModelHits > 0) score += makeModelHits * 0.15
+    if (makeModelHits > 0) score += Math.min(makeModelHits * 0.08, 0.16)
     
-    // ── General keyword boost ──
+    // ── General keyword boost (softened, capped) ──
     const keywordMatches = keywords.filter(kw => text.includes(kw)).length
     if (!isTOC && keywordMatches > 0) {
-      score += keywordMatches * 0.08
+      score += Math.min(keywordMatches * 0.03, 0.12)
     }
     
-    // ── Procedural content boost (lower weight) ──
+    // ── Procedural content boost (much lower — was rewarding generic verbs) ──
     const proceduralIndicators = [
       'replace', 'check', 'inspect', 'warning', 'caution', 'procedure', 'step',
       'value', 'temperature', 'pressure'
     ]
     const proceduralMatches = proceduralIndicators.filter(ind => text.includes(ind)).length
-    score += proceduralMatches * 0.03
+    score += Math.min(proceduralMatches * 0.01, 0.04)
     
-    // ── Table/data content boost ──
+    // ── Table/data content boost (softened) ──
     const hasTableContent = /\|.*\|/.test(chunk.text) || /\t/.test(chunk.text) || /\d+\s+(mi|km|mpg|kwh|hp)\b/i.test(chunk.text)
     if (hasTableContent && detectTableIntent(question)) {
-      score += 0.1
+      score += 0.05
     }
     
-    // ── Specific values/measurements boost ──
+    // ── Specific values/measurements boost (softened — was rewarding any chunk with numbers) ──
     const hasSpecificValues = /\d+\s*(ppm|%|°C|°F|years?|months?|days?|hours?|mi|km|mpg|kwh)/i.test(chunk.text)
     if (hasSpecificValues) {
-      score += 0.1
+      score += 0.04
     }
     
     return { ...chunk, finalScore: score, isTOC }
