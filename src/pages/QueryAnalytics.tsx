@@ -215,16 +215,18 @@ const QueryAnalytics = () => {
       const sumFn = rows.reduce((s, r) => s + r.fn, 0);
       const sumTn = rows.reduce((s, r) => s + r.tn, 0);
       const totalAll = sumTp + sumFp + sumFn + sumTn;
-      // Macro-F1: average of per-query F1 (consistent with per-query precision/recall averaging)
+      // Macro-F1: average of per-query F1 (matches Retrieval Quality card)
       const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
+      const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
+      const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
 
       setConfusionMatrix({
         rows,
         totals: {
           tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
           accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
-          precision: (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0,
-          recall: (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0,
+          precision: microPrecision,
+          recall: microRecall,
           f1: macroF1,
         },
       });
