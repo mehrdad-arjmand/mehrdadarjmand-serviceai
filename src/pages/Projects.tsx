@@ -359,11 +359,19 @@ const Projects = () => {
   };
 
   const fetchMetrics = async () => {
-     const { data, error } = await supabase.
-    from("query_logs").
-    select("precision_at_k, relevant_in_top_k, top_k, top_k_eval, total_relevant_chunks, first_relevant_rank, execution_time_ms, upstream_inference_cost").
-    not("execution_time_ms", "is", null);
-    if (error || !data || data.length === 0) return;
+    const PAGE = 1000;
+    const data: any[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error } = await supabase
+        .from("query_logs")
+        .select("precision_at_k, relevant_in_top_k, top_k, top_k_eval, total_relevant_chunks, first_relevant_rank, execution_time_ms, upstream_inference_cost")
+        .not("execution_time_ms", "is", null)
+        .range(from, from + PAGE - 1);
+      if (error || !page || page.length === 0) break;
+      data.push(...page);
+      if (page.length < PAGE) break;
+    }
+    if (data.length === 0) return;
 
     // Accuracy: (TP + TN) / top_k_eval for eligible rows
     const eligible = data.filter((d) => d.first_relevant_rank !== null && d.total_relevant_chunks !== null && d.top_k_eval !== null);
