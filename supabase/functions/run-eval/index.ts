@@ -114,12 +114,22 @@ Deno.serve(async (req) => {
 
     // ─── ACTION: analytics ───
     if (action === 'analytics') {
-      const { data: logs } = await supabase
-        .from('query_logs')
-        .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k')
-        .order('created_at', { ascending: true })
+      // Paginate to bypass PostgREST 1000-row cap
+      const PAGE = 1000
+      const logs: any[] = []
+      for (let from = 0; ; from += PAGE) {
+        const { data: page, error } = await supabase
+          .from('query_logs')
+          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at')
+          .order('created_at', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (error) break
+        if (!page || page.length === 0) break
+        logs.push(...page)
+        if (page.length < PAGE) break
+      }
 
-      if (!logs || logs.length === 0) {
+      if (logs.length === 0) {
         return new Response(JSON.stringify({ error: 'No query logs found' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       }
 
@@ -133,30 +143,34 @@ Deno.serve(async (req) => {
       }
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
-      // Retrieval eval: only rows where first_relevant_rank is not null AND total_relevant_chunks is not null (properly evaluated)
+      // Retrieval eval: rows with first_relevant_rank AND total_relevant_chunks (matches Confusion Matrix eligibility)
       const eligible = logs.filter(l => l.first_relevant_rank !== null && l.first_relevant_rank !== undefined && l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined)
 
-      // Precision@K = sum(relevant_in_top_k) / sum(top_k) for eligible rows
-      const sumRelevantInTopK = eligible.reduce((s, l) => s + (l.relevant_in_top_k ?? 0), 0)
-      const sumTopK = eligible.reduce((s, l) => s + (l.top_k ?? 0), 0)
-      const aggPrecision = sumTopK > 0 ? sumRelevantInTopK / sumTopK : 0
+      // Confusion-matrix-aligned per-query TP/FP/FN/TN
+      const perQ = eligible.map(l => {
+        const tp = l.relevant_in_top_k ?? 0
+        const fp = Math.max(0, (l.top_k ?? 0) - tp)
+        const fn = Math.max(0, (l.total_relevant_chunks ?? 0) - tp)
+        const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn)
+        const p = (tp + fp) > 0 ? tp / (tp + fp) : 0
+        const r = (tp + fn) > 0 ? tp / (tp + fn) : 0
+        const f1 = (p + r) > 0 ? (2 * p * r) / (p + r) : 0
+        return { tp, fp, fn, tn, p, r, f1 }
+      })
 
-      // Recall@K = sum(relevant_in_top_k) / sum(total_relevant_chunks) for eligible rows
-      const sumTotalRelevant = eligible.reduce((s, l) => s + (l.total_relevant_chunks ?? 0), 0)
-      const aggRecall = sumTotalRelevant > 0 ? sumRelevantInTopK / sumTotalRelevant : 0
+      const sumTP = perQ.reduce((s, q) => s + q.tp, 0)
+      const sumFP = perQ.reduce((s, q) => s + q.fp, 0)
+      const sumFN = perQ.reduce((s, q) => s + q.fn, 0)
+      const sumTN = perQ.reduce((s, q) => s + q.tn, 0)
 
+      // Micro precision/recall (aggregate across queries) — matches Confusion Matrix totals row
+      const aggPrecision = (sumTP + sumFP) > 0 ? sumTP / (sumTP + sumFP) : 0
+      const aggRecall = (sumTP + sumFN) > 0 ? sumTP / (sumTP + sumFN) : 0
+
+      // Macro F1 — average of per-query F1
+      const avgF1 = perQ.length > 0 ? avg(perQ.map(q => q.f1)) : 0
       const avgHitRate = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)) : 0
       const mrr = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)) : 0
-
-      // Macro-F1: compute F1 per query (2·p·r/(p+r)), then average. More accurate
-      // than F1 of the aggregated precision/recall — consistent with how avg
-      // precision/recall are presented per-query and averaged.
-      const perQueryF1 = eligible.map(l => {
-        const p = l.precision_at_k ?? 0
-        const r = l.recall_at_k ?? 0
-        return (p + r) > 0 ? (2 * p * r) / (p + r) : 0
-      })
-      const avgF1 = eligible.length > 0 ? parseFloat(avg(perQueryF1).toFixed(4)) : 0
 
       const analytics = {
         sample_size: logs.length,
@@ -180,7 +194,7 @@ Deno.serve(async (req) => {
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
           avg_hit_rate: avgHitRate,
-          avg_f1: avgF1,
+          avg_f1: parseFloat(avgF1.toFixed(4)),
           mrr: mrr,
         } : null,
       }

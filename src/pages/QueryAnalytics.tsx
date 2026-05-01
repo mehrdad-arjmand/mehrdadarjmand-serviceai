@@ -170,16 +170,22 @@ const QueryAnalytics = () => {
 
   const fetchConfusionMatrix = async () => {
     try {
-      const { data: logs, error } = await supabase
-        .from('query_logs')
-        .select('query_text, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
-        .not('evaluated_at', 'is', null)
-        .not('total_relevant_chunks', 'is', null)
-        .not('first_relevant_rank', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(1000);
-      
-      if (error || !logs || logs.length === 0) return;
+      const PAGE = 1000;
+      const logs: any[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('query_logs')
+          .select('query_text, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
+          .not('evaluated_at', 'is', null)
+          .not('total_relevant_chunks', 'is', null)
+          .not('first_relevant_rank', 'is', null)
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error || !data || data.length === 0) break;
+        logs.push(...data);
+        if (data.length < PAGE) break;
+      }
+      if (logs.length === 0) return;
 
       const rows: ConfusionRow[] = logs.map(l => {
         const tp = l.relevant_in_top_k ?? 0;
@@ -209,16 +215,18 @@ const QueryAnalytics = () => {
       const sumFn = rows.reduce((s, r) => s + r.fn, 0);
       const sumTn = rows.reduce((s, r) => s + r.tn, 0);
       const totalAll = sumTp + sumFp + sumFn + sumTn;
-      // Macro-F1: average of per-query F1 (consistent with per-query precision/recall averaging)
+      // Macro-F1: average of per-query F1 (matches Retrieval Quality card)
       const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
+      const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
+      const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
 
       setConfusionMatrix({
         rows,
         totals: {
           tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
           accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
-          precision: (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0,
-          recall: (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0,
+          precision: microPrecision,
+          recall: microRecall,
           f1: macroF1,
         },
       });
