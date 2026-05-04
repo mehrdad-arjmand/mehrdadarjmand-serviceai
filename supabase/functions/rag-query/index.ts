@@ -660,18 +660,23 @@ Deno.serve(async (req) => {
       topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 50)
       console.log(`Section-window mode: selected ${topChunks.length} contiguous chunks`)
     } else {
-      // Phase 1 precision tuning: tight top-K + similarity floor.
-      // Rationale: relevance density collapses past rank ~5 and below ~0.62 cosine,
-      // so dropping k from 20 -> 5 with a floor sharply increases precision while
-      // preserving recall on confident matches.
-      const contextLimit = 5
+      // Phase 2: Adaptive K via intent classifier + dual-floor confidence gate.
+      // - Classifier picks target K based on query type (lookup/synthesis/enumerate)
+      // - Similarity floor (absolute) drops weak semantic matches
+      // - Relative reranker-score floor (0.6 × top score) drops weak rerank scores
+      // - Floor at 3, cap at classifier K, single-chunk safety net if all gated out.
+      const { intent, k: targetK, classifierMs } = await classifyIntent(retrievalQuery)
       const SIMILARITY_FLOOR = 0.55
-      const floored = rankedChunks.filter((c: any) => (c.similarity ?? 0) >= SIMILARITY_FLOOR)
-      // Safety net: if the floor wipes everything out, keep the single best chunk
-      // so we never regress to a no-context answer when *some* signal exists.
-      const pool = floored.length > 0 ? floored : rankedChunks.slice(0, 1)
-      topChunks = pool.slice(0, Math.min(pool.length, contextLimit))
-      console.log(`Standard mode (Phase 1): ${topChunks.length} chunks (floor=${SIMILARITY_FLOOR}, cap=${contextLimit}, pre-floor=${rankedChunks.length})`)
+      const topScore = rankedChunks[0]?.finalScore ?? 0
+      const REL_FLOOR = 0.6 * topScore
+      const eligible = rankedChunks.filter((c: any) =>
+        (c.similarity ?? 0) >= SIMILARITY_FLOOR &&
+        (c.finalScore ?? 0) >= REL_FLOOR
+      )
+      const pool = eligible.length > 0 ? eligible : rankedChunks.slice(0, 1)
+      const k = Math.max(3, Math.min(targetK, pool.length))
+      topChunks = pool.slice(0, k)
+      console.log(`Adaptive: intent=${intent} targetK=${targetK} returned=${topChunks.length} clsMs=${classifierMs} simFloor=${SIMILARITY_FLOOR} relFloor=${REL_FLOOR.toFixed(3)} preFloor=${rankedChunks.length}`)
     }
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
@@ -1478,5 +1483,99 @@ async function evaluateRetrievalBackground(
     console.error('Failed to update retrieval eval:', updateError)
   } else {
     console.log(`Retrieval eval complete for ${queryLogId}: P@K=${precisionAtK.toFixed(3)}, R@K=${recallAtK.toFixed(3)}, HR=${hitRate}, topKEval=${Math.min(topKEval, labels.length, 200)}`)
+  }
+}
+
+// ── Adaptive K: intent classifier ──────────────────────────────────────────
+// Returns target K based on query intent:
+//   lookup     → k=3   (single fact / value / definition)
+//   synthesis  → k=8   (procedures, comparisons, "how do I...")
+//   enumerate  → k=20  (lists, counts, "all X", tables)
+// Heuristic short-circuits avoid the LLM call on obvious patterns.
+// On any failure, returns a safe default (k=5).
+async function classifyIntent(query: string): Promise<{ intent: string; k: number; classifierMs: number }> {
+  const start = Date.now()
+  const q = query.toLowerCase().trim()
+
+  // Heuristic 1: enumeration patterns
+  if (/\b(list|all|every|each|how many|count|enumerate|total number)\b/.test(q)) {
+    return { intent: 'enumerate', k: 20, classifierMs: Date.now() - start }
+  }
+
+  // Heuristic 2: short factual lookup
+  const tokenCount = q.split(/\s+/).length
+  if (tokenCount <= 6 && /\b(what is|value of|spec|specification|define|definition of)\b/.test(q)) {
+    return { intent: 'lookup', k: 3, classifierMs: Date.now() - start }
+  }
+
+  // LLM classifier fallback (Flash-Lite + tool calling for guaranteed JSON)
+  try {
+    const apiKey = Deno.env.get('LOVABLE_API_KEY')
+    if (!apiKey) {
+      console.warn('classifyIntent: LOVABLE_API_KEY missing, defaulting to k=5')
+      return { intent: 'default', k: 5, classifierMs: Date.now() - start }
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5000)
+    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Classify the user query intent for a RAG retrieval system. ' +
+              'Respond by calling the classify_intent tool with one of: ' +
+              '"lookup" (single specific fact/value/definition), ' +
+              '"synthesis" (procedure, how-to, comparison, explanation), ' +
+              '"enumerate" (list all, count, multi-item aggregation, table data).'
+          },
+          { role: 'user', content: query.slice(0, 500) },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'classify_intent',
+            description: 'Pick the retrieval intent for this query.',
+            parameters: {
+              type: 'object',
+              properties: {
+                intent: { type: 'string', enum: ['lookup', 'synthesis', 'enumerate'] }
+              },
+              required: ['intent'],
+              additionalProperties: false,
+            }
+          }
+        }],
+        tool_choice: { type: 'function', function: { name: 'classify_intent' } },
+        temperature: 0,
+        max_tokens: 50,
+      }),
+    })
+    clearTimeout(timer)
+    if (!resp.ok) {
+      console.warn(`classifyIntent: gateway ${resp.status}, defaulting to k=5`)
+      return { intent: 'default', k: 5, classifierMs: Date.now() - start }
+    }
+    const data = await resp.json()
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
+    const args = toolCall?.function?.arguments
+    if (!args) {
+      return { intent: 'default', k: 5, classifierMs: Date.now() - start }
+    }
+    const parsed = typeof args === 'string' ? JSON.parse(args) : args
+    const intent = parsed.intent
+    const kMap: Record<string, number> = { lookup: 3, synthesis: 8, enumerate: 20 }
+    const k = kMap[intent] ?? 5
+    return { intent: intent || 'default', k, classifierMs: Date.now() - start }
+  } catch (e) {
+    console.warn('classifyIntent failed:', e instanceof Error ? e.message : e)
+    return { intent: 'default', k: 5, classifierMs: Date.now() - start }
   }
 }
