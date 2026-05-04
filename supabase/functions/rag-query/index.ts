@@ -660,18 +660,23 @@ Deno.serve(async (req) => {
       topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 50)
       console.log(`Section-window mode: selected ${topChunks.length} contiguous chunks`)
     } else {
-      // Phase 1 precision tuning: tight top-K + similarity floor.
-      // Rationale: relevance density collapses past rank ~5 and below ~0.62 cosine,
-      // so dropping k from 20 -> 5 with a floor sharply increases precision while
-      // preserving recall on confident matches.
-      const contextLimit = 5
+      // Phase 2: Adaptive K via intent classifier + dual-floor confidence gate.
+      // - Classifier picks target K based on query type (lookup/synthesis/enumerate)
+      // - Similarity floor (absolute) drops weak semantic matches
+      // - Relative reranker-score floor (0.6 × top score) drops weak rerank scores
+      // - Floor at 3, cap at classifier K, single-chunk safety net if all gated out.
+      const { intent, k: targetK, classifierMs } = await classifyIntent(retrievalQuery)
       const SIMILARITY_FLOOR = 0.55
-      const floored = rankedChunks.filter((c: any) => (c.similarity ?? 0) >= SIMILARITY_FLOOR)
-      // Safety net: if the floor wipes everything out, keep the single best chunk
-      // so we never regress to a no-context answer when *some* signal exists.
-      const pool = floored.length > 0 ? floored : rankedChunks.slice(0, 1)
-      topChunks = pool.slice(0, Math.min(pool.length, contextLimit))
-      console.log(`Standard mode (Phase 1): ${topChunks.length} chunks (floor=${SIMILARITY_FLOOR}, cap=${contextLimit}, pre-floor=${rankedChunks.length})`)
+      const topScore = rankedChunks[0]?.finalScore ?? 0
+      const REL_FLOOR = 0.6 * topScore
+      const eligible = rankedChunks.filter((c: any) =>
+        (c.similarity ?? 0) >= SIMILARITY_FLOOR &&
+        (c.finalScore ?? 0) >= REL_FLOOR
+      )
+      const pool = eligible.length > 0 ? eligible : rankedChunks.slice(0, 1)
+      const k = Math.max(3, Math.min(targetK, pool.length))
+      topChunks = pool.slice(0, k)
+      console.log(`Adaptive: intent=${intent} targetK=${targetK} returned=${topChunks.length} clsMs=${classifierMs} simFloor=${SIMILARITY_FLOOR} relFloor=${REL_FLOOR.toFixed(3)} preFloor=${rankedChunks.length}`)
     }
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
