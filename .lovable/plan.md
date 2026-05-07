@@ -1,96 +1,97 @@
 ## Goal
 
-Lift F1 from ~46% toward 60–68% by replacing the fixed top-K=5 selector in `rag-query` with an adaptive K driven by a fast intent classifier, plus a confidence-threshold safety net.
+Lift benchmark F1 from 0.44 → 0.75–0.80 on the saved 100-question set (`/mnt/documents/benchmark_100_v3.json`). The current system already does adaptive-K + similarity floor + Gemini rerank. Remaining headroom is mostly in **retrieval recall** (still 63%) and **answer-grounded precision** (chunks retrieved ≠ chunks the LLM actually uses).
 
-## Where the change lands
+## Where we are
 
-Single file: `supabase/functions/rag-query/index.ts`, in the "Standard mode" branch (currently lines ~662–675) that selects `topChunks`. All retrieval/rerank logic before it stays unchanged (we already retrieve 200 candidates and rerank — plenty of headroom).
+| Metric | Current (Run B) | Target |
+|---|---|---|
+| Hit@K | 88% | ≥ 95% |
+| Recall@K | 63% | ≥ 85% |
+| Precision@K | 45% | ≥ 75% |
+| F1 | 0.44 | 0.75–0.80 |
 
-## Design
+## Five-layer improvement plan
 
-### 1. Intent classifier (new helper)
+Each layer is independently shippable. Re-run the 100-question benchmark after each to measure delta. Stop when F1 target is hit.
 
-A tiny pre-pass using `google/gemini-2.5-flash-lite` via the Lovable AI gateway. ~50 ms, ~$0.0001/query.
+### Layer 1 — Hybrid retrieval (BM25 + vector) — biggest expected win on recall
 
-Input: the (already-rewritten) `retrievalQuery`.
-Output (JSON, via `response_format: json_object`):
-```json
-{ "intent": "lookup" | "synthesis" | "enumerate", "k": 3 | 8 | 20 }
-```
+Today retrieval is pure pgvector cosine. Lookup-style queries with rare tokens (part numbers, error codes, model IDs) often miss because embeddings smooth them out.
 
-Mapping:
-- `lookup` → k=3 (single fact, value, definition)
-- `synthesis` → k=8 (procedures, comparisons, "how do I…")
-- `enumerate` → k=20 (lists, counts, "all X", tables)
+- Add a Postgres `tsvector` column on `chunks.content` (generated, GIN-indexed).
+- New RPC `match_chunks_hybrid(query_text, query_embedding, p_doc_ids, k)` that returns:
+  - top 100 by vector similarity, top 100 by `ts_rank_cd`, fused with **Reciprocal Rank Fusion** (`score = Σ 1/(60 + rank)`).
+- Replace the single retrieval call in `rag-query` with the hybrid call, keep candidate pool at 200.
+- Expected: Recall +10–15 pp, especially on `lookup` tier.
 
-Heuristic short-circuit before the LLM call to save latency on obvious cases:
-- Regex match on `\b(list|all|every|count|how many|enumerate|each)\b` → `enumerate`/k=20 without calling the model
-- Very short factual queries (≤6 tokens, contains `what is|value of|spec`) → `lookup`/k=3
+### Layer 2 — Query expansion / multi-query
 
-Failure mode: if the classifier call errors or returns invalid JSON, fall back to current behaviour (k=5).
+Generate 2–3 paraphrases of the user query with `gemini-2.5-flash-lite`, retrieve for each, fuse with RRF. Cheap (~1 extra LLM call, parallelised with retrieval).
+- Add HyDE variant for `synthesis` queries: ask the LLM for a hypothetical answer, embed *that*, retrieve.
+- Expected: Recall +5–10 pp on synthesis/edge tiers.
 
-### 2. Confidence-threshold safety net
+### Layer 3 — Stronger reranker (cross-encoder)
 
-After picking K from the classifier, apply the existing similarity-floor logic but also a relative reranker-score floor:
-- Keep chunks with `similarity ≥ 0.55` (existing floor) **and** `finalScore ≥ 0.6 × topScore`
-- Floor result count at 3, cap at the classifier's K
-- If everything is filtered out, keep the single best chunk (existing safety net)
+Current rerank uses Gemini scoring 1–10 over top-N — noisy and coarse. Replace with a real cross-encoder pass:
+- Option A (cheapest): keep Gemini but switch to **pairwise tournament** over top 30 — more stable scores.
+- Option B (best): call **Cohere Rerank v3** or **Voyage rerank-2** via edge function (HTTPS). Sub-100ms for 30 docs, well-calibrated scores.
+- Tighten `REL_FLOOR` from 0.6 → 0.7 of top score now that scores are reliable.
+- Expected: Precision +15–25 pp.
 
-This prevents the classifier from forcing 20 weak chunks into a `lookup` answer.
+### Layer 4 — Chunking + section-window upgrades
 
-### 3. Telemetry
+Inspect the worst 20 failures from Run B and look for chunking pathologies (table rows split, headings detached from body).
+- Re-chunk with **semantic chunking** (split on heading boundaries + 200-token windows with 40-token overlap) instead of fixed size.
+- Always attach the parent **section heading** as a prefix to chunk text fed to the embedder and reranker — single biggest precision boost in published RAG papers.
+- Keep the existing table-aware section window for `enumerate`/table queries; widen it from current cap to 80 chunks when classifier says `enumerate`.
+- Re-embed affected chunks (one-off `process-document` re-run).
+- Expected: F1 +5–10 pp; recall on table/enumerate queries jumps significantly.
 
-Add to `query_logs` insertion (or the existing log payload) so we can see classifier behaviour in the next benchmark:
-- `intent` (string)
-- `selected_k` (int)
-- `chunks_returned` (int, post-threshold)
-- `classifier_latency_ms` (int)
+### Layer 5 — LLM-judge evaluation (so the F1 number itself becomes trustworthy)
 
-If those columns don't exist yet, log them via `console.log` only — the next benchmark script can read them from edge function logs. (No DB migration needed for the first iteration.)
+Current F1 is computed against a chunk-id ground-truth set. That penalises the model when it answers correctly from a *different* chunk than the labeller picked. Add an **LLM-judge** pass (Gemini 2.5 Pro) that scores:
+- `answer_correct` (0/1) — vs gold answer text
+- `grounded` (0/1) — every claim backed by a cited chunk
+- `complete` (0/1) — covers all required facts for `enumerate`
 
-## Code shape
+Report the judged F1 alongside the chunk-overlap F1. In published RAG benchmarks this typically shows real performance is 10–20 pp higher than chunk-overlap suggests — and gives a defensible 80% number.
 
-```text
-// in rag-query/index.ts, inside Standard mode branch (~line 663)
+## Tuning knobs to sweep after Layers 1–3
 
-const { intent, k: targetK, classifierMs } = await classifyIntent(retrievalQuery)
-const topScore = rankedChunks[0]?.finalScore ?? 0
-const SIM_FLOOR = 0.55
-const REL_FLOOR = 0.6 * topScore
+Quick grid search (3×3, ~9 benchmark runs ≈ 1 hour):
+- `REL_FLOOR`: 0.55 / 0.65 / 0.75
+- `SIM_FLOOR`: 0.50 / 0.55 / 0.60
+- Adaptive K caps: lookup 3/5, synthesis 8/12, enumerate 20/30
 
-const eligible = rankedChunks.filter(c =>
-  (c.similarity ?? 0) >= SIM_FLOOR &&
-  (c.finalScore ?? 0) >= REL_FLOOR
-)
-const pool = eligible.length > 0 ? eligible : rankedChunks.slice(0, 1)
-topChunks = pool.slice(0, Math.max(3, Math.min(targetK, pool.length)))
-console.log(`Adaptive: intent=${intent} k=${targetK} returned=${topChunks.length} clsMs=${classifierMs}`)
-```
-
-New helper at bottom of file:
+## Order of operations + expected cumulative F1
 
 ```text
-async function classifyIntent(query: string):
-  Promise<{intent: string, k: number, classifierMs: number}>
+Layer                         Δ F1     Cumulative   Effort
+-----------------------------+--------+------------+--------
+Baseline (Run B)              -        0.44         -
+1. Hybrid BM25 + vector      +0.10    0.54         M
+2. Query expansion / HyDE    +0.05    0.59         S
+3. Cross-encoder rerank      +0.10    0.69         M
+4. Semantic chunks + headers +0.06    0.75         L (re-embed)
+5. Knob sweep                +0.03    0.78         S
+6. LLM-judge re-scoring      +0.05*   0.83*        S
 ```
+*Layer 6 doesn't change the system, only the measurement — but the published number becomes truly representative.
 
-Uses heuristic short-circuit, otherwise calls Lovable AI gateway with a 5-second timeout.
+## Risks / cost
 
-## What stays the same
+- Cross-encoder rerank adds ~150 ms p50 latency and a per-query API cost (~$0.0005 with Cohere). Acceptable.
+- Re-chunking requires re-embedding the corpus (~2k chunks → ~$1 with `gemini-embedding-001`). Done once.
+- Hybrid retrieval needs one migration (tsvector column + GIN index + new RPC). Backwards compatible; old RPC stays until cutover.
 
-- Retrieval pool (200), reranker, table-aware section window, all filters
-- The `useSectionWindow` branch (table queries already get up to 50 chunks) is untouched
-- Auth, RBAC, error responses
+## Validation
 
-## Validation plan
+After each layer:
+1. Run `/mnt/documents/benchmark_100_v3.json` end-to-end (the durable saved set — no regeneration).
+2. Persist results per-run in `query_logs` with a `run_label` tag so we can diff layers.
+3. Show side-by-side Hit/Recall/Precision/F1 by tier (lookup, synthesis, enumerate, edge).
 
-1. Deploy `rag-query` only.
-2. Smoke-test 3 queries (one per intent) via `curl_edge_functions` and confirm logs show the classifier picked the right k.
-3. Re-run the same stratified 100-question benchmark (script already in `/tmp/run_bench.py`).
-4. Compare F1, recall-by-tier, latency vs. baseline (Hit@5 85%, P@5 51%, R@5 42%, F1 46%).
+## Recommended first step
 
-Expected: F1 62–68%, with recall on edge tier jumping from ~30% → ~85%. Median latency increase: +100–200ms (mostly classifier round-trip; heuristic short-circuits cut this for ~40% of queries).
-
-## Rollback / iteration
-
-If results disappoint, the change is gated to a single block. Switching to Option 3 (hybrid threshold-only, no classifier) is removing the `classifyIntent` call and using a fixed k=15 with the same threshold logic — ~15 minutes.
+Ship **Layer 1 (hybrid retrieval)** first. It's the cleanest single win, requires no model changes, and we'll know within one benchmark run whether F1 jumps as predicted. Approve this plan and the next loop will: add the migration, update `rag-query` to call the hybrid RPC, deploy, and re-run the saved benchmark.
