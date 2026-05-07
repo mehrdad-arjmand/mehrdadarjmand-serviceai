@@ -459,18 +459,37 @@ Deno.serve(async (req) => {
 
     if (requestProjectId && projectDocIdArray.length > 0) {
       const retrievalCount = 200
-      const { data, error } = await supabase.rpc(
-        'match_chunks_by_docs',
+      // Hybrid retrieval: BM25 (tsvector) ∪ vector, fused via Reciprocal Rank Fusion
+      const { data: hybridData, error: hybridErr } = await supabase.rpc(
+        'match_chunks_hybrid',
         {
+          query_text: retrievalQuery,
           query_embedding: embeddingStr,
           doc_ids: effectiveDocIds,
-          match_threshold: 0.10,
           match_count: retrievalCount,
+          vec_pool: 150,
+          kw_pool: 150,
+          rrf_k: 60,
         }
       )
-      chunks = data || []
-      searchError = error
-      console.log(`Project-scoped search found ${chunks.length} chunks`)
+      if (hybridErr) {
+        console.warn('Hybrid retrieval failed, falling back to vector-only:', hybridErr.message)
+        const { data, error } = await supabase.rpc(
+          'match_chunks_by_docs',
+          {
+            query_embedding: embeddingStr,
+            doc_ids: effectiveDocIds,
+            match_threshold: 0.10,
+            match_count: retrievalCount,
+          }
+        )
+        chunks = data || []
+        searchError = error
+      } else {
+        chunks = hybridData || []
+        searchError = null
+      }
+      console.log(`Project-scoped hybrid search found ${chunks.length} chunks`)
     } else {
       const { data, error } = await supabase.rpc(
         'match_chunks',

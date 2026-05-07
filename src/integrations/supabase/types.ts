@@ -101,6 +101,7 @@ export type Database = {
           id: string
           site: string | null
           text: string
+          text_tsv: unknown
         }
         Insert: {
           chunk_index: number
@@ -112,6 +113,7 @@ export type Database = {
           id?: string
           site?: string | null
           text: string
+          text_tsv?: unknown
         }
         Update: {
           chunk_index?: number
@@ -123,6 +125,7 @@ export type Database = {
           id?: string
           site?: string | null
           text?: string
+          text_tsv?: unknown
         }
         Relationships: [
           {
@@ -725,6 +728,30 @@ export type Database = {
           fault_code: string
           filename: string
           id: string
+          similarity: number
+          site: string
+          text: string
+        }[]
+      }
+      match_chunks_hybrid: {
+        Args: {
+          doc_ids: string[]
+          kw_pool?: number
+          match_count?: number
+          query_embedding: string
+          query_text: string
+          rrf_k?: number
+          vec_pool?: number
+        }
+        Returns: {
+          chunk_index: number
+          document_id: string
+          equipment: string
+          fault_code: string
+          filename: string
+          id: string
+          kw_rank: number
+          rrf_score: number
           similarity: number
           site: string
           text: string
