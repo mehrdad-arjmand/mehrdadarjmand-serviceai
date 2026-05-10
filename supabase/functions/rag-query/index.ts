@@ -130,8 +130,8 @@ Deno.serve(async (req) => {
       console.log(`RAG query from user: ${user.id}`)
     }
 
+    if (!user) throw new Error('user unresolved')
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
-    const userId = user!.id
 
     // Check permission
     const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
