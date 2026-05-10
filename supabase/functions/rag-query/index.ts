@@ -92,9 +92,24 @@ Deno.serve(async (req) => {
     const bearerToken = authHeader.replace('Bearer ', '').trim()
     let user: { id: string } | null = null
 
-    // Service-role bypass: used by internal benchmark/eval scripts. Caller must
-    // pass the user id to impersonate via x-benchmark-user-id header.
-    if (supabaseServiceKey && bearerToken === supabaseServiceKey) {
+    // Service-role / benchmark bypass: accept either the env service-role key
+    // or the value stored in public.bench_secrets (key='service_role').
+    let benchKey: string | null = null
+    try {
+      const adminClient = createClient(supabaseUrl, supabaseServiceKey)
+      const { data } = await adminClient
+        .from('bench_secrets')
+        .select('value')
+        .eq('key', 'service_role')
+        .maybeSingle()
+      benchKey = (data as { value?: string } | null)?.value ?? null
+    } catch (_) { /* table may not exist yet */ }
+
+    const isBypass = bearerToken &&
+      ((supabaseServiceKey && bearerToken === supabaseServiceKey) ||
+       (benchKey && bearerToken === benchKey))
+
+    if (isBypass) {
       const impersonateId = req.headers.get('x-benchmark-user-id')
       if (!impersonateId) {
         return new Response(
