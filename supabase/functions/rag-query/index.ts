@@ -80,7 +80,7 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 
-    // Validate JWT authentication
+    // Validate JWT authentication (or service-role bypass for benchmarks)
     const authHeader = req.headers.get('Authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return new Response(
@@ -89,30 +89,48 @@ Deno.serve(async (req) => {
       )
     }
 
-    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: { Authorization: authHeader, apikey: supabaseAnonKey },
-    })
+    const bearerToken = authHeader.replace('Bearer ', '').trim()
+    let user: { id: string } | null = null
 
-    if (!userRes.ok) {
-      const errText = await userRes.text()
-      console.error('Auth error:', errText)
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized: Invalid token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    // Service-role bypass: used by internal benchmark/eval scripts. Caller must
+    // pass the user id to impersonate via x-benchmark-user-id header.
+    if (supabaseServiceKey && bearerToken === supabaseServiceKey) {
+      const impersonateId = req.headers.get('x-benchmark-user-id')
+      if (!impersonateId) {
+        return new Response(
+          JSON.stringify({ error: 'Service-role calls require x-benchmark-user-id header' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      user = { id: impersonateId }
+      console.log(`RAG query via service-role bypass for user: ${impersonateId}`)
+    } else {
+      const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: { Authorization: authHeader, apikey: supabaseAnonKey },
+      })
+
+      if (!userRes.ok) {
+        const errText = await userRes.text()
+        console.error('Auth error:', errText)
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized: Invalid token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      user = await userRes.json()
+      if (!user?.id) {
+        console.error('Auth error: No user ID in response')
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized: Invalid token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      console.log(`RAG query from user: ${user.id}`)
     }
 
-    const user = await userRes.json()
-    if (!user?.id) {
-      console.error('Auth error: No user ID in response')
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized: Invalid token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    console.log(`RAG query from user: ${user.id}`)
-
+    if (!user) throw new Error('user unresolved')
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     // Check permission
