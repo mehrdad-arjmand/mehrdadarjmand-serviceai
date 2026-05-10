@@ -131,6 +131,7 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const userId = user!.id
 
     // Check permission
     const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
