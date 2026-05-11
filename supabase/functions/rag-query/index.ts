@@ -80,7 +80,7 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 
-    // Validate JWT authentication
+    // Validate JWT authentication (with benchmark bypass)
     const authHeader = req.headers.get('Authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return new Response(
@@ -89,31 +89,46 @@ Deno.serve(async (req) => {
       )
     }
 
-    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: { Authorization: authHeader, apikey: supabaseAnonKey },
-    })
-
-    if (!userRes.ok) {
-      const errText = await userRes.text()
-      console.error('Auth error:', errText)
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized: Invalid token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    const user = await userRes.json()
-    if (!user?.id) {
-      console.error('Auth error: No user ID in response')
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized: Invalid token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    console.log(`RAG query from user: ${user.id}`)
-
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const benchUserId = req.headers.get('x-benchmark-user-id')
+    const bearerToken = authHeader.slice(7).trim()
+    let user: { id: string } | null = null
+
+    if (benchUserId) {
+      const { data: benchRow } = await supabase
+        .from('bench_secrets')
+        .select('value')
+        .eq('key', 'service_role')
+        .maybeSingle()
+      if (benchRow?.value && benchRow.value === bearerToken) {
+        user = { id: benchUserId }
+        console.log(`RAG query (benchmark bypass) for user: ${benchUserId}`)
+      }
+    }
+
+    if (!user) {
+      const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: { Authorization: authHeader, apikey: supabaseAnonKey },
+      })
+      if (!userRes.ok) {
+        const errText = await userRes.text()
+        console.error('Auth error:', errText)
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized: Invalid token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      const u = await userRes.json()
+      if (!u?.id) {
+        console.error('Auth error: No user ID in response')
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized: Invalid token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      user = { id: u.id }
+      console.log(`RAG query from user: ${user.id}`)
+    }
 
     // Check permission
     const { data: hasPermission, error: permError } = await supabase.rpc('has_permission', {
