@@ -80,7 +80,7 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 
-    // Validate JWT authentication (or service-role bypass for benchmarks)
+    // Validate JWT authentication
     const authHeader = req.headers.get('Authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return new Response(
@@ -89,63 +89,30 @@ Deno.serve(async (req) => {
       )
     }
 
-    const bearerToken = authHeader.replace('Bearer ', '').trim()
-    let user: { id: string } | null = null
+    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { Authorization: authHeader, apikey: supabaseAnonKey },
+    })
 
-    // Service-role / benchmark bypass: accept either the env service-role key
-    // or the value stored in public.bench_secrets (key='service_role').
-    let benchKey: string | null = null
-    try {
-      const adminClient = createClient(supabaseUrl, supabaseServiceKey)
-      const { data } = await adminClient
-        .from('bench_secrets')
-        .select('value')
-        .eq('key', 'service_role')
-        .maybeSingle()
-      benchKey = (data as { value?: string } | null)?.value ?? null
-    } catch (_) { /* table may not exist yet */ }
-
-    const isBypass = bearerToken &&
-      ((supabaseServiceKey && bearerToken === supabaseServiceKey) ||
-       (benchKey && bearerToken === benchKey))
-
-    if (isBypass) {
-      const impersonateId = req.headers.get('x-benchmark-user-id')
-      if (!impersonateId) {
-        return new Response(
-          JSON.stringify({ error: 'Service-role calls require x-benchmark-user-id header' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      user = { id: impersonateId }
-      console.log(`RAG query via service-role bypass for user: ${impersonateId}`)
-    } else {
-      const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-        headers: { Authorization: authHeader, apikey: supabaseAnonKey },
-      })
-
-      if (!userRes.ok) {
-        const errText = await userRes.text()
-        console.error('Auth error:', errText)
-        return new Response(
-          JSON.stringify({ error: 'Unauthorized: Invalid token' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      user = await userRes.json()
-      if (!user?.id) {
-        console.error('Auth error: No user ID in response')
-        return new Response(
-          JSON.stringify({ error: 'Unauthorized: Invalid token' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      console.log(`RAG query from user: ${user.id}`)
+    if (!userRes.ok) {
+      const errText = await userRes.text()
+      console.error('Auth error:', errText)
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: Invalid token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
-    if (!user) throw new Error('user unresolved')
+    const user = await userRes.json()
+    if (!user?.id) {
+      console.error('Auth error: No user ID in response')
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: Invalid token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log(`RAG query from user: ${user.id}`)
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     // Check permission
@@ -779,9 +746,8 @@ CRITICAL RETRIEVAL AND ANALYTICAL INSTRUCTIONS:
 - ANALYTICAL TASKS: When the user asks you to calculate, compare, sort, rank, divide, multiply, average, or perform any mathematical operation on data from the documents, you MUST perform those calculations accurately. Extract the relevant numbers from the sources, show your work, and present the results clearly. Do NOT refuse to perform calculations — you have all the data in the provided context.
 - DATA AGGREGATION: When asked to list all items, count entries, summarize across categories, or compile data from multiple sources, be thorough and include ALL matching entries from the provided context, not just a subset.
 - MATHEMATICAL ACCURACY: When performing summation, counting, or arithmetic, you MUST enumerate each item explicitly, then add them up step by step. Do NOT estimate or approximate. If you are summing a list of numbers, write out each number and compute the total carefully. Double-check your arithmetic before presenting the final answer.
-- QUANTITY-GROUNDED ABSTENTION: If the question asks for a specific quantity (temperature, voltage, current, pressure, torque, distance, time, weight, capacity, frequency, etc.) of a specific subject (e.g. "minimum temperature for X"), you MUST only answer if at least one provided source explicitly states that exact quantity-of-that-subject. A source about a DIFFERENT quantity of the same subject (e.g. voltage when asked about temperature), or the same quantity of a DIFFERENT subject, does NOT count. If no source contains the asked quantity for the asked subject, reply EXACTLY: "I don't have that information in the provided documents." Do not substitute a related-but-different value.
 ${citationInstructions}`
-       : `You are a field technician assistant for industrial energy systems. 
+      : `You are a field technician assistant for industrial energy systems. 
 
 CRITICAL INSTRUCTIONS:
 - Answer the SPECIFIC question asked. Do not give a general overview or tangential information unless directly relevant.
@@ -797,7 +763,6 @@ CRITICAL INSTRUCTIONS:
 - ANALYTICAL TASKS: When the user asks you to calculate, compare, sort, rank, divide, multiply, average, or perform any mathematical operation on data from the documents, you MUST perform those calculations accurately. Extract the relevant numbers from the sources, show your work step by step, and present the results in a clear table or list format. Do NOT refuse or say you cannot calculate — you have all the data in the provided context.
 - DATA AGGREGATION: When asked to list ALL items of a type (e.g., all SUV models, all prices), be thorough and include EVERY matching entry from ALL provided sources. Count them and confirm the total. If you find fewer than expected, explicitly state how many you found and from which sources.
 - MATHEMATICAL ACCURACY: When performing summation, counting, or arithmetic, you MUST enumerate each item explicitly, then add them up step by step. Do NOT estimate or approximate. If you are summing a list of numbers, write out each number and compute the total carefully. Double-check your arithmetic before presenting the final answer.
-- QUANTITY-GROUNDED ABSTENTION: If the question asks for a specific quantity (temperature, voltage, current, pressure, torque, distance, time, weight, capacity, frequency, dimension, count, etc.) of a specific subject (e.g. "minimum temperature for CATL battery maintenance"), you MUST only answer if at least one provided source explicitly states that exact quantity-of-that-subject. A source describing a DIFFERENT quantity of the same subject (e.g. voltage instead of temperature), or the same quantity of a DIFFERENT subject, does NOT count and MUST NOT be substituted. If no source contains the asked quantity for the asked subject, reply EXACTLY: "I don't have that information in the provided documents." Then optionally suggest the closest related information found, clearly labeled as related-but-not-the-answer. Never fabricate or infer a number that is not explicitly stated.
 ${citationInstructions}`
 
     // Build conversation context
