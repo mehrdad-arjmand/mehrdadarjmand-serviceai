@@ -246,7 +246,8 @@ Deno.serve(async (req) => {
       throw new Error('isConversationMode must be a boolean')
     }
 
-    if (rawRequest.projectId !== undefined && !isValidOptionalString(rawRequest.projectId, 100)) {
+    const rawProjectId = rawRequest.projectId ?? rawRequest.project_id
+    if (rawProjectId !== undefined && !isValidOptionalString(rawProjectId, 100)) {
       throw new Error('projectId must be a valid string')
     }
 
@@ -276,7 +277,7 @@ Deno.serve(async (req) => {
 
     const request: RAGQueryRequest = {
       question: (rawRequest.question as string).trim().slice(0, MAX_QUESTION_LENGTH),
-      projectId: rawRequest.projectId as string | undefined,
+      projectId: rawProjectId as string | undefined,
       sessionId: rawRequest.sessionId as string | undefined,
       documentType: sanitizeString(rawRequest.documentType as string | undefined),
       uploadDate: rawRequest.uploadDate as string | undefined,
