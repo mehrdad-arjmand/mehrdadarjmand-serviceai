@@ -837,27 +837,27 @@ Provide a clear, concise answer based on the actual procedural content in the co
       upstream_inference_cost: usage.upstream_inference_cost ?? 0,
     }
 
-    // Background: insert log then evaluate
-    const bgTask = (async () => {
+    const { data: insertedLog, error: logError } = await supabase
+      .from('query_logs')
+      .insert(logPayload)
+      .select('id')
+      .single()
+
+    const queryLogId = insertedLog?.id ?? null
+    if (logError || !queryLogId) {
+      console.error('Failed to log query:', logError)
+    } else {
+      console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
+    }
+
+    // Background: evaluate only after the durable log row exists.
+    const bgTask = queryLogId ? (async () => {
       try {
-        const { data: inserted, error: logError } = await supabase
-          .from('query_logs')
-          .insert(logPayload)
-          .select('id')
-          .single()
-
-        if (logError || !inserted) {
-          console.error('Failed to log query:', logError)
-          return
-        }
-
-        console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
-
-        await evaluateRetrievalBackground(supabase, inserted.id, question, evalChunkTexts, topK, topKEval)
+        await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval)
       } catch (e) {
         console.error('Background eval error:', e)
       }
-    })()
+    })() : Promise.resolve()
 
     if (typeof (globalThis as any).EdgeRuntime?.waitUntil === 'function') {
       (globalThis as any).EdgeRuntime.waitUntil(bgTask)
@@ -870,6 +870,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
         sources,
         usage,
         execution_time_ms: executionTimeMs,
+        query_log_id: queryLogId,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
