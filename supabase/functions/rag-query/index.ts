@@ -246,7 +246,8 @@ Deno.serve(async (req) => {
       throw new Error('isConversationMode must be a boolean')
     }
 
-    if (rawRequest.projectId !== undefined && !isValidOptionalString(rawRequest.projectId, 100)) {
+    const rawProjectId = rawRequest.projectId ?? rawRequest.project_id
+    if (rawProjectId !== undefined && !isValidOptionalString(rawProjectId, 100)) {
       throw new Error('projectId must be a valid string')
     }
 
@@ -276,7 +277,7 @@ Deno.serve(async (req) => {
 
     const request: RAGQueryRequest = {
       question: (rawRequest.question as string).trim().slice(0, MAX_QUESTION_LENGTH),
-      projectId: rawRequest.projectId as string | undefined,
+      projectId: rawProjectId as string | undefined,
       sessionId: rawRequest.sessionId as string | undefined,
       documentType: sanitizeString(rawRequest.documentType as string | undefined),
       uploadDate: rawRequest.uploadDate as string | undefined,
@@ -836,27 +837,27 @@ Provide a clear, concise answer based on the actual procedural content in the co
       upstream_inference_cost: usage.upstream_inference_cost ?? 0,
     }
 
-    // Background: insert log then evaluate
-    const bgTask = (async () => {
+    const { data: insertedLog, error: logError } = await supabase
+      .from('query_logs')
+      .insert(logPayload)
+      .select('id')
+      .single()
+
+    const queryLogId = insertedLog?.id ?? null
+    if (logError || !queryLogId) {
+      console.error('Failed to log query:', logError)
+    } else {
+      console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
+    }
+
+    // Background: evaluate only after the durable log row exists.
+    const bgTask = queryLogId ? (async () => {
       try {
-        const { data: inserted, error: logError } = await supabase
-          .from('query_logs')
-          .insert(logPayload)
-          .select('id')
-          .single()
-
-        if (logError || !inserted) {
-          console.error('Failed to log query:', logError)
-          return
-        }
-
-        console.log(`Query logged: ${executionTimeMs}ms, ${usage.total_tokens} tokens, cost: $${usage.upstream_inference_cost ?? 0}`)
-
-        await evaluateRetrievalBackground(supabase, inserted.id, question, evalChunkTexts, topK, topKEval)
+        await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval)
       } catch (e) {
         console.error('Background eval error:', e)
       }
-    })()
+    })() : Promise.resolve()
 
     if (typeof (globalThis as any).EdgeRuntime?.waitUntil === 'function') {
       (globalThis as any).EdgeRuntime.waitUntil(bgTask)
@@ -869,6 +870,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
         sources,
         usage,
         execution_time_ms: executionTimeMs,
+        query_log_id: queryLogId,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
