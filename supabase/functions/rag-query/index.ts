@@ -473,8 +473,8 @@ Deno.serve(async (req) => {
     let chunks: any[] = []
     let searchError: any = null
 
-    // Retrieval mode flag: "vector" (default) or "hybrid". See plan: hybrid kept behind a flag.
-    const retrievalMode = (Deno.env.get('RAG_RETRIEVAL_MODE') || 'vector').toLowerCase()
+    // Retrieval mode flag: "hybrid" (default) or "vector". See plan: hybrid restored as default after Run E regression.
+    const retrievalMode = (Deno.env.get('RAG_RETRIEVAL_MODE') || 'hybrid').toLowerCase()
 
     if (requestProjectId && projectDocIdArray.length > 0) {
       const retrievalCount = 200
@@ -511,7 +511,7 @@ Deno.serve(async (req) => {
         }
         console.log(`Project-scoped HYBRID search found ${chunks.length} chunks`)
       } else {
-        // Vector-only (default) — winning config per Run A vs Run D judged benchmark
+        // Vector-only fallback — override via RAG_RETRIEVAL_MODE=vector
         const { data, error } = await supabase.rpc(
           'match_chunks_by_docs',
           {
