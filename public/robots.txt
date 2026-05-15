@@ -12,3 +12,5 @@ Allow: /
 
 User-agent: *
 Allow: /
+
+Sitemap: https://mehrdadarjmand-serviceai.lovable.app/sitemap.xml
