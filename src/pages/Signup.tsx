@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Helmet } from "react-helmet-async";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -113,7 +114,15 @@ export default function Signup() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <main className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Helmet>
+        <title>Create account — Service AI</title>
+        <meta name="description" content="Create your Service AI account to access the enterprise technician knowledge base, project repositories, and AI assistant." />
+        <link rel="canonical" href="https://mehrdadarjmand-serviceai.lovable.app/signup" />
+        <meta property="og:title" content="Create account — Service AI" />
+        <meta property="og:description" content="Sign up for Service AI." />
+        <meta property="og:url" content="https://mehrdadarjmand-serviceai.lovable.app/signup" />
+      </Helmet>
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold">Create Account</CardTitle>
@@ -190,6 +199,6 @@ export default function Signup() {
           </CardFooter>
         </form>
       </Card>
-    </div>
+    </main>
   );
 }

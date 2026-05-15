@@ -1,0 +1,16 @@
+# Service AI
+
+> Enterprise knowledge base and AI assistant that helps field technicians instantly find answers across service manuals, SOPs, and project documents.
+
+Service AI ingests service documentation into project-scoped repositories, then exposes a retrieval-augmented chat assistant with citations, voice dictation, and role-based access control. The application is gated behind authentication; only the marketing-adjacent auth pages are publicly reachable.
+
+## Pages
+
+- [Login](/login): Sign in to an existing Service AI account.
+- [Sign up](/signup): Create a new Service AI account (requires invitation code).
+- [Forgot password](/forgot-password): Request a password reset email.
+
+## Optional
+
+- [Projects](/projects): Authenticated landing page listing accessible projects.
+- [Workspace](/): Authenticated repository and assistant workspace for a selected project.
