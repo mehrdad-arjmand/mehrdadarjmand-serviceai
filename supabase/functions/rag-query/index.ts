@@ -473,23 +473,45 @@ Deno.serve(async (req) => {
     let chunks: any[] = []
     let searchError: any = null
 
+    // Retrieval mode flag: "vector" (default) or "hybrid". See plan: hybrid kept behind a flag.
+    const retrievalMode = (Deno.env.get('RAG_RETRIEVAL_MODE') || 'vector').toLowerCase()
+
     if (requestProjectId && projectDocIdArray.length > 0) {
       const retrievalCount = 200
-      // Hybrid retrieval: BM25 (tsvector) ∪ vector, fused via Reciprocal Rank Fusion
-      const { data: hybridData, error: hybridErr } = await supabase.rpc(
-        'match_chunks_hybrid',
-        {
-          query_text: retrievalQuery,
-          query_embedding: embeddingStr,
-          doc_ids: effectiveDocIds,
-          match_count: retrievalCount,
-          vec_pool: 150,
-          kw_pool: 150,
-          rrf_k: 60,
+      if (retrievalMode === 'hybrid') {
+        // Hybrid retrieval: BM25 (tsvector) ∪ vector, fused via Reciprocal Rank Fusion
+        const { data: hybridData, error: hybridErr } = await supabase.rpc(
+          'match_chunks_hybrid',
+          {
+            query_text: retrievalQuery,
+            query_embedding: embeddingStr,
+            doc_ids: effectiveDocIds,
+            match_count: retrievalCount,
+            vec_pool: 150,
+            kw_pool: 150,
+            rrf_k: 60,
+          }
+        )
+        if (hybridErr) {
+          console.warn('Hybrid retrieval failed, falling back to vector-only:', hybridErr.message)
+          const { data, error } = await supabase.rpc(
+            'match_chunks_by_docs',
+            {
+              query_embedding: embeddingStr,
+              doc_ids: effectiveDocIds,
+              match_threshold: 0.10,
+              match_count: retrievalCount,
+            }
+          )
+          chunks = data || []
+          searchError = error
+        } else {
+          chunks = hybridData || []
+          searchError = null
         }
-      )
-      if (hybridErr) {
-        console.warn('Hybrid retrieval failed, falling back to vector-only:', hybridErr.message)
+        console.log(`Project-scoped HYBRID search found ${chunks.length} chunks`)
+      } else {
+        // Vector-only (default) — winning config per Run A vs Run D judged benchmark
         const { data, error } = await supabase.rpc(
           'match_chunks_by_docs',
           {
@@ -501,11 +523,8 @@ Deno.serve(async (req) => {
         )
         chunks = data || []
         searchError = error
-      } else {
-        chunks = hybridData || []
-        searchError = null
+        console.log(`Project-scoped VECTOR search found ${chunks.length} chunks`)
       }
-      console.log(`Project-scoped hybrid search found ${chunks.length} chunks`)
     } else {
       const { data, error } = await supabase.rpc(
         'match_chunks',
