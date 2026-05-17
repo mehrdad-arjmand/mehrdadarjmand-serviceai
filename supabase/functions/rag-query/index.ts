@@ -727,10 +727,22 @@ Deno.serve(async (req) => {
         (c.similarity ?? 0) >= SIMILARITY_FLOOR &&
         (c.finalScore ?? 0) >= REL_FLOOR
       )
-      const pool = eligible.length > 0 ? eligible : rankedChunks.slice(0, 1)
-      const k = Math.max(3, Math.min(targetK, pool.length))
+      // Phase 3: raise post-rerank K floor to >=4 to prevent reranker from over-pruning
+      // good chunks on lookup/edge tiers (Run F showed K_avg=2.3 there).
+      const MIN_K = 4
+      let pool = eligible.length > 0 ? eligible : rankedChunks.slice(0, 1)
+      // If gated pool is below floor, pad from the ranked (pre-gate) list so we always
+      // surface at least MIN_K candidates when available.
+      if (pool.length < MIN_K && rankedChunks.length > pool.length) {
+        const poolIds = new Set(pool.map((c: any) => c.id))
+        for (const c of rankedChunks) {
+          if (pool.length >= MIN_K) break
+          if (!poolIds.has(c.id)) { pool.push(c); poolIds.add(c.id) }
+        }
+      }
+      const k = Math.max(MIN_K, Math.min(targetK, pool.length))
       topChunks = pool.slice(0, k)
-      console.log(`Adaptive: intent=${intent} targetK=${targetK} returned=${topChunks.length} clsMs=${classifierMs} simFloor=${SIMILARITY_FLOOR} relFloor=${REL_FLOOR.toFixed(3)} preFloor=${rankedChunks.length}`)
+      console.log(`Adaptive: intent=${intent} targetK=${targetK} returned=${topChunks.length} clsMs=${classifierMs} simFloor=${SIMILARITY_FLOOR} relFloor=${REL_FLOOR.toFixed(3)} preFloor=${rankedChunks.length} minK=${MIN_K}`)
     }
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
