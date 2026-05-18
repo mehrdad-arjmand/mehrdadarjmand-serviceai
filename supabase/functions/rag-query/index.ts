@@ -1638,7 +1638,9 @@ async function classifyIntent(query: string): Promise<{ intent: string; k: numbe
     }
     const parsed = typeof args === 'string' ? JSON.parse(args) : args
     const intent = parsed.intent
-    const kMap: Record<string, number> = { lookup: 3, synthesis: 8, enumerate: 20 }
+    // MAX_K cap: enumerate reduced from 20 → 8. K=20 mechanically craters precision
+    // (P ≤ relevant/20) without lifting Hit@K. See Run H1 vs Run G analysis.
+    const kMap: Record<string, number> = { lookup: 3, synthesis: 8, enumerate: 8 }
     const k = kMap[intent] ?? 5
     return { intent: intent || 'default', k, classifierMs: Date.now() - start }
   } catch (e) {
