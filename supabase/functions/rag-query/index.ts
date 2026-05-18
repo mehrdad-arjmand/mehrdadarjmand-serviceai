@@ -1557,16 +1557,16 @@ async function evaluateRetrievalBackground(
 // Returns target K based on query intent:
 //   lookup     → k=3   (single fact / value / definition)
 //   synthesis  → k=8   (procedures, comparisons, "how do I...")
-//   enumerate  → k=20  (lists, counts, "all X", tables)
+//   enumerate  → k=8   (lists, counts; capped from 20 — see kMap below)
 // Heuristic short-circuits avoid the LLM call on obvious patterns.
 // On any failure, returns a safe default (k=5).
 async function classifyIntent(query: string): Promise<{ intent: string; k: number; classifierMs: number }> {
   const start = Date.now()
   const q = query.toLowerCase().trim()
 
-  // Heuristic 1: enumeration patterns
+  // Heuristic 1: enumeration patterns (K capped at 8 to prevent precision tax)
   if (/\b(list|all|every|each|how many|count|enumerate|total number)\b/.test(q)) {
-    return { intent: 'enumerate', k: 20, classifierMs: Date.now() - start }
+    return { intent: 'enumerate', k: 8, classifierMs: Date.now() - start }
   }
 
   // Heuristic 2: short factual lookup
