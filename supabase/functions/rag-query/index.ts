@@ -1402,6 +1402,44 @@ async function generateEmbedding(text: string, apiTier: string = 'free'): Promis
 }
 
 async function generateAnswer(systemPrompt: string, userPrompt: string, model: string = 'google/gemini-2.5-flash-lite'): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
+  // Prefer direct Google API to bypass Lovable gateway rate limits (user has paid Google API key).
+  // Falls back to Lovable gateway if GOOGLE_API_KEY is not configured.
+  const googleKey = Deno.env.get('GOOGLE_API_KEY')
+  const modelId = model.replace(/^google\//, '')
+
+  if (googleKey) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${googleKey}`
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 8192,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+      }),
+    })
+    if (!resp.ok) {
+      const error = await resp.text()
+      throw new Error(`Failed to generate answer (Google API): ${error}`)
+    }
+    const data = await resp.json()
+    const content = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') ?? ''
+    const um = data.usageMetadata ?? {}
+    return {
+      content,
+      usage: {
+        input_tokens: um.promptTokenCount ?? 0,
+        output_tokens: um.candidatesTokenCount ?? 0,
+        total_tokens: um.totalTokenCount ?? 0,
+        upstream_inference_cost: 0,
+      },
+    }
+  }
+
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
