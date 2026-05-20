@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
       for (let from = 0; ; from += PAGE) {
         const { data: page, error } = await supabase
           .from('query_logs')
-          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at')
+          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at, eval_model')
           .order('created_at', { ascending: true })
           .range(from, from + PAGE - 1)
         if (error) break
@@ -144,11 +144,12 @@ Deno.serve(async (req) => {
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
       const evaluatedLogs = logs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
+      const judgeFailedLogs = logs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
+      const pendingLogs = logs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
 
       // Retrieval eval: rows with first_relevant_rank AND total_relevant_chunks (matches Confusion Matrix eligibility)
       const eligible = logs.filter(l => l.first_relevant_rank !== null && l.first_relevant_rank !== undefined && l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined)
       const noJudgedRelevantCount = Math.max(0, evaluatedLogs.length - eligible.length)
-      const pendingEvaluationCount = Math.max(0, logs.length - evaluatedLogs.length)
 
       // Confusion-matrix-aligned per-query TP/FP/FN/TN
       const perQ = eligible.map(l => {
@@ -165,7 +166,6 @@ Deno.serve(async (req) => {
       const sumTP = perQ.reduce((s, q) => s + q.tp, 0)
       const sumFP = perQ.reduce((s, q) => s + q.fp, 0)
       const sumFN = perQ.reduce((s, q) => s + q.fn, 0)
-      const sumTN = perQ.reduce((s, q) => s + q.tn, 0)
 
       // Micro precision/recall (aggregate across queries) — matches Confusion Matrix totals row
       const aggPrecision = (sumTP + sumFP) > 0 ? sumTP / (sumTP + sumFP) : 0
@@ -196,7 +196,8 @@ Deno.serve(async (req) => {
           total_evaluated_count: evaluatedLogs.length,
           total_queries: logs.length,
           no_judged_relevant_count: noJudgedRelevantCount,
-          pending_evaluation_count: pendingEvaluationCount,
+          pending_evaluation_count: pendingLogs.length,
+          judge_failed_count: judgeFailedLogs.length,
           abstention_rate: parseFloat((noJudgedRelevantCount / evaluatedLogs.length).toFixed(4)),
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
@@ -366,6 +367,7 @@ Deno.serve(async (req) => {
       console.log(`Evaluating ${logs.length} queries with LLM (${EVAL_MODEL})`)
 
       const perQueryResults: any[] = []
+      const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'LOVABLE_API_KEY not configured', 'Chunk not found'])
 
       for (const log of logs) {
         const chunkIds = log.retrieved_chunk_ids || []
@@ -384,26 +386,37 @@ Deno.serve(async (req) => {
 
         const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
         let firstRelevantRank: number | null = null
+        let judgeFailures = 0
 
         for (let i = 0; i < topKEval; i++) {
           const chunk = evalChunks[i]
           if (!chunk || !chunk.text) {
             labels.push({ chunk_id: chunk?.id || 'unknown', relevant: false, reasoning: 'Chunk not found', rank: i + 1 })
+            judgeFailures++
             continue
           }
 
           const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          if (FAILURE_REASONS.has(result.reasoning)) judgeFailures++
           labels.push({ chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
-          // For firstRelevantRank, check if the chunk was in the original top-K retrieval
           const topKSet = new Set(chunkIds.slice(0, k))
           if (result.relevant && firstRelevantRank === null && topKSet.has(chunk.id)) {
-            // Find rank in original retrieval order
             const originalRank = chunkIds.indexOf(chunk.id)
             if (originalRank >= 0 && originalRank < k) {
               firstRelevantRank = originalRank + 1
             }
           }
+        }
+
+        // If most of the judge calls failed, do NOT stamp evaluated_at — that pollutes analytics.
+        if (topKEval > 0 && judgeFailures / topKEval >= 0.5) {
+          await supabase.from('query_logs').update({
+            relevance_labels: labels,
+            eval_model: `${EVAL_MODEL} (judge_failed)`,
+          }).eq('id', log.id)
+          console.warn(`run-retrieval-eval skipped for ${log.id}: ${judgeFailures}/${topKEval} judge calls failed`)
+          continue
         }
 
         const topKChunkIdSet = new Set(chunkIds.slice(0, k))

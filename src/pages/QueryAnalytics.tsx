@@ -20,6 +20,7 @@ interface AnalyticsData {
     total_queries: number;
     no_judged_relevant_count?: number;
     pending_evaluation_count?: number;
+    judge_failed_count?: number;
     abstention_rate: number;
     avg_precision_at_k: number;
     avg_recall_at_k: number;
@@ -430,11 +431,12 @@ const QueryAnalytics = () => {
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-muted-foreground">With judged-relevant chunk</span><span className="font-mono font-medium">{analytics.retrieval_eval.evaluated_count}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Pending evaluation</span><span className="font-mono font-medium">{analytics.retrieval_eval.pending_evaluation_count ?? Math.max(0, analytics.retrieval_eval.total_queries - (analytics.retrieval_eval.total_evaluated_count ?? analytics.retrieval_eval.evaluated_count))}</span></div>
+                  <div className="flex justify-between" title="Rows where the AI judge failed (rate limit, parse error, API down). NOT counted as evaluated."><span className="text-muted-foreground">Judge failed (excluded)</span><span className="font-mono font-medium">{analytics.retrieval_eval.judge_failed_count ?? 0}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Pending evaluation</span><span className="font-mono font-medium">{analytics.retrieval_eval.pending_evaluation_count ?? 0}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_precision_at_k * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Recall@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_recall_at_k * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">F1 (macro)</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_f1 * 100).toFixed(1)}%</span></div>
-                  <div className="flex justify-between" title="Share of rows where the background LLM judge did not mark any retrieved chunk as relevant. NOT the assistant refusing to answer."><span className="text-muted-foreground">No judged-relevant chunk</span><span className="font-mono font-medium">{(analytics.retrieval_eval.abstention_rate * 100).toFixed(1)}%</span></div>
+                  <div className="flex justify-between" title="Share of validly evaluated rows where the judge found no relevant chunk in top-K. Excludes judge failures."><span className="text-muted-foreground">No judged-relevant chunk</span><span className="font-mono font-medium">{(analytics.retrieval_eval.abstention_rate * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">MRR</span><span className="font-mono font-medium">{analytics.retrieval_eval.mrr.toFixed(4)}</span></div>
                 </CardContent>
               </Card>
