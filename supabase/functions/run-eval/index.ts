@@ -366,6 +366,7 @@ Deno.serve(async (req) => {
       console.log(`Evaluating ${logs.length} queries with LLM (${EVAL_MODEL})`)
 
       const perQueryResults: any[] = []
+      const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'LOVABLE_API_KEY not configured', 'Chunk not found'])
 
       for (const log of logs) {
         const chunkIds = log.retrieved_chunk_ids || []
@@ -384,26 +385,37 @@ Deno.serve(async (req) => {
 
         const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
         let firstRelevantRank: number | null = null
+        let judgeFailures = 0
 
         for (let i = 0; i < topKEval; i++) {
           const chunk = evalChunks[i]
           if (!chunk || !chunk.text) {
             labels.push({ chunk_id: chunk?.id || 'unknown', relevant: false, reasoning: 'Chunk not found', rank: i + 1 })
+            judgeFailures++
             continue
           }
 
           const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          if (FAILURE_REASONS.has(result.reasoning)) judgeFailures++
           labels.push({ chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
-          // For firstRelevantRank, check if the chunk was in the original top-K retrieval
           const topKSet = new Set(chunkIds.slice(0, k))
           if (result.relevant && firstRelevantRank === null && topKSet.has(chunk.id)) {
-            // Find rank in original retrieval order
             const originalRank = chunkIds.indexOf(chunk.id)
             if (originalRank >= 0 && originalRank < k) {
               firstRelevantRank = originalRank + 1
             }
           }
+        }
+
+        // If most of the judge calls failed, do NOT stamp evaluated_at — that pollutes analytics.
+        if (topKEval > 0 && judgeFailures / topKEval >= 0.5) {
+          await supabase.from('query_logs').update({
+            relevance_labels: labels,
+            eval_model: `${EVAL_MODEL} (judge_failed)`,
+          }).eq('id', log.id)
+          console.warn(`run-retrieval-eval skipped for ${log.id}: ${judgeFailures}/${topKEval} judge calls failed`)
+          continue
         }
 
         const topKChunkIdSet = new Set(chunkIds.slice(0, k))
