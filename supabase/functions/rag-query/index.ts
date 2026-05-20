@@ -1565,15 +1565,31 @@ async function evaluateRetrievalBackground(
 ) {
   const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
   let firstRelevantRank: number | null = null
+  let judgeFailures = 0
 
   for (let i = 0; i < Math.min(chunkTexts.length, topKEval); i++) {
     const { id: chunkId, text: chunkText } = chunkTexts[i]
     const result = await evaluateChunkRelevance(queryText, chunkText)
+    // Treat parser/LLM failure as "unknown", not as a confirmed-irrelevant chunk.
+    const isFailure = result.reasoning === 'Parse error' || result.reasoning === 'LLM evaluation failed' || result.reasoning === 'LOVABLE_API_KEY not configured'
+    if (isFailure) judgeFailures++
     labels.push({ chunk_id: chunkId, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
     if (result.relevant && firstRelevantRank === null && i < topK) {
       firstRelevantRank = i + 1
     }
+  }
+
+  // If most of the judge calls failed, do NOT stamp evaluated_at with bogus zeros —
+  // that pollutes the analytics "no judged-relevant chunk" rate. Persist labels for diagnosis only.
+  const totalChecked = Math.min(chunkTexts.length, topKEval)
+  if (totalChecked > 0 && judgeFailures / totalChecked >= 0.5) {
+    await supabase.from('query_logs').update({
+      relevance_labels: labels,
+      eval_model: `${EVAL_MODEL} (judge_failed)`,
+    }).eq('id', queryLogId)
+    console.warn(`Background eval skipped for ${queryLogId}: ${judgeFailures}/${totalChecked} judge calls failed`)
+    return
   }
 
   const totalRelevant = labels.filter(l => l.relevant).length
@@ -1598,7 +1614,7 @@ async function evaluateRetrievalBackground(
   if (updateError) {
     console.error('Failed to update retrieval eval:', updateError)
   } else {
-    console.log(`Retrieval eval complete for ${queryLogId}: P@K=${precisionAtK.toFixed(3)}, R@K=${recallAtK.toFixed(3)}, HR=${hitRate}, topKEval=${Math.min(topKEval, labels.length, 200)}`)
+    console.log(`Retrieval eval complete for ${queryLogId}: P@K=${precisionAtK.toFixed(3)}, R@K=${recallAtK.toFixed(3)}, HR=${hitRate}, topKEval=${Math.min(topKEval, labels.length, 200)}, judgeFailures=${judgeFailures}/${totalChecked}`)
   }
 }
 

@@ -429,7 +429,7 @@ const QueryAnalytics = () => {
                   <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_precision_at_k * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Recall@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_recall_at_k * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">F1 (macro)</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_f1 * 100).toFixed(1)}%</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Abstention</span><span className="font-mono font-medium">{(analytics.retrieval_eval.abstention_rate * 100).toFixed(1)}%</span></div>
+                  <div className="flex justify-between" title="Share of rows where the background LLM judge did not mark any retrieved chunk as relevant. NOT the assistant refusing to answer."><span className="text-muted-foreground">No judged-relevant chunk</span><span className="font-mono font-medium">{(analytics.retrieval_eval.abstention_rate * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">MRR</span><span className="font-mono font-medium">{analytics.retrieval_eval.mrr.toFixed(4)}</span></div>
                 </CardContent>
               </Card>
