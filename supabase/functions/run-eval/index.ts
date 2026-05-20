@@ -144,11 +144,12 @@ Deno.serve(async (req) => {
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
       const evaluatedLogs = logs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
+      const judgeFailedLogs = logs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
+      const pendingLogs = logs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
 
       // Retrieval eval: rows with first_relevant_rank AND total_relevant_chunks (matches Confusion Matrix eligibility)
       const eligible = logs.filter(l => l.first_relevant_rank !== null && l.first_relevant_rank !== undefined && l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined)
       const noJudgedRelevantCount = Math.max(0, evaluatedLogs.length - eligible.length)
-      const pendingEvaluationCount = Math.max(0, logs.length - evaluatedLogs.length)
 
       // Confusion-matrix-aligned per-query TP/FP/FN/TN
       const perQ = eligible.map(l => {
@@ -165,7 +166,6 @@ Deno.serve(async (req) => {
       const sumTP = perQ.reduce((s, q) => s + q.tp, 0)
       const sumFP = perQ.reduce((s, q) => s + q.fp, 0)
       const sumFN = perQ.reduce((s, q) => s + q.fn, 0)
-      const sumTN = perQ.reduce((s, q) => s + q.tn, 0)
 
       // Micro precision/recall (aggregate across queries) — matches Confusion Matrix totals row
       const aggPrecision = (sumTP + sumFP) > 0 ? sumTP / (sumTP + sumFP) : 0
@@ -196,7 +196,8 @@ Deno.serve(async (req) => {
           total_evaluated_count: evaluatedLogs.length,
           total_queries: logs.length,
           no_judged_relevant_count: noJudgedRelevantCount,
-          pending_evaluation_count: pendingEvaluationCount,
+          pending_evaluation_count: pendingLogs.length,
+          judge_failed_count: judgeFailedLogs.length,
           abstention_rate: parseFloat((noJudgedRelevantCount / evaluatedLogs.length).toFixed(4)),
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
