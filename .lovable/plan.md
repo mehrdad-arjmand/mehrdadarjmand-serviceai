@@ -1,52 +1,77 @@
-# Diagnose the apparent regression before reverting
+## Diagnosis
 
-## TL;DR
+The high “abstention” number in the analytics UI is not the same metric as the benchmark F1 report.
 
-The May 6 baseline (Hit@5 = 0.92, F1 = 0.585) was scored at **fixed K=5**. Today's Run C (Hit@K = 0.56, F1 = 0.21) was scored at the **per-tier post-rerank top-K** stored in `query_logs` (3 / 8 / 20 / per-tier). These are not comparable — precision in particular collapses when K grows from 5 to 20, dragging F1 down even with identical retrieval.
+### What happened
 
-On top of that, the runner did not pass `project_id`, so the hybrid path (`match_chunks_hybrid`) never fired and the request fell through to vector-only `match_chunks`. That is a real, but separate, retrieval issue.
+1. **The 400-run ablation was intentionally forced to fixed K=5**
+   - The benchmark runner sent `x-bench-fixed-k: 5` for all four configs.
+   - That bypassed the adaptive K policy so the four configs could be compared apples-to-apples against May 6.
+   - In the 400 ablation logs:
+     - Hybrid-only and hybrid+rerank: **100/100 rows each at K=5**.
+     - Vector-only and rerank-only: mostly K=5, but a few K=0/1/2/3 because fewer than five chunks survived retrieval/filtering.
 
-**No revert is needed yet.** First we re-score Run C at fixed K=5 to see how much of the gap is measurement vs. real regression. Then we decide.
+2. **Production adaptive K was not removed**
+   - Normal non-benchmark requests still use adaptive K:
+     - default/fallback: K=5
+     - enumerate: K=8
+     - synthesis: K=8
+     - lookup currently often lands at K=4 because of the minimum-K floor
+   - Older K=20 rows are from the earlier policy before enumerate was capped down to 8.
 
-## What we know
+3. **The F1 table I reported was not computed from the UI’s `precision_at_k` / `recall_at_k` fields**
+   - It was computed by `score_ablation.py` using:
+     - the 400 stored `query_log_id`s,
+     - each row’s `retrieved_chunk_ids`,
+     - the multigold benchmark labels in `benchmark_100_v3_multigold.json`.
+   - So the reported ablation F1/Hit/P/R is exact-label benchmark scoring, not the background LLM judge scoring shown in analytics.
 
-May 6 baseline (`bench100_4tier_metrics_20260501.json`, n=100, K=5):
-- Overall: P@5 = 0.46, R@5 = 0.805, **F1 = 0.585, Hit@5 = 0.92**
-- Tiers (easy/medium/hard/edge): F1 = 0.596 / 0.660 / 0.558 / 0.522
+4. **The analytics “abstention” field is misleading / effectively wrong for this benchmark**
+   - The UI currently calls a row an “abstention” if `first_relevant_rank` is null.
+   - That really means “the background LLM relevance judge did not mark any retrieved chunk relevant,” not “the assistant abstained from answering.”
+   - For the ablation rows, the background judge appears to have failed or rate-limited badly: for hybrid-only, it marked obvious answered/cited rows as `total_relevant_chunks = 0`.
+   - Example checked from the hybrid-only run: the answer correctly returned the CATL address with citations, but the DB-side LLM judge recorded zero relevant chunks.
 
-Run C today (n=99, scored at per-query top_k = 3/8/20):
-- Overall: **F1 = 0.214, Hit@K = 0.556**
-- Tiers (lookup/synthesis/enumerate/edge): F1 = 0.281 / 0.188 / 0.117 / 0.247
+5. **The 400 ablation rows are currently scored in the database, but many look unscored because the key fields are null/zero**
+   - Current check against the 400 ablation IDs: **400/400 have `evaluated_at` set**.
+   - But **374/400 have `first_relevant_rank` null**, so the UI treats them as abstentions/no relevant result.
+   - That is a background-evaluator/reporting problem, not proof that the benchmark F1 calculation was missing rows.
 
-Two confounders stacked:
-1. **K mismatch** — denominator changed from 5 to up to 20. Precision is bounded by relevant_count/K, so larger K mechanically lowers P and F1.
-2. **Hybrid path silent fallback** — runner sent no `project_id`, so server used global vector-only retrieval. Real, but smaller, effect.
+### Why answer abstention is still a real concern
 
-## Plan (no benchmark rerun, no code edits in app)
+A separate text scan of the 400 response bodies found about **126/400 possible answer-abstention phrases**. By config:
 
-### Step 1 — Re-score Run C at fixed K=5
-- Take the 99 stored `query_logs` rows for the Run C question set.
-- Score against the same gold `source_chunk_id` set used May 6, **truncating retrieved chunks to the first 5** (matching May 6 methodology exactly).
-- Produce overall + per-tier Hit@5 / P@5 / R@5 / F1@5.
-- Write `/mnt/documents/bench_run_C_rescored_at5.json`.
+| Config | Possible answer abstentions |
+|---|---:|
+| Vector-only | 38/100 |
+| Hybrid-only | 28/100 |
+| Rerank-only | 33/100 |
+| Hybrid+rerank | 27/100 |
 
-### Step 2 — Side-by-side comparison
-Build a single table: tier × {May 6, Run C @ per-tier-K, Run C @ K=5}.
-This isolates how much of the drop is the K change vs. a real regression.
+So the answer-abstention issue is real, but it is closer to the high-20s / low-30s in the ablation outputs, not the UI’s inflated retrieval-abstention number.
 
-### Step 3 — Decide
-- **If Run C @ K=5 is within ~3 pp of May 6** → no regression. The "drop" was a scoring change. We proceed with tomorrow's patched Run D (with `project_id`) and report against May 6 normally. **No revert.**
-- **If Run C @ K=5 is materially below May 6 (>5 pp Hit or >0.05 F1)** → real regression. Next loop: bisect commits since May 6 affecting ingestion/embeddings/`rag-query` retrieval, and quantify how much hybrid-vs-vector accounts for. Revert is a last resort, only if bisect points at an unfixable change.
+## Plan to clean this up
 
-### Step 4 — Tomorrow
-Independent of the above, run patched Run D (`project_id` wired) and score at fixed K=5 so it is directly comparable to May 6.
+1. **Separate the metrics in analytics**
+   - Rename the current UI “Abstention” concept to something like “No judged relevant chunk.”
+   - Add separate counts for:
+     - unscored rows,
+     - zero-hit rows,
+     - true answer abstentions,
+     - benchmark exact-label scores.
 
-## Out of scope
-- No edits to `rag-query`, no migrations, no edge function deploys.
-- No new benchmark execution this loop — only re-scoring stored Run C results.
-- No revert until Step 3 says so.
+2. **Stop using the background LLM judge as the source of truth for benchmark runs**
+   - For known benchmark datasets, score by exact `expected_chunk_ids` / multigold labels only.
+   - Keep LLM judging only for ad-hoc production queries where no gold label exists.
 
-## Technical notes
-- Re-score script: copy of `/mnt/documents/scripts/score3.py` with `K_BY_TIER` replaced by constant `5` and the `retrieved[:K]` slice forced to 5. Save as `/mnt/documents/scripts/score_at5.py`.
-- Gold set: `eval_dataset.expected_chunk_ids` joined by `query_text`, same as May 6.
-- Output JSON shape mirrors `bench100_4tier_metrics_20260501.json` for direct diffing.
+3. **Fix the background evaluator failure mode**
+   - Do not write `evaluated_at` with all-false labels when judge calls fail or rate-limit.
+   - Track judge failures distinctly so failed evaluation is not confused with “retrieval found nothing relevant.”
+
+4. **Publish a corrected benchmark table**
+   - Include the four ablation configs with exact-label F1/Hit/P/R.
+   - Add answer-abstention counts from the response text.
+   - Add K distribution per config so the “fixed K=5 but some rows <5” behavior is explicit.
+
+5. **Optional follow-up benchmark**
+   - If we want true zero-abstention validation, rerun hybrid-only with a stricter answer prompt that says every benchmark question is answerable and should not abstain unless no cited source is present.
