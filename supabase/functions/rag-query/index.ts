@@ -711,8 +711,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Re-rank chunks (benchmark may disable via x-bench-rerank: false)
-    const skipRerank = benchRerank === 'false'
+    // Re-rank chunks.
+    // Production default: DISABLED. Ablation v3-multigold (n=100, K=5) showed reranker is a net negative
+    // when combined with hybrid retrieval: Hit@5 0.60 → 0.56, F1 0.237 → 0.222. Hybrid alone wins.
+    // Override with env RAG_RERANK_ENABLED=true, or per-request via x-bench-rerank: true|false.
+    const rerankEnvDefault = (Deno.env.get('RAG_RERANK_ENABLED') || 'false').toLowerCase() === 'true'
+    const rerankEnabled = benchRerank !== null ? (benchRerank.toLowerCase() === 'true') : rerankEnvDefault
+    const skipRerank = !rerankEnabled
     const rankedChunks = skipRerank
       ? retrievalChunks.map((c: any) => ({ ...c, finalScore: c.similarity ?? c.rrf_score ?? 0 }))
       : rerankChunks(retrievalChunks, retrievalQuery, inferredDocIds || filterDocumentIds || null)
