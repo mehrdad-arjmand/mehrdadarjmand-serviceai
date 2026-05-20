@@ -20,6 +20,7 @@ interface AnalyticsData {
     total_queries: number;
     no_judged_relevant_count?: number;
     pending_evaluation_count?: number;
+    judge_failed_count?: number;
     abstention_rate: number;
     avg_precision_at_k: number;
     avg_recall_at_k: number;
