@@ -143,8 +143,12 @@ Deno.serve(async (req) => {
       }
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
+      const evaluatedLogs = logs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
+
       // Retrieval eval: rows with first_relevant_rank AND total_relevant_chunks (matches Confusion Matrix eligibility)
       const eligible = logs.filter(l => l.first_relevant_rank !== null && l.first_relevant_rank !== undefined && l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined)
+      const noJudgedRelevantCount = Math.max(0, evaluatedLogs.length - eligible.length)
+      const pendingEvaluationCount = Math.max(0, logs.length - evaluatedLogs.length)
 
       // Confusion-matrix-aligned per-query TP/FP/FN/TN
       const perQ = eligible.map(l => {
@@ -187,10 +191,13 @@ Deno.serve(async (req) => {
           avg: avg(costs).toFixed(6), p95: percentile(costs, 95).toFixed(6),
           total: costs.reduce((s, v) => s + v, 0).toFixed(6),
         },
-        retrieval_eval: eligible.length > 0 ? {
+        retrieval_eval: evaluatedLogs.length > 0 ? {
           evaluated_count: eligible.length,
+          total_evaluated_count: evaluatedLogs.length,
           total_queries: logs.length,
-          abstention_rate: parseFloat(((logs.length - eligible.length) / logs.length).toFixed(4)),
+          no_judged_relevant_count: noJudgedRelevantCount,
+          pending_evaluation_count: pendingEvaluationCount,
+          abstention_rate: parseFloat((noJudgedRelevantCount / evaluatedLogs.length).toFixed(4)),
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
           avg_hit_rate: avgHitRate,

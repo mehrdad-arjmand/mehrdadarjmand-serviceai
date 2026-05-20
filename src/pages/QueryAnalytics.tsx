@@ -16,7 +16,10 @@ interface AnalyticsData {
   cost: { avg: string; p95: string; total: string };
   retrieval_eval: {
     evaluated_count: number;
+    total_evaluated_count?: number;
     total_queries: number;
+    no_judged_relevant_count?: number;
+    pending_evaluation_count?: number;
     abstention_rate: number;
     avg_precision_at_k: number;
     avg_recall_at_k: number;
@@ -422,10 +425,12 @@ const QueryAnalytics = () => {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Retrieval Quality</CardTitle>
                   <CardDescription>
-                    {analytics.retrieval_eval.evaluated_count} queries with relevant results
+                    {analytics.retrieval_eval.total_evaluated_count ?? analytics.retrieval_eval.total_queries} / {analytics.retrieval_eval.total_queries} queries evaluated
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-muted-foreground">With judged-relevant chunk</span><span className="font-mono font-medium">{analytics.retrieval_eval.evaluated_count}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Pending evaluation</span><span className="font-mono font-medium">{analytics.retrieval_eval.pending_evaluation_count ?? Math.max(0, analytics.retrieval_eval.total_queries - (analytics.retrieval_eval.total_evaluated_count ?? analytics.retrieval_eval.evaluated_count))}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_precision_at_k * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Recall@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_recall_at_k * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">F1 (macro)</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_f1 * 100).toFixed(1)}%</span></div>
