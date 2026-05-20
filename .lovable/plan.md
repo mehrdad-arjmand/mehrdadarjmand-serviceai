@@ -1,77 +1,80 @@
 ## Diagnosis
 
-The high “abstention” number in the analytics UI is not the same metric as the benchmark F1 report.
+The problem is real, and the earlier explanation was incomplete.
 
-### What happened
+Current database truth:
 
-1. **The 400-run ablation was intentionally forced to fixed K=5**
-   - The benchmark runner sent `x-bench-fixed-k: 5` for all four configs.
-   - That bypassed the adaptive K policy so the four configs could be compared apples-to-apples against May 6.
-   - In the 400 ablation logs:
-     - Hybrid-only and hybrid+rerank: **100/100 rows each at K=5**.
-     - Vector-only and rerank-only: mostly K=5, but a few K=0/1/2/3 because fewer than five chunks survived retrieval/filtering.
+- Total query logs: **2,949**
+- Rows with `evaluated_at`: **2,948**
+- Rows with a relevant chunk in top-K: **1,770**
+- Rows marked evaluated but with no relevant chunk in top-K: **1,178**
+- Of those, **1,093** have `total_relevant_chunks = 0`
+- Today is the smoking gun: **401 evaluated rows, 375 no relevant-in-top-K, 374 zero relevant anywhere scanned**
 
-2. **Production adaptive K was not removed**
-   - Normal non-benchmark requests still use adaptive K:
-     - default/fallback: K=5
-     - enumerate: K=8
-     - synthesis: K=8
-     - lookup currently often lands at K=4 because of the minimum-K floor
-   - Older K=20 rows are from the earlier policy before enumerate was capped down to 8.
+The main cause is not that evaluation is still running. The main cause is that the evaluator stamped failed judge calls as completed evaluations.
 
-3. **The F1 table I reported was not computed from the UI’s `precision_at_k` / `recall_at_k` fields**
-   - It was computed by `score_ablation.py` using:
-     - the 400 stored `query_log_id`s,
-     - each row’s `retrieved_chunk_ids`,
-     - the multigold benchmark labels in `benchmark_100_v3_multigold.json`.
-   - So the reported ablation F1/Hit/P/R is exact-label benchmark scoring, not the background LLM judge scoring shown in analytics.
+I found many rows where every relevance label says:
 
-4. **The analytics “abstention” field is misleading / effectively wrong for this benchmark**
-   - The UI currently calls a row an “abstention” if `first_relevant_rank` is null.
-   - That really means “the background LLM relevance judge did not mark any retrieved chunk relevant,” not “the assistant abstained from answering.”
-   - For the ablation rows, the background judge appears to have failed or rate-limited badly: for hybrid-only, it marked obvious answered/cited rows as `total_relevant_chunks = 0`.
-   - Example checked from the hybrid-only run: the answer correctly returned the CATL address with citations, but the DB-side LLM judge recorded zero relevant chunks.
+```text
+LLM evaluation failed
+```
 
-5. **The 400 ablation rows are currently scored in the database, but many look unscored because the key fields are null/zero**
-   - Current check against the 400 ablation IDs: **400/400 have `evaluated_at` set**.
-   - But **374/400 have `first_relevant_rank` null**, so the UI treats them as abstentions/no relevant result.
-   - That is a background-evaluator/reporting problem, not proof that the benchmark F1 calculation was missing rows.
+Those failures were stored as `relevant: false`, then written with `evaluated_at`, which made them look like legitimate “no relevant chunk” retrieval results. That is invalid scoring.
 
-### Why answer abstention is still a real concern
+So the 40% is polluted by evaluator failure, especially from recent runs. It is not a valid statement that 40% of queries truly have no relevant chunk.
 
-A separate text scan of the 400 response bodies found about **126/400 possible answer-abstention phrases**. By config:
+There is also a separate benchmark-design issue: answer-text abstentions around 27–38% should not have been accepted for a zero-abstention benchmark. Those rows should be failed/rerun, not treated as acceptable benchmark questions.
 
-| Config | Possible answer abstentions |
-|---|---:|
-| Vector-only | 38/100 |
-| Hybrid-only | 28/100 |
-| Rerank-only | 33/100 |
-| Hybrid+rerank | 27/100 |
+## Plan
 
-So the answer-abstention issue is real, but it is closer to the high-20s / low-30s in the ablation outputs, not the UI’s inflated retrieval-abstention number.
+1. **Repair evaluator semantics**
+   - Treat `LLM evaluation failed`, parse errors, missing API key, and non-OK judge responses as evaluator failures, not irrelevant chunks.
+   - Do not set `evaluated_at` when the judge fails for a row.
+   - Store diagnostic labels only, with an explicit failure marker.
 
-## Plan to clean this up
+2. **Clean polluted historical rows**
+   - Find rows where the relevance labels are all or majority judge failures.
+   - Clear their retrieval metrics and `evaluated_at` so they return to pending/failed status instead of counting as valid no-hit retrieval results.
+   - Keep the raw labels for auditability unless you want them deleted.
 
-1. **Separate the metrics in analytics**
-   - Rename the current UI “Abstention” concept to something like “No judged relevant chunk.”
-   - Add separate counts for:
-     - unscored rows,
-     - zero-hit rows,
-     - true answer abstentions,
-     - benchmark exact-label scores.
+3. **Add explicit evaluation status fields or equivalent reporting logic**
+   - Distinguish:
+     - Pending evaluation
+     - Evaluation failed
+     - Evaluation complete with relevant chunk
+     - Evaluation complete with no judged relevant chunk
+   - The analytics card should never collapse evaluator failures into “no relevant chunk.”
 
-2. **Stop using the background LLM judge as the source of truth for benchmark runs**
-   - For known benchmark datasets, score by exact `expected_chunk_ids` / multigold labels only.
-   - Keep LLM judging only for ad-hoc production queries where no gold label exists.
+4. **Rerun benchmark scoring using exact labels for benchmark rows**
+   - For benchmark datasets, use `expected_chunk_ids` as the source of truth instead of the background LLM judge.
+   - This gives deterministic Hit@K / Precision@K / Recall@K / F1.
+   - The LLM judge can remain for ad hoc production analytics, but not for benchmark truth.
 
-3. **Fix the background evaluator failure mode**
-   - Do not write `evaluated_at` with all-false labels when judge calls fail or rate-limit.
-   - Track judge failures distinctly so failed evaluation is not confused with “retrieval found nothing relevant.”
+5. **Add a zero-abstention benchmark gate**
+   - For benchmark generation/runs, a query is only accepted if:
+     - it has gold expected chunk IDs,
+     - the expected answer exists in the corpus,
+     - the assistant produces a substantive answer,
+     - and it does not use non-answer language like “not enough information,” “not specified,” or “context does not contain.”
+   - Any abstaining response is counted as a failed query/run candidate and must be rewritten or rerun.
 
-4. **Publish a corrected benchmark table**
-   - Include the four ablation configs with exact-label F1/Hit/P/R.
-   - Add answer-abstention counts from the response text.
-   - Add K distribution per config so the “fixed K=5 but some rows <5” behavior is explicit.
+6. **Publish a corrected benchmark table**
+   - Include separate columns for:
+     - total queries,
+     - valid exact-label scored rows,
+     - evaluator-failed rows,
+     - real no-hit rows,
+     - answer-text abstentions,
+     - Hit@K / Precision@K / Recall@K / F1.
+   - Explicitly mark the current 40% figure as invalid/polluted until the failed judge rows are excluded or rescored.
 
-5. **Optional follow-up benchmark**
-   - If we want true zero-abstention validation, rerun hybrid-only with a stricter answer prompt that says every benchmark question is answerable and should not abstain unless no cited source is present.
+## Technical details
+
+- `run-eval` currently returns `LLM evaluation failed` as `relevant: false`; this must become a failure state.
+- `rag-query` was partially patched to avoid stamping failures, but historical rows already contain polluted `evaluated_at` values.
+- The analytics UI should show `total_evaluated_count`, `pending_evaluation_count`, `evaluation_failed_count`, and `valid_scored_count` separately.
+- Benchmark rows should be scored by joining retrieved chunk IDs against `eval_dataset.expected_chunk_ids`, not by relying on the LLM judge.
+
+## Expected outcome
+
+After implementation, the dashboard will stop saying that 40% of queries have no judged-relevant chunk when the judge actually failed. The benchmark report will separate retrieval failure, evaluator failure, and answer abstention, and zero-abstention will become an enforced benchmark requirement rather than an after-the-fact observation.
