@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
       for (let from = 0; ; from += PAGE) {
         const { data: page, error } = await supabase
           .from('query_logs')
-          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at')
+          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at, eval_model')
           .order('created_at', { ascending: true })
           .range(from, from + PAGE - 1)
         if (error) break
