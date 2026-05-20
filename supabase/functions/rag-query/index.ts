@@ -474,7 +474,14 @@ Deno.serve(async (req) => {
     let searchError: any = null
 
     // Retrieval mode flag: "hybrid" (default) or "vector". See plan: hybrid restored as default after Run E regression.
-    const retrievalMode = (Deno.env.get('RAG_RETRIEVAL_MODE') || 'hybrid').toLowerCase()
+    // Benchmark header override: x-bench-hybrid: true|false
+    const benchHybridHdr = req.headers.get('x-bench-hybrid')
+    const retrievalMode = benchHybridHdr !== null
+      ? (benchHybridHdr.toLowerCase() === 'true' ? 'hybrid' : 'vector')
+      : (Deno.env.get('RAG_RETRIEVAL_MODE') || 'hybrid').toLowerCase()
+    const benchRerank = req.headers.get('x-bench-rerank') // 'true' | 'false' | null
+    const benchFixedKHdr = req.headers.get('x-bench-fixed-k')
+    const benchFixedK = benchFixedKHdr ? parseInt(benchFixedKHdr, 10) : null
 
     if (requestProjectId && projectDocIdArray.length > 0) {
       const retrievalCount = 200
