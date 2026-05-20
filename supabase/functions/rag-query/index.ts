@@ -711,21 +711,24 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Re-rank chunks
-    const rankedChunks = rerankChunks(retrievalChunks, retrievalQuery, inferredDocIds || filterDocumentIds || null)
+    // Re-rank chunks (benchmark may disable via x-bench-rerank: false)
+    const skipRerank = benchRerank === 'false'
+    const rankedChunks = skipRerank
+      ? retrievalChunks.map((c: any) => ({ ...c, finalScore: c.similarity ?? c.rrf_score ?? 0 }))
+      : rerankChunks(retrievalChunks, retrievalQuery, inferredDocIds || filterDocumentIds || null)
 
     // ── Context window: use section-window for table queries, standard top-K otherwise ──
     let topChunks: any[]
-    const useSectionWindow = tableIntent && (inferredDocIds?.length || filterDocumentIds?.length)
+    const useSectionWindow = tableIntent && (inferredDocIds?.length || filterDocumentIds?.length) && !benchFixedK
     if (useSectionWindow) {
       topChunks = selectSectionWindow(rankedChunks, inferredDocIds || filterDocumentIds || null, 50)
       console.log(`Section-window mode: selected ${topChunks.length} contiguous chunks`)
+    } else if (benchFixedK && benchFixedK > 0) {
+      // Benchmark override: take top-N from ranked (or similarity-sorted if rerank skipped)
+      topChunks = rankedChunks.slice(0, benchFixedK)
+      console.log(`Benchmark fixed K=${benchFixedK} rerank=${!skipRerank} hybrid=${retrievalMode==='hybrid'} returned=${topChunks.length}`)
     } else {
       // Phase 2: Adaptive K via intent classifier + dual-floor confidence gate.
-      // - Classifier picks target K based on query type (lookup/synthesis/enumerate)
-      // - Similarity floor (absolute) drops weak semantic matches
-      // - Relative reranker-score floor (0.6 × top score) drops weak rerank scores
-      // - Floor at 3, cap at classifier K, single-chunk safety net if all gated out.
       const { intent, k: targetK, classifierMs } = await classifyIntent(retrievalQuery)
       const SIMILARITY_FLOOR = 0.55
       const topScore = rankedChunks[0]?.finalScore ?? 0
@@ -734,12 +737,8 @@ Deno.serve(async (req) => {
         (c.similarity ?? 0) >= SIMILARITY_FLOOR &&
         (c.finalScore ?? 0) >= REL_FLOOR
       )
-      // Phase 3: raise post-rerank K floor to >=4 to prevent reranker from over-pruning
-      // good chunks on lookup/edge tiers (Run F showed K_avg=2.3 there).
       const MIN_K = 4
       let pool = eligible.length > 0 ? eligible : rankedChunks.slice(0, 1)
-      // If gated pool is below floor, pad from the ranked (pre-gate) list so we always
-      // surface at least MIN_K candidates when available.
       if (pool.length < MIN_K && rankedChunks.length > pool.length) {
         const poolIds = new Set(pool.map((c: any) => c.id))
         for (const c of rankedChunks) {
