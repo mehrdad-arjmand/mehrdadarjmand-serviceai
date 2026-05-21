@@ -120,6 +120,15 @@ Is this chunk relevant to answering the query?`
   return { relevant: false, reasoning: 'LLM evaluation failed' }
 }
 
+function getCitedSourceRanks(responseText: string | null | undefined): Set<number> {
+  const ranks = new Set<number>()
+  for (const match of (responseText || '').matchAll(/\bSource\s+(\d+)\b/gi)) {
+    const rank = Number(match[1])
+    if (Number.isFinite(rank) && rank > 0) ranks.add(rank)
+  }
+  return ranks
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
