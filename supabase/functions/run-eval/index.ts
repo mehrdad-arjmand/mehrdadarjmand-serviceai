@@ -41,13 +41,17 @@ function getEmbeddingApiKey(apiTier: string): string {
   return key
 }
 
-// Use Lovable AI gateway for LLM-based relevance evaluation
+// Use Google Gemini API directly (paid key) for LLM-based relevance evaluation.
+// Bypasses Lovable AI gateway to avoid shared-quota rate limits during benchmarks.
 async function evaluateChunkRelevance(
   queryText: string,
-  chunkText: string
+  chunkText: string,
+  apiTier: string
 ): Promise<{ relevant: boolean; reasoning: string }> {
-  const apiKey = Deno.env.get('LOVABLE_API_KEY')
-  if (!apiKey) throw new Error('LOVABLE_API_KEY not configured')
+  const apiKey = apiTier === 'paid'
+    ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
+    : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
+  if (!apiKey) return { relevant: false, reasoning: 'GOOGLE_API_KEY not configured' }
 
   const prompt = `You are a strict retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains specific data, facts, or information that would need to be included in a complete answer to the query.
 
@@ -68,38 +72,38 @@ ${chunkText.slice(0, 2000)}
 
 Is this chunk relevant to answering the query?`
 
-  const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: EVAL_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0,
-      max_tokens: 200,
-    }),
-  })
-
-  if (!res.ok) {
-    console.error('LLM eval error:', res.status, await res.text())
-    return { relevant: false, reasoning: 'LLM evaluation failed' }
-  }
-
-  const data = await res.json()
-  const text = data.choices?.[0]?.message?.content?.trim() ?? ''
-
-  try {
-    // Extract JSON from response (handle markdown code blocks)
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-      return { relevant: !!parsed.relevant, reasoning: parsed.reasoning || '' }
+  // Retry once on 429/5xx
+  let lastErr = ''
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: 'application/json' },
+        }),
+      }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ''
+      try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0])
+          return { relevant: !!parsed.relevant, reasoning: parsed.reasoning || '' }
+        }
+      } catch { /* fall through */ }
+      return { relevant: false, reasoning: 'Parse error' }
     }
-  } catch { /* fall through */ }
-
-  return { relevant: text.toLowerCase().includes('"relevant": true') || text.toLowerCase().includes('"relevant":true'), reasoning: text.slice(0, 100) }
+    lastErr = `${res.status}`
+    if (res.status !== 429 && res.status < 500) break
+    await new Promise(r => setTimeout(r, 800 + attempt * 1500))
+  }
+  console.error('Gemini judge error:', lastErr)
+  return { relevant: false, reasoning: 'LLM evaluation failed' }
 }
 
 Deno.serve(async (req) => {
@@ -108,7 +112,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { supabase, user } = await verifyAdmin(req)
+    const { supabase, user, apiTier } = await verifyAdmin(req)
     const url = new URL(req.url)
     const action = url.searchParams.get('action')
 
@@ -120,7 +124,7 @@ Deno.serve(async (req) => {
       for (let from = 0; ; from += PAGE) {
         const { data: page, error } = await supabase
           .from('query_logs')
-          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at, eval_model')
+          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at, eval_model, response_text')
           .order('created_at', { ascending: true })
           .range(from, from + PAGE - 1)
         if (error) break
@@ -176,6 +180,11 @@ Deno.serve(async (req) => {
       const avgHitRate = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)) : 0
       const mrr = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)) : 0
 
+      // Abstention: scan response_text for non-answer language across ALL queries
+      const ABSTENTION_RE = /not enough information|cannot (find|locate|answer)|don'?t have|do not have|insufficient (information|context|data)|context (does not|doesn'?t) contain|not (specified|provided|available|mentioned|covered) in (the )?(context|document|provided)|unable to (find|provide|answer)|no (information|details|specific|relevant)/i
+      const abstentionCount = logs.filter(l => l.response_text && ABSTENTION_RE.test(l.response_text)).length
+      const abstentionRate = logs.length > 0 ? abstentionCount / logs.length : 0
+
       const analytics = {
         sample_size: logs.length,
         latency: {
@@ -196,9 +205,10 @@ Deno.serve(async (req) => {
           total_evaluated_count: evaluatedLogs.length,
           total_queries: logs.length,
           no_judged_relevant_count: noJudgedRelevantCount,
-          pending_evaluation_count: pendingLogs.length,
           judge_failed_count: judgeFailedLogs.length,
-          abstention_rate: parseFloat((noJudgedRelevantCount / evaluatedLogs.length).toFixed(4)),
+          abstention_count: abstentionCount,
+          abstention_rate: parseFloat(abstentionRate.toFixed(4)),
+          no_hit_rate: parseFloat((noJudgedRelevantCount / evaluatedLogs.length).toFixed(4)),
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
           avg_hit_rate: avgHitRate,
@@ -367,7 +377,7 @@ Deno.serve(async (req) => {
       console.log(`Evaluating ${logs.length} queries with LLM (${EVAL_MODEL})`)
 
       const perQueryResults: any[] = []
-      const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'LOVABLE_API_KEY not configured', 'Chunk not found'])
+      const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'GOOGLE_API_KEY not configured', 'LOVABLE_API_KEY not configured', 'Chunk not found'])
 
       for (const log of logs) {
         const chunkIds = log.retrieved_chunk_ids || []
@@ -396,7 +406,7 @@ Deno.serve(async (req) => {
             continue
           }
 
-          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
           if (FAILURE_REASONS.has(result.reasoning)) judgeFailures++
           labels.push({ chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
@@ -573,7 +583,7 @@ Deno.serve(async (req) => {
         // Step 3: LLM-judge each expanded chunk
         let totalRelevantInScan = 0
         for (const chunk of expandedChunks) {
-          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
           if (result.relevant) totalRelevantInScan++
         }
 
@@ -584,7 +594,7 @@ Deno.serve(async (req) => {
 
         let relevantInTopK = 0
         for (const chunk of originalChunksInExpanded) {
-          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
           if (result.relevant) relevantInTopK++
         }
 
@@ -598,7 +608,7 @@ Deno.serve(async (req) => {
         for (let i = 0; i < originalChunkIds.length; i++) {
           const chunk = expandedChunks.find((c: any) => c.id === originalChunkIds[i])
           if (chunk) {
-            const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+            const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
             if (result.relevant) { firstRelevantRank = i + 1; break }
           }
         }
