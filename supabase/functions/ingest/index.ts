@@ -580,9 +580,6 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
   
   const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
   const pageCount = document.numPages
-  if (pageCount > MAX_PAGES_PER_DOCUMENT) {
-    throw new Error(`PDF has ${pageCount} pages. Maximum allowed is ${MAX_PAGES_PER_DOCUMENT} pages.`)
-  }
 
   const pageTexts: string[] = []
   for (let i = 1; i <= pageCount; i++) {
