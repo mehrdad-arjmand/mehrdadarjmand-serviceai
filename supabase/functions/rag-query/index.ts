@@ -1647,7 +1647,8 @@ async function evaluateRetrievalBackground(
 
   // If most of the judge calls failed, do NOT stamp evaluated_at with bogus zeros —
   // that pollutes the analytics "no judged-relevant chunk" rate. Persist labels for diagnosis only.
-  if (totalChecked > 0 && judgeFailures / totalChecked >= 0.5) {
+  const citedRelevantCount = labels.filter(l => l.relevant && l.rank <= topK).length
+  if (totalChecked > 0 && citedRelevantCount === 0 && judgeFailures / totalChecked >= 0.5) {
     await supabase.from('query_logs').update({
       relevance_labels: labels,
       eval_model: `${EVAL_MODEL} (judge_failed)`,
