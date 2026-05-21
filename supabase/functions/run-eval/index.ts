@@ -334,8 +334,14 @@ Deno.serve(async (req) => {
         }
 
         const embeddingStr = `[${embedding.join(',')}]`
-        const { data: chunks } = await supabase.rpc('match_chunks', {
-          query_embedding: embeddingStr, match_threshold: 0.15, match_count: k, p_user_id: user.id
+        const { data: chunks } = await supabase.rpc('match_chunks_hybrid', {
+          query_text: item.query_text,
+          query_embedding: embeddingStr,
+          doc_ids: allDocIds,
+          match_count: k,
+          vec_pool: 100,
+          kw_pool: 100,
+          rrf_k: 60,
         })
 
         const retrievedIds: string[] = (chunks || []).map((c: any) => c.id)
