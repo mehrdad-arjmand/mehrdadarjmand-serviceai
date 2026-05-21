@@ -15,23 +15,39 @@ async function verifyAdmin(req: Request) {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) throw new Error('Unauthorized')
 
-  const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-    headers: { Authorization: authHeader, apikey: supabaseAnonKey },
-  })
-  if (!userRes.ok) throw new Error('Unauthorized')
-  const user = await userRes.json()
-  if (!user?.id) throw new Error('Unauthorized')
-
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
+  const benchUserId = req.headers.get('x-benchmark-user-id')
+  const bearerToken = authHeader.slice(7).trim()
+  let user: { id: string } | null = null
+
+  // Benchmark bypass: bearer must match bench_secrets.service_role
+  if (benchUserId) {
+    const { data: benchRow } = await supabase
+      .from('bench_secrets').select('value').eq('key', 'service_role').maybeSingle()
+    if (benchRow?.value && benchRow.value === bearerToken) {
+      user = { id: benchUserId }
+    }
+  }
+
+  if (!user) {
+    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { Authorization: authHeader, apikey: supabaseAnonKey },
+    })
+    if (!userRes.ok) throw new Error('Unauthorized')
+    const u = await userRes.json()
+    if (!u?.id) throw new Error('Unauthorized')
+    user = { id: u.id }
+  }
+
   const { data: isAdmin } = await supabase.rpc('check_is_admin', { check_user_id: user.id })
   if (!isAdmin) throw new Error('Forbidden: admin only')
 
-  // Get user's API tier
   const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
   const apiTier = userApiTier || 'free'
 
   return { supabase, user, apiTier }
 }
+
 
 function getEmbeddingApiKey(apiTier: string): string {
   const key = apiTier === 'paid'
@@ -288,34 +304,59 @@ Deno.serve(async (req) => {
     }
 
     // ─── ACTION: run-eval (ground-truth benchmark; exact expected_chunk_ids) ───
+    // Query params:
+    //   benchmark = dataset name (default benchmark_100_v3_multigold)
+    //   k         = optional fixed K override
+    //   adaptive  = '1' → Strategy A score-gap knee detection.
+    //               Retrieves pool=20 hybrid, cuts at first gap > 2×median_gap,
+    //               clamps K to [3,15]. Metrics use K_used (the returned count),
+    //               NOT pool=20. top_k_eval records pool size for transparency.
+    //   judge     = '1' → after retrieval, also run LLM-as-judge on returned
+    //               chunks and store relevance_labels + judge_* metrics.
+    //               Normally OFF for benchmark (gold IDs are truth); flip ON
+    //               only for one-off comparison runs.
     if (action === 'run-eval') {
       const benchmarkName = url.searchParams.get('benchmark') ?? 'benchmark_100_v3_multigold'
       const fixedKParam = url.searchParams.get('k')
-      const { data: evalSet } = await supabase
+      const adaptive = url.searchParams.get('adaptive') === '1'
+      const judgeEnabled = url.searchParams.get('judge') === '1'
+      const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
+      const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
+      const POOL = 20
+      const ADAPT_MIN_K = 3
+      const ADAPT_MAX_K = 15
+      const GAP_MULT = 2.0
+
+      const { data: evalSetAll } = await supabase
         .from('eval_dataset')
         .select('*')
         .eq('benchmark_name', benchmarkName)
         .order('tier', { ascending: true })
         .order('query_text', { ascending: true })
 
-      if (!evalSet || evalSet.length === 0) {
+      if (!evalSetAll || evalSetAll.length === 0) {
         return new Response(JSON.stringify({ error: 'No eval dataset entries found.' }), {
           status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         })
       }
+      const evalSet = evalSetAll.slice(offset, offset + limit)
 
       const results: any[] = []
-      const EVAL_TAG = `benchmark:${benchmarkName}`
+      const tagSuffix = adaptive ? ':adaptive' : ''
+      const EVAL_TAG = `benchmark:${benchmarkName}${tagSuffix}`
 
-      // Clear prior rows for this benchmark so re-runs don't duplicate
-      await supabase.from('query_logs').delete().eq('eval_model', EVAL_TAG)
+      // Only delete on the first batch (offset=0) so paginated runs accumulate
+      if (offset === 0) {
+        await supabase.from('query_logs').delete().like('eval_model', `benchmark:${benchmarkName}%`)
+      }
 
-      // Fetch all doc ids once (hybrid retrieval needs explicit doc scope)
       const { data: allDocs } = await supabase.from('documents').select('id')
       const allDocIds = (allDocs || []).map((d: any) => d.id)
 
+
       for (const item of evalSet) {
-        const k = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
+        const requestedK = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
+        const matchCount = adaptive ? POOL : requestedK
         const t0 = Date.now()
         const embResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
@@ -334,18 +375,42 @@ Deno.serve(async (req) => {
         }
 
         const embeddingStr = `[${embedding.join(',')}]`
-        const { data: chunks } = await supabase.rpc('match_chunks_hybrid', {
+        const { data: chunksRaw } = await supabase.rpc('match_chunks_hybrid', {
           query_text: item.query_text,
           query_embedding: embeddingStr,
           doc_ids: allDocIds,
-          match_count: k,
+          match_count: matchCount,
           vec_pool: 100,
           kw_pool: 100,
           rrf_k: 60,
         })
 
-        const retrievedIds: string[] = (chunks || []).map((c: any) => c.id)
-        const retrievedSims: number[] = (chunks || []).map((c: any) => c.similarity ?? 0)
+        const pool: any[] = chunksRaw || []
+        // ── Adaptive K cut (Strategy A: score-gap knee detection) ──
+        let cut = pool.length
+        let kUsed = pool.length
+        if (adaptive && pool.length > ADAPT_MIN_K) {
+          const scores = pool.map((c: any) => Number(c.rrf_score ?? c.similarity ?? 0))
+          const gaps: number[] = []
+          for (let i = 0; i < scores.length - 1; i++) gaps.push(scores[i] - scores[i + 1])
+          const sortedGaps = [...gaps].filter(g => g > 0).sort((a, b) => a - b)
+          const median = sortedGaps.length > 0
+            ? sortedGaps[Math.floor(sortedGaps.length / 2)]
+            : 0
+          let kneeIdx = -1
+          for (let i = 0; i < gaps.length; i++) {
+            if (median > 0 && gaps[i] > GAP_MULT * median) { kneeIdx = i; break }
+          }
+          cut = kneeIdx >= 0 ? (kneeIdx + 1) : pool.length
+          cut = Math.max(ADAPT_MIN_K, Math.min(ADAPT_MAX_K, cut))
+          kUsed = cut
+        } else {
+          kUsed = pool.length
+        }
+
+        const returned = pool.slice(0, kUsed)
+        const retrievedIds: string[] = returned.map((c: any) => c.id)
+        const retrievedSims: number[] = returned.map((c: any) => c.similarity ?? 0)
         const expectedIds = new Set(item.expected_chunk_ids || [])
         const relevant = retrievedIds.filter((id: string) => expectedIds.has(id))
         let firstRelevantRank: number | null = null
@@ -356,20 +421,44 @@ Deno.serve(async (req) => {
         const precision = retrievedIds.length > 0 ? relevant.length / retrievedIds.length : 0
         const recall = expectedIds.size > 0 ? relevant.length / expectedIds.size : 0
         const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0
+
+        // ── Optional LLM-as-judge pass on the returned chunks ──
+        let judgeLabels: any[] | null = null
+        let judgePrecision: number | null = null
+        let judgeRecall: number | null = null
+        if (judgeEnabled && returned.length > 0) {
+          judgeLabels = []
+          let judgeRelevant = 0
+          for (let i = 0; i < returned.length; i++) {
+            const c = returned[i]
+            const verdict = await evaluateChunkRelevance(item.query_text, c.text || '', apiTier)
+            judgeLabels.push({
+              chunk_id: c.id,
+              relevant: verdict.relevant,
+              reasoning: verdict.reasoning,
+              rank: i + 1,
+              gold: expectedIds.has(c.id),
+            })
+            if (verdict.relevant) judgeRelevant++
+          }
+          judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
+          // Judge recall denominator = judged-relevant count (judge has no global truth)
+          judgeRecall = judgeRelevant > 0 ? judgeRelevant / judgeRelevant : null
+        }
+
         const elapsed = Date.now() - t0
 
-        // Persist into query_logs so the benchmark shows up in analytics + confusion matrix
         await supabase.from('query_logs').insert({
           user_id: user.id,
           query_text: item.query_text,
           retrieved_chunk_ids: retrievedIds,
           retrieved_similarities: retrievedSims,
-          response_text: `[${EVAL_TAG}] tier=${item.tier || 'n/a'}`,
+          response_text: `[${EVAL_TAG}] tier=${item.tier || 'n/a'} k=${kUsed}${adaptive ? `/pool=${POOL}` : ''}${judgeEnabled ? ' judge=on' : ''}`,
           citations_json: [],
           input_tokens: 0, output_tokens: 0, total_tokens: 0,
           execution_time_ms: elapsed,
           top_k: retrievedIds.length,
-          top_k_eval: k,
+          top_k_eval: adaptive ? POOL : retrievedIds.length,
           total_relevant_chunks: expectedIds.size,
           relevant_in_top_k: relevant.length,
           precision_at_k: parseFloat(precision.toFixed(4)),
@@ -378,16 +467,21 @@ Deno.serve(async (req) => {
           first_relevant_rank: firstRelevantRank,
           eval_model: EVAL_TAG,
           evaluated_at: new Date().toISOString(),
+          relevance_labels: judgeLabels,
         })
 
         results.push({
-          query: item.query_text, tier: item.tier || 'uncategorized', k, retrieved_count: retrievedIds.length, expected_count: expectedIds.size,
+          query: item.query_text, tier: item.tier || 'uncategorized',
+          k: kUsed, pool: adaptive ? POOL : null,
+          retrieved_count: retrievedIds.length, expected_count: expectedIds.size,
           relevant_found: relevant.length,
           precision_at_k: parseFloat(precision.toFixed(4)),
           recall_at_k: parseFloat(recall.toFixed(4)),
           f1_at_k: parseFloat(f1.toFixed(4)),
+          judge_precision: judgePrecision !== null ? parseFloat(judgePrecision.toFixed(4)) : null,
         })
       }
+
 
       const sumRelevantFound = results.reduce((s, r) => s + r.relevant_found, 0)
       const sumRetrieved = results.reduce((s, r) => s + r.retrieved_count, 0)
@@ -411,15 +505,32 @@ Deno.serve(async (req) => {
         }
       })
 
+      const hitCount = results.filter(r => r.relevant_found > 0).length
+      const zeroHitCount = results.filter(r => r.relevant_found === 0).length
+      const avgK = results.reduce((s, r) => s + (r.k || 0), 0) / Math.max(1, results.length)
+      const avgJudgeP = judgeEnabled
+        ? results.filter(r => r.judge_precision !== null).reduce((s, r) => s + r.judge_precision, 0) / Math.max(1, results.filter(r => r.judge_precision !== null).length)
+        : null
+
       return new Response(JSON.stringify({
-        success: true, benchmark_name: benchmarkName, k: fixedKParam ? parseInt(fixedKParam) : null, k_used: fixedKParam ? `fixed k=${fixedKParam}` : 'per-question k_target', total_queries: results.length,
+        success: true,
+        benchmark_name: benchmarkName,
+        mode: adaptive ? `adaptive (pool=${POOL}, knee gap×${GAP_MULT}, K∈[${ADAPT_MIN_K},${ADAPT_MAX_K}])` : (fixedKParam ? `fixed k=${fixedKParam}` : 'per-question k_target'),
+        judge_enabled: judgeEnabled,
+        total_queries: results.length,
+        hit_count: hitCount,
+        zero_hit_count: zeroHitCount,
+        hit_rate: parseFloat((hitCount / Math.max(1, results.length)).toFixed(4)),
+        avg_k_used: parseFloat(avgK.toFixed(2)),
         avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
         avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
         avg_f1_at_k: parseFloat(avgF1.toFixed(4)),
+        avg_judge_precision: avgJudgeP !== null ? parseFloat(avgJudgeP.toFixed(4)) : null,
         tier_summary,
         results
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
+
 
     // ─── ACTION: run-retrieval-eval (LLM-based relevance evaluation) ───
     if (action === 'run-retrieval-eval') {
