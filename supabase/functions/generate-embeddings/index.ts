@@ -504,6 +504,35 @@ async function processPaidTier(
 
     let totalProcessed = 0
     let isComplete = false
+    const now = new Date()
+
+    const { data: paidDocMeta } = await supabase
+      .from('documents')
+      .select('embedding_locked_until, ingested_chunks, total_chunks')
+      .eq('id', currentDocId)
+      .single()
+
+    if (paidDocMeta?.embedding_locked_until && new Date(paidDocMeta.embedding_locked_until) > now) {
+      console.log(`Paid document ${currentDocId} is already being embedded until ${paidDocMeta.embedding_locked_until}; skipping duplicate worker`)
+      results.push({
+        documentId: currentDocId,
+        processed: 0,
+        embedded: paidDocMeta.ingested_chunks || 0,
+        total: paidDocMeta.total_chunks || 0,
+        complete: false,
+      })
+      continue
+    }
+
+    await supabase
+      .from('documents')
+      .update({
+        embedding_locked_until: new Date(Date.now() + PAID_LOCK_DURATION_MS).toISOString(),
+        ingestion_status: 'processing_embeddings',
+        ingestion_stage: 'embedding',
+      })
+      .eq('id', currentDocId)
+
     const startedAt = Date.now()
 
     try {
