@@ -490,8 +490,11 @@ async function processPaidTier(
   docIds: string[],
   isFullMode: boolean,
   userId: string,
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  supabaseAnonKey: string,
 ) {
-  const CONCURRENT_API_CALLS = 10
+  const CONCURRENT_API_CALLS = 3
   const results: { documentId: string; processed: number; embedded: number; total: number; complete: boolean }[] = []
 
   for (let docIndex = 0; docIndex < docIds.length; docIndex++) {
