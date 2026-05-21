@@ -180,6 +180,11 @@ Deno.serve(async (req) => {
       const avgHitRate = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)) : 0
       const mrr = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)) : 0
 
+      // Abstention: scan response_text for non-answer language across ALL queries
+      const ABSTENTION_RE = /not enough information|cannot (find|locate|answer)|don'?t have|do not have|insufficient (information|context|data)|context (does not|doesn'?t) contain|not (specified|provided|available|mentioned|covered) in (the )?(context|document|provided)|unable to (find|provide|answer)|no (information|details|specific|relevant)/i
+      const abstentionCount = logs.filter(l => l.response_text && ABSTENTION_RE.test(l.response_text)).length
+      const abstentionRate = logs.length > 0 ? abstentionCount / logs.length : 0
+
       const analytics = {
         sample_size: logs.length,
         latency: {
@@ -200,9 +205,10 @@ Deno.serve(async (req) => {
           total_evaluated_count: evaluatedLogs.length,
           total_queries: logs.length,
           no_judged_relevant_count: noJudgedRelevantCount,
-          pending_evaluation_count: pendingLogs.length,
           judge_failed_count: judgeFailedLogs.length,
-          abstention_rate: parseFloat((noJudgedRelevantCount / evaluatedLogs.length).toFixed(4)),
+          abstention_count: abstentionCount,
+          abstention_rate: parseFloat(abstentionRate.toFixed(4)),
+          no_hit_rate: parseFloat((noJudgedRelevantCount / evaluatedLogs.length).toFixed(4)),
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
           avg_hit_rate: avgHitRate,
