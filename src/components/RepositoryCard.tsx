@@ -1593,7 +1593,14 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       </span>
     );
     if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
-      const progress = doc.totalChunks > 0 ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100) : 0;
+      const progress = doc.totalChunks > 0
+        ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100)
+        : doc.ingestionStage === 'chunking'
+          ? 15
+          : doc.ingestionStage === 'extracting'
+            ? 8
+            : 4;
+      const label = doc.ingestionStatus === 'processing_embeddings' ? 'Embedding' : doc.ingestionStage === 'extracting' ? 'Extracting' : 'Processing';
       return (
         <span className="inline-flex items-center gap-1">
           <span className="inline-flex items-center text-xs font-medium rounded-full border overflow-hidden min-w-[90px]" style={{ borderColor: 'hsl(38 80% 75%)' }}>
@@ -1602,7 +1609,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
                 className="absolute inset-y-0 left-0 transition-all duration-700 ease-out rounded-full"
                 style={{ width: `${progress}%`, background: 'hsl(32 95% 84%)' }}
               />
-              <span className="relative z-10 px-2.5" style={{ color: 'hsl(32 95% 35%)' }}>Processing</span>
+              <span className="relative z-10 px-2.5" style={{ color: 'hsl(32 95% 35%)' }}>{label}</span>
             </span>
           </span>
           {canWrite && (
