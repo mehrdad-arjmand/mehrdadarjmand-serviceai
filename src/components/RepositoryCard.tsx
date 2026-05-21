@@ -981,7 +981,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         await supabase.from('documents').update({
           ingestion_status: 'failed',
           ingestion_stage: 'failed',
-          ingestion_error: 'Extraction timed out before chunks were created. Large PDFs are limited to 50 pages; split the document and upload again.',
+          ingestion_error: 'Extraction stopped before chunks were created. Reprocess or upload again to restart ingestion.',
         }).eq('id', stuckDoc.id);
       }
     }, 10_000); // Check every 10 seconds
@@ -1594,13 +1594,13 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     );
     if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
       const progress = doc.totalChunks > 0
-        ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100)
+        ? Math.max(doc.ingestionStage === 'chunking' ? 15 : 0, Math.round((doc.embeddedChunks / doc.totalChunks) * 100))
         : doc.ingestionStage === 'chunking'
           ? 15
           : doc.ingestionStage === 'extracting'
             ? 8
             : 4;
-      const label = doc.ingestionStatus === 'processing_embeddings' ? 'Embedding' : doc.ingestionStage === 'extracting' ? 'Extracting' : 'Processing';
+      const label = doc.ingestionStatus === 'processing_embeddings' ? 'Embedding' : doc.ingestionStage === 'chunking' ? 'Chunking' : doc.ingestionStage === 'extracting' ? 'Extracting' : 'Processing';
       return (
         <span className="inline-flex items-center gap-1">
           <span className="inline-flex items-center text-xs font-medium rounded-full border overflow-hidden min-w-[90px]" style={{ borderColor: 'hsl(38 80% 75%)' }}>
