@@ -604,27 +604,37 @@ Deno.serve(async (req) => {
 
         const topKEval = evalChunks.length
 
-        const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
+        const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = new Array(topKEval)
         let firstRelevantRank: number | null = null
         let judgeFailures = 0
 
+        // Run all judge calls in parallel (batched to avoid hammering the API).
+        const CONCURRENCY = 25
+        for (let start = 0; start < topKEval; start += CONCURRENCY) {
+          const end = Math.min(start + CONCURRENCY, topKEval)
+          const idxs: number[] = []
+          for (let i = start; i < end; i++) idxs.push(i)
+          await Promise.all(idxs.map(async (i) => {
+            const chunk = evalChunks[i]
+            if (!chunk || !chunk.text) {
+              labels[i] = { chunk_id: chunk?.id || 'unknown', relevant: false, reasoning: 'Chunk not found', rank: i + 1 }
+              judgeFailures++
+              return
+            }
+            const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
+            if (FAILURE_REASONS.has(result.reasoning)) judgeFailures++
+            labels[i] = { chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 }
+          }))
+        }
+
+        const topKSet = new Set(chunkIds.slice(0, k))
         for (let i = 0; i < topKEval; i++) {
-          const chunk = evalChunks[i]
-          if (!chunk || !chunk.text) {
-            labels.push({ chunk_id: chunk?.id || 'unknown', relevant: false, reasoning: 'Chunk not found', rank: i + 1 })
-            judgeFailures++
-            continue
-          }
-
-          const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
-          if (FAILURE_REASONS.has(result.reasoning)) judgeFailures++
-          labels.push({ chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
-
-          const topKSet = new Set(chunkIds.slice(0, k))
-          if (result.relevant && firstRelevantRank === null && topKSet.has(chunk.id)) {
-            const originalRank = chunkIds.indexOf(chunk.id)
+          const lab = labels[i]
+          if (lab?.relevant && topKSet.has(lab.chunk_id)) {
+            const originalRank = chunkIds.indexOf(lab.chunk_id)
             if (originalRank >= 0 && originalRank < k) {
               firstRelevantRank = originalRank + 1
+              break
             }
           }
         }
