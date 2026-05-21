@@ -9,6 +9,7 @@ const corsHeaders = {
 const BATCH_EMBED_SIZE_PAID = 50
 const CHUNKS_PER_FETCH = 150
 const PAID_MAX_RUNTIME_MS = 55_000
+const PAID_LOCK_DURATION_MS = 2 * 60_000
 const MAX_CHUNK_TEXT_LENGTH = 6000
 
 // ── Free tier config (serial + resumable) ──
