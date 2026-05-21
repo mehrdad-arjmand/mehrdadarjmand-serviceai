@@ -342,11 +342,11 @@ Deno.serve(async (req) => {
       const evalSet = evalSetAll.slice(offset, offset + limit)
 
       const results: any[] = []
-      const tagSuffix = adaptive ? ':adaptive' : ''
+      // eval_model tag encodes mode + judge so CSV/Analytics can distinguish runs
+      const tagSuffix = `${adaptive ? ':adaptive' : ''}${judgeEnabled ? ':judge' : ''}`
       const EVAL_TAG = `benchmark:${benchmarkName}${tagSuffix}`
 
       // Only delete the current mode on the first batch (offset=0) so paginated runs accumulate.
-      // Baseline and adaptive must coexist for side-by-side comparisons.
       if (offset === 0) {
         await supabase.from('query_logs').delete().eq('eval_model', EVAL_TAG)
       }
@@ -354,8 +354,12 @@ Deno.serve(async (req) => {
       const { data: allDocs } = await supabase.from('documents').select('id')
       const allDocIds = (allDocs || []).map((d: any) => d.id)
 
+      // Parallel execution: process queries in concurrent batches.
+      // Judge calls inside each query are also fanned out in parallel.
+      const CONCURRENCY = 8
+      const JUDGE_CONCURRENCY = 10
 
-      for (const item of evalSet) {
+      const runOne = async (item: any) => {
         const requestedK = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
         const matchCount = adaptive ? POOL : requestedK
         const t0 = Date.now()
@@ -369,10 +373,8 @@ Deno.serve(async (req) => {
         )
         const embData = await embResponse.json()
         const embedding = embData.embedding?.values
-
         if (!embedding) {
-          results.push({ query: item.query_text, error: 'Failed to generate embedding', precision_at_k: 0, recall_at_k: 0 })
-          continue
+          return { query: item.query_text, tier: item.tier || 'uncategorized', error: 'Failed to generate embedding', k: 0, pool: null, retrieved_count: 0, expected_count: (item.expected_chunk_ids || []).length, relevant_found: 0, precision_at_k: 0, recall_at_k: 0, f1_at_k: 0, judge_precision: null }
         }
 
         const embeddingStr = `[${embedding.join(',')}]`
@@ -387,26 +389,20 @@ Deno.serve(async (req) => {
         })
 
         const pool: any[] = chunksRaw || []
-        // ── Adaptive K cut (Strategy A: score-gap knee detection) ──
-        let cut = pool.length
         let kUsed = pool.length
         if (adaptive && pool.length > ADAPT_MIN_K) {
           const scores = pool.map((c: any) => Number(c.rrf_score ?? c.similarity ?? 0))
           const gaps: number[] = []
           for (let i = 0; i < scores.length - 1; i++) gaps.push(scores[i] - scores[i + 1])
           const sortedGaps = [...gaps].filter(g => g > 0).sort((a, b) => a - b)
-          const median = sortedGaps.length > 0
-            ? sortedGaps[Math.floor(sortedGaps.length / 2)]
-            : 0
+          const median = sortedGaps.length > 0 ? sortedGaps[Math.floor(sortedGaps.length / 2)] : 0
           let kneeIdx = -1
           for (let i = 0; i < gaps.length; i++) {
             if (median > 0 && gaps[i] > GAP_MULT * median) { kneeIdx = i; break }
           }
-          cut = kneeIdx >= 0 ? (kneeIdx + 1) : pool.length
+          let cut = kneeIdx >= 0 ? (kneeIdx + 1) : pool.length
           cut = Math.max(ADAPT_MIN_K, Math.min(ADAPT_MAX_K, cut))
           kUsed = cut
-        } else {
-          kUsed = pool.length
         }
 
         const returned = pool.slice(0, kUsed)
@@ -423,28 +419,30 @@ Deno.serve(async (req) => {
         const recall = expectedIds.size > 0 ? relevant.length / expectedIds.size : 0
         const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0
 
-        // ── Optional LLM-as-judge pass on the returned chunks ──
+        // ── LLM-as-judge pass (parallel) ──
         let judgeLabels: any[] | null = null
         let judgePrecision: number | null = null
-        let judgeRecall: number | null = null
         if (judgeEnabled && returned.length > 0) {
-          judgeLabels = []
-          let judgeRelevant = 0
-          for (let i = 0; i < returned.length; i++) {
-            const c = returned[i]
-            const verdict = await evaluateChunkRelevance(item.query_text, c.text || '', apiTier)
-            judgeLabels.push({
-              chunk_id: c.id,
-              relevant: verdict.relevant,
-              reasoning: verdict.reasoning,
-              rank: i + 1,
-              gold: expectedIds.has(c.id),
+          judgeLabels = new Array(returned.length)
+          for (let start = 0; start < returned.length; start += JUDGE_CONCURRENCY) {
+            const slice = returned.slice(start, start + JUDGE_CONCURRENCY)
+            const verdicts = await Promise.all(
+              slice.map((c: any) => evaluateChunkRelevance(item.query_text, c.text || '', apiTier))
+            )
+            verdicts.forEach((verdict, idx) => {
+              const i = start + idx
+              const c = returned[i]
+              judgeLabels![i] = {
+                chunk_id: c.id,
+                relevant: verdict.relevant,
+                reasoning: verdict.reasoning,
+                rank: i + 1,
+                gold: expectedIds.has(c.id),
+              }
             })
-            if (verdict.relevant) judgeRelevant++
           }
+          const judgeRelevant = judgeLabels.filter((l: any) => l && l.relevant).length
           judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
-          // Judge recall denominator = judged-relevant count (judge has no global truth)
-          judgeRecall = judgeRelevant > 0 ? judgeRelevant / judgeRelevant : null
         }
 
         const elapsed = Date.now() - t0
@@ -471,7 +469,7 @@ Deno.serve(async (req) => {
           relevance_labels: judgeLabels,
         })
 
-        results.push({
+        return {
           query: item.query_text, tier: item.tier || 'uncategorized',
           k: kUsed, pool: adaptive ? POOL : null,
           retrieved_count: retrievedIds.length, expected_count: expectedIds.size,
@@ -480,8 +478,15 @@ Deno.serve(async (req) => {
           recall_at_k: parseFloat(recall.toFixed(4)),
           f1_at_k: parseFloat(f1.toFixed(4)),
           judge_precision: judgePrecision !== null ? parseFloat(judgePrecision.toFixed(4)) : null,
-        })
+        }
       }
+
+      for (let start = 0; start < evalSet.length; start += CONCURRENCY) {
+        const batch = evalSet.slice(start, start + CONCURRENCY)
+        const batchResults = await Promise.all(batch.map(runOne))
+        results.push(...batchResults)
+      }
+
 
 
       const sumRelevantFound = results.reduce((s, r) => s + r.relevant_found, 0)
