@@ -366,16 +366,22 @@ const Projects = () => {
     //  • Latency   → P50 (median) of execution_time_ms across ALL logs
     //  • Cost      → avg(upstream_inference_cost ?? 0) × 1,000 across ALL logs
     const PAGE = 1000;
-    const logs: any[] = [];
+    const rawLogs: any[] = [];
     for (let from = 0; ; from += PAGE) {
       const { data: page, error } = await supabase
         .from("query_logs")
-        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, evaluated_at")
+        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, evaluated_at, eval_model, response_text")
         .range(from, from + PAGE - 1);
       if (error || !page || page.length === 0) break;
-      logs.push(...page);
+      rawLogs.push(...page);
       if (page.length < PAGE) break;
     }
+    // Exclude benchmark rows — portfolio metrics reflect production queries only.
+    const logs = rawLogs.filter((l: any) => {
+      const em = (l.eval_model || "") as string;
+      const rt = (l.response_text || "") as string;
+      return !(em === "benchmark" || em.startsWith("benchmark:") || rt.startsWith("[benchmark:"));
+    });
     if (logs.length === 0) return;
 
     // ── Accuracy (same filter + formula as QueryAnalytics confusion matrix totals) ──
