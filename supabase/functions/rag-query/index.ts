@@ -1435,35 +1435,45 @@ async function generateAnswer(systemPrompt: string, userPrompt: string, model: s
 
   if (googleKey) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${googleKey}`
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 8192,
-          thinkingConfig: { thinkingBudget: 0 },
+    let resp: Response | null = null
+    let lastErr = ''
+    // Retry on 429/5xx (Gemini "model overloaded" returns 503 UNAVAILABLE).
+    for (let attempt = 0; attempt < 3; attempt++) {
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 8192,
+            thinkingConfig: { thinkingBudget: 0 },
+          },
+        }),
+      })
+      if (resp.ok) break
+      lastErr = await resp.text()
+      const retriable = resp.status === 429 || resp.status >= 500
+      if (!retriable || attempt === 2) break
+      await new Promise(r => setTimeout(r, 600 * (attempt + 1) + Math.random() * 400))
+    }
+    if (resp && resp.ok) {
+      const data = await resp.json()
+      const content = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') ?? ''
+      const um = data.usageMetadata ?? {}
+      return {
+        content,
+        usage: {
+          input_tokens: um.promptTokenCount ?? 0,
+          output_tokens: um.candidatesTokenCount ?? 0,
+          total_tokens: um.totalTokenCount ?? 0,
+          upstream_inference_cost: 0,
         },
-      }),
-    })
-    if (!resp.ok) {
-      const error = await resp.text()
-      throw new Error(`Failed to generate answer (Google API): ${error}`)
+      }
     }
-    const data = await resp.json()
-    const content = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') ?? ''
-    const um = data.usageMetadata ?? {}
-    return {
-      content,
-      usage: {
-        input_tokens: um.promptTokenCount ?? 0,
-        output_tokens: um.candidatesTokenCount ?? 0,
-        total_tokens: um.totalTokenCount ?? 0,
-        upstream_inference_cost: 0,
-      },
-    }
+    // Google overloaded/unavailable → fall through to Lovable AI gateway as a backup.
+    console.warn(`Google API failed after retries (${resp?.status}); falling back to Lovable gateway. ${lastErr.slice(0, 200)}`)
   }
 
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
