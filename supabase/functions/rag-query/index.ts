@@ -895,7 +895,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
     // Background: evaluate only after the durable log row exists.
     const bgTask = queryLogId ? (async () => {
       try {
-        await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval)
+        await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval, apiTier)
       } catch (e) {
         console.error('Background eval error:', e)
       }
