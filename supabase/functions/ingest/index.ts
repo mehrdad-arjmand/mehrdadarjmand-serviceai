@@ -542,14 +542,22 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
     return { text: applyRegexNormalization(pageTexts), pageCount }
   }
 
+  // Hard wall-clock timeout so the Edge Function can't silently hang on Gemini.
+  // If cleaning takes too long, fall back to regex normalization and continue.
+  const CLEAN_TIMEOUT_MS = 90_000
   try {
-    const cleanedText = await cleanGarbledText(pageTexts, googleApiKey, apiTier)
+    const cleanedText = await Promise.race([
+      cleanGarbledText(pageTexts, googleApiKey, apiTier),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error(`cleanGarbledText timeout after ${CLEAN_TIMEOUT_MS}ms`)), CLEAN_TIMEOUT_MS)
+      ),
+    ])
     if (cleanedText && cleanedText.length > 50) {
       console.log(`Google AI cleaned text: ${cleanedText.length} characters`)
       return { text: cleanedText, pageCount }
     }
   } catch (err) {
-    console.error('Google AI text cleanup failed:', err)
+    console.error('Google AI text cleanup failed/timed out, using regex fallback:', err)
   }
 
   return { text: applyRegexNormalization(pageTexts), pageCount }
