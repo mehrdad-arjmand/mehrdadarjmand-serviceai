@@ -570,9 +570,12 @@ const QueryAnalytics = () => {
                   <tbody>
                     {evalResult.results.map((r, i) => (
                       <tr key={i} className="border-t">
+                        <td className="p-3 text-muted-foreground capitalize">{r.tier || '—'}</td>
                         <td className="p-3 max-w-xs truncate">{r.query}</td>
+                        <td className="p-3 text-right font-mono">{r.k}</td>
                         <td className="p-3 text-right font-mono">{(r.precision_at_k * 100).toFixed(1)}%</td>
                         <td className="p-3 text-right font-mono">{(r.recall_at_k * 100).toFixed(1)}%</td>
+                        <td className="p-3 text-right font-mono">{((r.f1_at_k ?? 0) * 100).toFixed(1)}%</td>
                         <td className="p-3 text-right font-mono">{r.relevant_found}/{r.expected_count}</td>
                       </tr>
                     ))}
