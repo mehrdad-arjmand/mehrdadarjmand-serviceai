@@ -258,28 +258,49 @@ export type Database = {
       }
       eval_dataset: {
         Row: {
+          answer_hint: string | null
+          benchmark_name: string
           created_at: string
           created_by: string | null
           description: string | null
           expected_chunk_ids: string[]
           id: string
+          k_target: number | null
+          locked: boolean
           query_text: string
+          source_chunk_id: string | null
+          source_doc: string | null
+          tier: string | null
         }
         Insert: {
+          answer_hint?: string | null
+          benchmark_name?: string
           created_at?: string
           created_by?: string | null
           description?: string | null
           expected_chunk_ids?: string[]
           id?: string
+          k_target?: number | null
+          locked?: boolean
           query_text: string
+          source_chunk_id?: string | null
+          source_doc?: string | null
+          tier?: string | null
         }
         Update: {
+          answer_hint?: string | null
+          benchmark_name?: string
           created_at?: string
           created_by?: string | null
           description?: string | null
           expected_chunk_ids?: string[]
           id?: string
+          k_target?: number | null
+          locked?: boolean
           query_text?: string
+          source_chunk_id?: string | null
+          source_doc?: string | null
+          tier?: string | null
         }
         Relationships: []
       }
