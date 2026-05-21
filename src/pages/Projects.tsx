@@ -359,53 +359,62 @@ const Projects = () => {
   };
 
   const fetchMetrics = async () => {
+    // Mirror QueryAnalytics exactly:
+    //  • Accuracy  → confusion-matrix totals: (TP + TN) / (TP+FP+FN+TN)
+    //                Filter: evaluated_at NOT NULL AND total_relevant_chunks NOT NULL AND relevant_in_top_k NOT NULL
+    //  • Latency   → P50 (median) of execution_time_ms across ALL logs
+    //  • Cost      → avg(upstream_inference_cost ?? 0) across ALL logs (same as analytics endpoint)
     const PAGE = 1000;
-    const data: any[] = [];
+    const logs: any[] = [];
     for (let from = 0; ; from += PAGE) {
       const { data: page, error } = await supabase
         .from("query_logs")
-        .select("precision_at_k, relevant_in_top_k, top_k, top_k_eval, total_relevant_chunks, first_relevant_rank, execution_time_ms, upstream_inference_cost")
-        .not("execution_time_ms", "is", null)
+        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, evaluated_at")
         .range(from, from + PAGE - 1);
       if (error || !page || page.length === 0) break;
-      data.push(...page);
+      logs.push(...page);
       if (page.length < PAGE) break;
     }
-    if (data.length === 0) return;
+    if (logs.length === 0) return;
 
-    // Accuracy: (TP + TN) / top_k_eval for eligible rows
-    const eligible = data.filter((d) => d.first_relevant_rank !== null && d.total_relevant_chunks !== null && d.top_k_eval !== null);
-    let sumTP = 0, sumTN = 0, sumEval = 0;
-    eligible.forEach((d) => {
-      const tp = d.relevant_in_top_k || 0;
-      const fn = (d.total_relevant_chunks || 0) - tp;
-      const tn = Math.max(0, (d.top_k_eval || 0) - (d.top_k || 0) - fn);
-      sumTP += tp;
-      sumTN += tn;
-      sumEval += (d.top_k_eval || 0);
+    // ── Accuracy (same filter + formula as QueryAnalytics confusion matrix totals) ──
+    const matrixLogs = logs.filter(
+      (l) => l.evaluated_at != null && l.total_relevant_chunks != null && l.relevant_in_top_k != null
+    );
+    let sumTP = 0, sumFP = 0, sumFN = 0, sumTN = 0;
+    matrixLogs.forEach((l) => {
+      const tp = l.relevant_in_top_k ?? 0;
+      const fp = Math.max(0, (l.top_k ?? 0) - tp);
+      const fn = Math.max(0, (l.total_relevant_chunks ?? 0) - tp);
+      const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
+      sumTP += tp; sumFP += fp; sumFN += fn; sumTN += tn;
     });
-    const accuracy = sumEval > 0 ? (sumTP + sumTN) / sumEval : 0;
+    const totalAll = sumTP + sumFP + sumFN + sumTN;
+    const accuracy = totalAll > 0 ? (sumTP + sumTN) / totalAll : 0;
 
-    const latencies = data.
-    map((d) => d.execution_time_ms).
-    filter((v): v is number => v !== null).
-    sort((a, b) => a - b);
-    const medianLatency = latencies.length > 0 ? latencies[Math.floor(latencies.length / 2)] : 0;
+    // ── Latency P50 (same as analytics endpoint: percentile = arr[ceil(p/100*n)-1]) ──
+    const times = logs
+      .map((l) => l.execution_time_ms)
+      .filter((v): v is number => typeof v === "number")
+      .sort((a, b) => a - b);
+    const p50 = times.length > 0 ? times[Math.max(0, Math.ceil(0.5 * times.length) - 1)] : 0;
 
-    const costs = data.filter((d) => d.upstream_inference_cost !== null);
-    const avgCost =
-    costs.length > 0 ? costs.reduce((sum, d) => sum + (d.upstream_inference_cost || 0), 0) / costs.length : 0;
+    // ── Avg cost (same as analytics endpoint: null treated as 0, across all logs) ──
+    const avgCost = logs.length > 0
+      ? logs.reduce((s, l) => s + (l.upstream_inference_cost ?? 0), 0) / logs.length
+      : 0;
 
     setMetrics([
-    { label: "QUALITY", sublabel: "Accuracy", value: `${(accuracy * 100).toFixed(1)}%` },
-    {
-      label: "TIME",
-      sublabel: "Median latency",
-      value: medianLatency >= 1000 ? `${(medianLatency / 1000).toFixed(1)} seconds` : `${medianLatency} ms`
-    },
-    { label: "COST", sublabel: "Average cost per thousand queries", value: `$${(avgCost * 1000).toFixed(2)}` }]
-    );
+      { label: "QUALITY", sublabel: "Accuracy", value: `${(accuracy * 100).toFixed(1)}%` },
+      {
+        label: "TIME",
+        sublabel: "Median latency (p50)",
+        value: p50 >= 1000 ? `${(p50 / 1000).toFixed(1)} seconds` : `${p50} ms`,
+      },
+      { label: "COST", sublabel: "Average cost per query", value: `$${avgCost.toFixed(6)}` },
+    ]);
   };
+
 
   const fetchRoles = async () => {
     const { data } = await supabase.from("role_permissions").select("role, display_name").order("role");
