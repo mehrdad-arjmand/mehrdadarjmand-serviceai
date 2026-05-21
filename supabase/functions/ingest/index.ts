@@ -10,7 +10,6 @@ const FREE_TIER_DOC_DELAY_MS = 4000
 // Input validation constants
 const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 const MAX_FILES = 50
-const MAX_PAGES_PER_DOCUMENT = 50
 const MAX_METADATA_LENGTH = 500
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt']
 
@@ -382,17 +381,18 @@ Deno.serve(async (req) => {
               pageCount = 1
               break
             case 'pdf': {
-              const pdfResult = await extractTextFromPdf(fileData.arrayBuffer, googleApiKey, apiTier)
-              extractedText = pdfResult.text
-              pageCount = pdfResult.pageCount
+              const pdfResult = await extractAndChunkPdf(fileData.arrayBuffer, supabase, doc.id, sanitizedEquipmentType || null)
+              await supabase
+                .from('documents')
+                .update({ ingested_chunks: 0, total_chunks: pdfResult.totalChunks, page_count: pdfResult.pageCount, ingestion_status: 'processing_embeddings', ingestion_stage: 'embedding' })
+                .eq('id', doc.id)
+              console.log(`Chunks saved for ${fileData.name}`)
+              return true
               break
             }
             case 'docx':
               extractedText = await extractTextFromDocx(fileData.arrayBuffer)
               pageCount = Math.ceil(extractedText.length / 3000)
-              if (pageCount > MAX_PAGES_PER_DOCUMENT) {
-                throw new Error(`Document has approximately ${pageCount} pages. Maximum allowed is ${MAX_PAGES_PER_DOCUMENT} pages.`)
-              }
               break
             default:
               throw new Error(`Unsupported file type: ${fileData.fileType}`)
