@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
         retrieval_eval: evaluatedLogs.length > 0 ? {
           evaluated_count: validScoredLogs.length,
           total_evaluated_count: evaluatedLogs.length,
-          total_queries: logs.length,
+          total_queries: rawLogs.length,
           no_judged_relevant_count: noJudgedRelevantCount,
           judge_failed_count: judgeFailedLogs.length,
           abstention_count: abstentionCount,
