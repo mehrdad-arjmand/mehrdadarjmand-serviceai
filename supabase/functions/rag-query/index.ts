@@ -866,8 +866,12 @@ Provide a clear, concise answer based on the actual procedural content in the co
       documentId: chunk.document_id || ''
     }))
 
-    // Eval uses rankedChunks up to 200
-    const evalSlice = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+    // Eval stores the answer-visible sources first so Source N citations align with ranks 1..topK.
+    const topChunkIds = new Set(topChunks.map((c: any) => c.id))
+    const evalSlice = [
+      ...topChunks,
+      ...rankedChunks.filter((c: any) => !topChunkIds.has(c.id)),
+    ].slice(0, Math.min(200, rankedChunks.length))
     const evalChunkTexts = evalSlice.map((c: any) => ({ id: c.id, text: c.text }))
     const topKEval = evalSlice.length
     console.log(`Eval scope: ${topKEval} vector-retrieved chunks`)
@@ -877,8 +881,8 @@ Provide a clear, concise answer based on the actual procedural content in the co
     const logPayload = {
       user_id: user.id,
       query_text: question,
-      retrieved_chunk_ids: topChunks.map((c: any) => c.id),
-      retrieved_similarities: topChunks.map((c: any) => c.similarity ?? 0),
+      retrieved_chunk_ids: evalSlice.map((c: any) => c.id),
+      retrieved_similarities: evalSlice.map((c: any) => c.similarity ?? 0),
       response_text: answer,
       citations_json: sources,
       input_tokens: usage.input_tokens,
