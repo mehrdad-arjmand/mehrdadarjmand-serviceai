@@ -202,6 +202,18 @@ async function processFreeTier(
       }
     }
 
+    // Sync persisted progress with actual embedded rows before each resumable slice.
+    const { count: embeddedBeforeLock } = await supabase
+      .from('chunks')
+      .select('id', { count: 'exact', head: true })
+      .eq('document_id', docId)
+      .not('embedding', 'is', null)
+
+    await supabase
+      .from('documents')
+      .update({ ingested_chunks: embeddedBeforeLock || 0 })
+      .eq('id', docId)
+
     // Acquire lock — DO NOT clear embedding_retry_after here (that destroys failure tracking)
     const lockUntil = new Date(now.getTime() + FREE_LOCK_DURATION_MS).toISOString()
     await supabase
