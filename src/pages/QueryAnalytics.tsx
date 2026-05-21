@@ -707,6 +707,7 @@ const QueryAnalytics = () => {
                     {/* Aggregate row */}
                     <TableRow className="bg-muted/40 font-semibold border-t-2 border-border hover:bg-muted/40">
                       <TableCell className="text-sm py-2.5">Aggregate</TableCell>
+                      <TableCell className="text-xs text-muted-foreground py-2.5">—</TableCell>
                       <TableCell className="text-right font-mono text-sm py-2.5">—</TableCell>
                       <TableCell className="text-center font-mono text-sm py-2.5">
                         <span className="text-green-600">{confusionMatrix.totals.tp}</span>
