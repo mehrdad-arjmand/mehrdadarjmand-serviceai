@@ -332,8 +332,9 @@ const Projects = () => {
   const [projectMetadataFields, setProjectMetadataFields] = useState<Record<string, string[]>>({});
   const [metrics, setMetrics] = useState<MetricCard[]>([
   { label: "QUALITY", sublabel: "Accuracy", value: "—" },
-  { label: "TIME", sublabel: "Median latency", value: "—" },
-  { label: "COST", sublabel: "Average cost per thousand queries", value: "—" }]
+  { label: "TIME", sublabel: "Median latency (p50)", value: "—" },
+  { label: "COST", sublabel: "Average cost per query", value: "—" }]
+
   );
 
   const currentUserRole = permissions.role;
