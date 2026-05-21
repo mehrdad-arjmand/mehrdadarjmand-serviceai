@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { supabase, user } = await verifyAdmin(req)
+    const { supabase, user, apiTier } = await verifyAdmin(req)
     const url = new URL(req.url)
     const action = url.searchParams.get('action')
 
