@@ -674,6 +674,7 @@ const QueryAnalytics = () => {
                   <TableHeader>
                     <TableRow className="bg-muted/30 hover:bg-muted/30">
                       <TableHead className="text-muted-foreground text-xs">Query</TableHead>
+                      <TableHead className="text-muted-foreground text-xs w-[110px]">Date</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[60px]">K</TableHead>
                       <TableHead className="text-center text-muted-foreground text-xs w-[120px]">TP/FP/FN/TN</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Acc</TableHead>
@@ -686,6 +687,7 @@ const QueryAnalytics = () => {
                     {confusionMatrix.rows.map((r, i) => (
                       <TableRow key={i} className="hover:bg-muted/20">
                         <TableCell className="max-w-xs truncate text-sm py-2.5">{r.query}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground py-2.5 whitespace-nowrap">{r.created_at ? new Date(r.created_at).toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' }) : '—'}</TableCell>
                         <TableCell className="text-right font-mono text-sm py-2.5">{r.top_k}</TableCell>
                         <TableCell className="text-center font-mono text-sm py-2.5">
                           <span className="text-green-600">{r.tp}</span>
