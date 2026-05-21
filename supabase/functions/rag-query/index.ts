@@ -1,9 +1,20 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
 
+// LLM-AS-JUDGE POLICY:
+// - rag-query runs the LLM-as-judge in the background for EVERY query that
+//   reaches it (UI questions, programmatic batches, ad-hoc tests).
+// - The 100-question canonical benchmark goes through `run-eval`, which calls
+//   match_chunks_hybrid directly and bypasses rag-query — so the judge never
+//   fires for benchmark rows. Benchmark scoring uses exact gold expected_chunk_ids.
+// - Programmatic batches that should NOT trigger the judge can send the header
+//   `x-skip-judge: true` (e.g. a future "100 test questions" run that you do
+//   want judged should NOT set this; a synthetic load test that you do not
+//   want polluting analytics SHOULD set this).
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-benchmark-user-id, x-bench-hybrid, x-bench-rerank, x-bench-fixed-k',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-benchmark-user-id, x-bench-hybrid, x-bench-rerank, x-bench-fixed-k, x-skip-judge',
 }
+
 
 interface ConversationMessage {
   role: "user" | "assistant"
@@ -893,17 +904,21 @@ Provide a clear, concise answer based on the actual procedural content in the co
     }
 
     // Background: evaluate only after the durable log row exists.
-    const bgTask = queryLogId ? (async () => {
+    // Skip when caller sends `x-skip-judge: true` (see policy comment at top of file).
+    const skipJudge = (req.headers.get('x-skip-judge') || '').toLowerCase() === 'true'
+    const bgTask = (queryLogId && !skipJudge) ? (async () => {
       try {
         await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval, apiTier)
       } catch (e) {
         console.error('Background eval error:', e)
       }
     })() : Promise.resolve()
+    if (skipJudge) console.log(`Judge skipped for log ${queryLogId} (x-skip-judge: true)`)
 
     if (typeof (globalThis as any).EdgeRuntime?.waitUntil === 'function') {
       (globalThis as any).EdgeRuntime.waitUntil(bgTask)
     }
+
 
     return new Response(
       JSON.stringify({ 
