@@ -10,6 +10,7 @@ const FREE_TIER_DOC_DELAY_MS = 4000
 // Input validation constants
 const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 const MAX_FILES = 50
+const MAX_PAGES_PER_DOCUMENT = 50
 const MAX_METADATA_LENGTH = 500
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt']
 
@@ -389,6 +390,9 @@ Deno.serve(async (req) => {
             case 'docx':
               extractedText = await extractTextFromDocx(fileData.arrayBuffer)
               pageCount = Math.ceil(extractedText.length / 3000)
+              if (pageCount > MAX_PAGES_PER_DOCUMENT) {
+                throw new Error(`Document has approximately ${pageCount} pages. Maximum allowed is ${MAX_PAGES_PER_DOCUMENT} pages.`)
+              }
               break
             default:
               throw new Error(`Unsupported file type: ${fileData.fileType}`)
@@ -519,6 +523,9 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
   
   const document = await getDocument({ data: uint8Array, useSystemFonts: true }).promise
   const pageCount = document.numPages
+  if (pageCount > MAX_PAGES_PER_DOCUMENT) {
+    throw new Error(`PDF has ${pageCount} pages. Maximum allowed is ${MAX_PAGES_PER_DOCUMENT} pages.`)
+  }
 
   const pageTexts: string[] = []
   for (let i = 1; i <= pageCount; i++) {
