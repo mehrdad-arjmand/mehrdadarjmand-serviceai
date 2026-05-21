@@ -6,8 +6,9 @@ const corsHeaders = {
 }
 
 // ── Paid tier config (unchanged) ──
-const BATCH_EMBED_SIZE_PAID = 100
-const CHUNKS_PER_FETCH = 500
+const BATCH_EMBED_SIZE_PAID = 25
+const CHUNKS_PER_FETCH = 50
+const PAID_MAX_RUNTIME_MS = 20_000
 const MAX_CHUNK_TEXT_LENGTH = 6000
 
 // ── Free tier config (serial + resumable) ──
@@ -200,6 +201,18 @@ async function processFreeTier(
         continue
       }
     }
+
+    // Sync persisted progress with actual embedded rows before each resumable slice.
+    const { count: embeddedBeforeLock } = await supabase
+      .from('chunks')
+      .select('id', { count: 'exact', head: true })
+      .eq('document_id', docId)
+      .not('embedding', 'is', null)
+
+    await supabase
+      .from('documents')
+      .update({ ingested_chunks: embeddedBeforeLock || 0 })
+      .eq('id', docId)
 
     // Acquire lock — DO NOT clear embedding_retry_after here (that destroys failure tracking)
     const lockUntil = new Date(now.getTime() + FREE_LOCK_DURATION_MS).toISOString()
@@ -452,6 +465,7 @@ async function processPaidTier(
 
     let totalProcessed = 0
     let isComplete = false
+    const startedAt = Date.now()
 
     try {
       do {
@@ -474,8 +488,8 @@ async function processPaidTier(
         for (let i = 0; i < apiBatches.length; i += CONCURRENT_API_CALLS) {
           const concurrentBatches = apiBatches.slice(i, i + CONCURRENT_API_CALLS)
 
-          const batchResults = await Promise.all(
-            concurrentBatches.map(async (batch) => {
+          const batchResults: number[] = []
+          for (const batch of concurrentBatches) {
               const texts = batch.map(c => {
                 const text = c.text
                 if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
@@ -495,12 +509,50 @@ async function processPaidTier(
                 )
               )
 
-              return batch.length
-            })
-          )
+              batchResults.push(batch.length)
+
+              const { count: embeddedCountAfterSingleBatch } = await supabase
+                .from('chunks')
+                .select('id', { count: 'exact', head: true })
+                .eq('document_id', currentDocId)
+                .not('embedding', 'is', null)
+
+              await supabase
+                .from('documents')
+                .update({
+                  ingested_chunks: embeddedCountAfterSingleBatch || 0,
+                  ingestion_status: 'processing_embeddings',
+                  ingestion_stage: 'embedding',
+                  ingestion_error: null,
+                })
+                .eq('id', currentDocId)
+          }
 
           totalProcessed += batchResults.reduce((a, b) => a + b, 0)
+
+          const { count: embeddedCountAfterBatch } = await supabase
+            .from('chunks')
+            .select('id', { count: 'exact', head: true })
+            .eq('document_id', currentDocId)
+            .not('embedding', 'is', null)
+
+          await supabase
+            .from('documents')
+            .update({
+              ingested_chunks: embeddedCountAfterBatch || 0,
+              ingestion_status: 'processing_embeddings',
+              ingestion_stage: 'embedding',
+              ingestion_error: null,
+            })
+            .eq('id', currentDocId)
+
+          if (Date.now() - startedAt >= PAID_MAX_RUNTIME_MS) {
+            console.log(`Paid slice paused at ${embeddedCountAfterBatch || 0} chunks for ${currentDocId}`)
+            break
+          }
         }
+
+        if (Date.now() - startedAt >= PAID_MAX_RUNTIME_MS) break
 
         const { count: embeddedCount } = await supabase
           .from('chunks')
@@ -556,20 +608,37 @@ async function processPaidTier(
       })
     } catch (docError) {
       console.error(`Error embedding document ${currentDocId}:`, docError)
+      const { count: embeddedCountOnError } = await supabase
+        .from('chunks')
+        .select('id', { count: 'exact', head: true })
+        .eq('document_id', currentDocId)
+        .not('embedding', 'is', null)
+
+      const { data: docOnError } = await supabase
+        .from('documents')
+        .select('total_chunks')
+        .eq('id', currentDocId)
+        .single()
+
+      const embedded = embeddedCountOnError || 0
+      const total = docOnError?.total_chunks || 0
+      const complete = total > 0 && embedded >= total
       await supabase
         .from('documents')
         .update({
-          ingestion_status: 'failed',
-          ingestion_error: docError instanceof Error ? docError.message.slice(0, 1000) : 'Unknown error'
+          ingestion_status: complete ? 'complete' : 'processing_embeddings',
+          ingestion_stage: complete ? 'complete' : 'embedding',
+          ingested_chunks: embedded,
+          ingestion_error: complete ? null : (docError instanceof Error ? docError.message.slice(0, 1000) : 'Embedding paused before completion; retry will resume remaining chunks.'),
         })
         .eq('id', currentDocId)
 
       results.push({
         documentId: currentDocId,
         processed: totalProcessed,
-        embedded: 0,
-        total: 0,
-        complete: false,
+        embedded,
+        total,
+        complete,
       })
     }
   }
