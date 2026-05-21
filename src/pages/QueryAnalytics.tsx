@@ -32,14 +32,28 @@ interface AnalyticsData {
 }
 
 interface EvalResult {
-  k: number;
+  benchmark_name?: string;
+  k: number | null;
+  k_used?: string;
   total_queries: number;
   avg_precision_at_k: number;
   avg_recall_at_k: number;
+  avg_f1_at_k?: number;
+  tier_summary?: Array<{
+    tier: string;
+    total_queries: number;
+    avg_k: number;
+    avg_precision_at_k: number;
+    avg_recall_at_k: number;
+    avg_f1_at_k: number;
+  }>;
   results: Array<{
     query: string;
+    tier?: string;
+    k: number;
     precision_at_k: number;
     recall_at_k: number;
+    f1_at_k?: number;
     retrieved_count: number;
     expected_count: number;
     relevant_found: number;
@@ -270,7 +284,7 @@ const QueryAnalytics = () => {
   const runEval = async () => {
     setLoading("eval");
     try {
-      const res = await callEvalFunction("run-eval", { k: "10" });
+      const res = await callEvalFunction("run-eval", { benchmark: "benchmark_100_v3_multigold" });
       if (!res) return;
       const data = await res.json();
       if (data.success) setEvalResult(data);
