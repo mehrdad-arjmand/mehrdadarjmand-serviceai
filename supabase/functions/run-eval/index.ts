@@ -305,9 +305,14 @@ Deno.serve(async (req) => {
       }
 
       const results: any[] = []
+      const EVAL_TAG = `benchmark:${benchmarkName}`
+
+      // Clear prior rows for this benchmark so re-runs don't duplicate
+      await supabase.from('query_logs').delete().eq('eval_model', EVAL_TAG)
 
       for (const item of evalSet) {
         const k = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
+        const t0 = Date.now()
         const embResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
           {
@@ -329,14 +334,41 @@ Deno.serve(async (req) => {
           query_embedding: embeddingStr, match_threshold: 0.15, match_count: k, p_user_id: user.id
         })
 
-        const retrievedIds = (chunks || []).map((c: any) => c.id)
+        const retrievedIds: string[] = (chunks || []).map((c: any) => c.id)
+        const retrievedSims: number[] = (chunks || []).map((c: any) => c.similarity ?? 0)
         const expectedIds = new Set(item.expected_chunk_ids || [])
         const relevant = retrievedIds.filter((id: string) => expectedIds.has(id))
+        let firstRelevantRank: number | null = null
+        for (let i = 0; i < retrievedIds.length; i++) {
+          if (expectedIds.has(retrievedIds[i])) { firstRelevantRank = i + 1; break }
+        }
 
         const precision = retrievedIds.length > 0 ? relevant.length / retrievedIds.length : 0
         const recall = expectedIds.size > 0 ? relevant.length / expectedIds.size : 0
-
         const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0
+        const elapsed = Date.now() - t0
+
+        // Persist into query_logs so the benchmark shows up in analytics + confusion matrix
+        await supabase.from('query_logs').insert({
+          user_id: user.id,
+          query_text: item.query_text,
+          retrieved_chunk_ids: retrievedIds,
+          retrieved_similarities: retrievedSims,
+          response_text: `[${EVAL_TAG}] tier=${item.tier || 'n/a'}`,
+          citations_json: [],
+          input_tokens: 0, output_tokens: 0, total_tokens: 0,
+          execution_time_ms: elapsed,
+          top_k: retrievedIds.length,
+          top_k_eval: k,
+          total_relevant_chunks: expectedIds.size,
+          relevant_in_top_k: relevant.length,
+          precision_at_k: parseFloat(precision.toFixed(4)),
+          recall_at_k: parseFloat(recall.toFixed(4)),
+          hit_rate_at_k: relevant.length > 0 ? 1 : 0,
+          first_relevant_rank: firstRelevantRank,
+          eval_model: EVAL_TAG,
+          evaluated_at: new Date().toISOString(),
+        })
 
         results.push({
           query: item.query_text, tier: item.tier || 'uncategorized', k, retrieved_count: retrievedIds.length, expected_count: expectedIds.size,

@@ -100,6 +100,7 @@ interface EvalRun {
 
 interface ConfusionRow {
   query: string;
+  created_at: string;
   top_k: number;
   top_k_eval: number;
   relevant_in_top_k: number;
@@ -194,7 +195,7 @@ const QueryAnalytics = () => {
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from('query_logs')
-          .select('query_text, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
+          .select('query_text, created_at, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
           .not('evaluated_at', 'is', null)
           .not('total_relevant_chunks', 'is', null)
           .not('relevant_in_top_k', 'is', null)
@@ -217,6 +218,7 @@ const QueryAnalytics = () => {
         const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
         return {
           query: l.query_text?.slice(0, 80) || '',
+          created_at: l.created_at,
           top_k: l.top_k ?? 0,
           top_k_eval: l.top_k_eval ?? 0,
           relevant_in_top_k: tp,
@@ -672,6 +674,7 @@ const QueryAnalytics = () => {
                   <TableHeader>
                     <TableRow className="bg-muted/30 hover:bg-muted/30">
                       <TableHead className="text-muted-foreground text-xs">Query</TableHead>
+                      <TableHead className="text-muted-foreground text-xs w-[110px]">Date</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[60px]">K</TableHead>
                       <TableHead className="text-center text-muted-foreground text-xs w-[120px]">TP/FP/FN/TN</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Acc</TableHead>
@@ -684,6 +687,7 @@ const QueryAnalytics = () => {
                     {confusionMatrix.rows.map((r, i) => (
                       <TableRow key={i} className="hover:bg-muted/20">
                         <TableCell className="max-w-xs truncate text-sm py-2.5">{r.query}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground py-2.5 whitespace-nowrap">{r.created_at ? new Date(r.created_at).toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' }) : '—'}</TableCell>
                         <TableCell className="text-right font-mono text-sm py-2.5">{r.top_k}</TableCell>
                         <TableCell className="text-center font-mono text-sm py-2.5">
                           <span className="text-green-600">{r.tp}</span>
@@ -703,6 +707,7 @@ const QueryAnalytics = () => {
                     {/* Aggregate row */}
                     <TableRow className="bg-muted/40 font-semibold border-t-2 border-border hover:bg-muted/40">
                       <TableCell className="text-sm py-2.5">Aggregate</TableCell>
+                      <TableCell className="text-xs text-muted-foreground py-2.5">—</TableCell>
                       <TableCell className="text-right font-mono text-sm py-2.5">—</TableCell>
                       <TableCell className="text-center font-mono text-sm py-2.5">
                         <span className="text-green-600">{confusionMatrix.totals.tp}</span>
