@@ -520,10 +520,13 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     if (error || !docs) { setIsLoadingDocuments(false); return; }
 
     const documentsWithText = await Promise.all(docs.map(async (doc) => {
-      const { data: chunks } = await supabase.from('chunks').select('text, chunk_index, equipment, embedding').eq('document_id', doc.id).order('chunk_index');
-      const extractedText = chunks?.map(c => c.text).join('') || '';
+      const needsFullText = viewDoc?.id === doc.id || editContentDoc?.id === doc.id || expandedDocId === doc.id;
+      const { data: chunks } = needsFullText
+        ? await supabase.from('chunks').select('text, chunk_index, equipment').eq('document_id', doc.id).order('chunk_index')
+        : await supabase.from('chunks').select('equipment').eq('document_id', doc.id).order('chunk_index').limit(1);
+      const extractedText = needsFullText ? chunks?.map(c => (c as any).text).join('') || '' : '';
       const equipment = chunks?.[0]?.equipment || 'unknown';
-      const embeddedChunks = chunks?.filter(c => c.embedding !== null).length || 0;
+      const embeddedChunks = doc.ingested_chunks || 0;
       return {
         id: doc.id,
         fileName: doc.filename,
@@ -539,7 +542,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         error: null,
         createdAt: doc.uploaded_at || new Date().toISOString(),
         pageCount: doc.page_count || null,
-        totalChunks: doc.total_chunks || chunks?.length || 0,
+        totalChunks: doc.total_chunks || 0,
         embeddedChunks,
         ingestionStatus: doc.ingestion_status || 'pending',
         ingestionStage: (doc as any).ingestion_stage || null,
@@ -891,7 +894,6 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     setIsLoadingDocuments(true);
     fetchDocuments();
     const docsChannel = supabase.channel('repository-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).subscribe();
-    const chunksChannel = supabase.channel('repository-chunks').on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments).subscribe();
 
     const poll = setInterval(async () => {
       const docs = documentsRef.current;
@@ -988,7 +990,6 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
     return () => {
       supabase.removeChannel(docsChannel);
-      supabase.removeChannel(chunksChannel);
       clearInterval(poll);
       clearScheduledRecoveryTimers();
     };

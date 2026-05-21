@@ -6,8 +6,8 @@ const corsHeaders = {
 }
 
 // ── Paid tier config (unchanged) ──
-const BATCH_EMBED_SIZE_PAID = 25
-const CHUNKS_PER_FETCH = 50
+const BATCH_EMBED_SIZE_PAID = 10
+const CHUNKS_PER_FETCH = 20
 const PAID_MAX_RUNTIME_MS = 20_000
 const MAX_CHUNK_TEXT_LENGTH = 6000
 
@@ -449,6 +449,41 @@ async function processFreeTier(
 // ═══════════════════════════════════════════════════════════════════════════════
 // PAID TIER: Original full-document processing (unchanged from before)
 // ═══════════════════════════════════════════════════════════════════════════════
+async function syncPaidDocumentProgress(
+  supabase: ReturnType<typeof createClient>,
+  docId: string,
+  clearError = false,
+) {
+  const { count: embeddedCount } = await supabase
+    .from('chunks')
+    .select('id', { count: 'exact', head: true })
+    .eq('document_id', docId)
+    .not('embedding', 'is', null)
+
+  const { data: doc } = await supabase
+    .from('documents')
+    .select('total_chunks')
+    .eq('id', docId)
+    .single()
+
+  const embedded = embeddedCount || 0
+  const total = doc?.total_chunks || 0
+  const complete = total > 0 && embedded >= total
+  const updateData: Record<string, unknown> = {
+    ingested_chunks: embedded,
+    ingestion_status: complete ? 'complete' : 'processing_embeddings',
+    ingestion_stage: complete ? 'complete' : 'embedding',
+  }
+  if (clearError || complete) updateData.ingestion_error = null
+
+  await supabase
+    .from('documents')
+    .update(updateData)
+    .eq('id', docId)
+
+  return { embedded, total, complete }
+}
+
 async function processPaidTier(
   supabase: ReturnType<typeof createClient>,
   apiKey: string,
@@ -499,112 +534,49 @@ async function processPaidTier(
               const result = await batchEmbedTexts(apiKey, texts)
               if (!result.embeddings) throw new Error('Batch embedding failed')
 
-              await Promise.all(
-                batch.map((chunk, idx) =>
-                  supabase
-                    .from('chunks')
-                    .update({ embedding: result.embeddings![idx] })
-                    .eq('id', chunk.id)
-                    .then(({ error }) => { if (error) throw error })
-                )
-              )
+              for (let idx = 0; idx < batch.length; idx++) {
+                const { error: updateError } = await supabase
+                  .from('chunks')
+                  .update({ embedding: result.embeddings![idx] })
+                  .eq('id', batch[idx].id)
+                if (updateError) throw updateError
+              }
 
               batchResults.push(batch.length)
 
-              const { count: embeddedCountAfterSingleBatch } = await supabase
-                .from('chunks')
-                .select('id', { count: 'exact', head: true })
-                .eq('document_id', currentDocId)
-                .not('embedding', 'is', null)
-
-              await supabase
-                .from('documents')
-                .update({
-                  ingested_chunks: embeddedCountAfterSingleBatch || 0,
-                  ingestion_status: 'processing_embeddings',
-                  ingestion_stage: 'embedding',
-                  ingestion_error: null,
-                })
-                .eq('id', currentDocId)
+              await syncPaidDocumentProgress(supabase, currentDocId, true)
           }
 
           totalProcessed += batchResults.reduce((a, b) => a + b, 0)
 
-          const { count: embeddedCountAfterBatch } = await supabase
-            .from('chunks')
-            .select('id', { count: 'exact', head: true })
-            .eq('document_id', currentDocId)
-            .not('embedding', 'is', null)
-
-          await supabase
-            .from('documents')
-            .update({
-              ingested_chunks: embeddedCountAfterBatch || 0,
-              ingestion_status: 'processing_embeddings',
-              ingestion_stage: 'embedding',
-              ingestion_error: null,
-            })
-            .eq('id', currentDocId)
+          const syncedAfterBatch = await syncPaidDocumentProgress(supabase, currentDocId, true)
 
           if (Date.now() - startedAt >= PAID_MAX_RUNTIME_MS) {
-            console.log(`Paid slice paused at ${embeddedCountAfterBatch || 0} chunks for ${currentDocId}`)
+            console.log(`Paid slice paused at ${syncedAfterBatch.embedded} chunks for ${currentDocId}`)
             break
           }
         }
 
         if (Date.now() - startedAt >= PAID_MAX_RUNTIME_MS) break
 
-        const { count: embeddedCount } = await supabase
-          .from('chunks')
-          .select('id', { count: 'exact', head: true })
-          .eq('document_id', currentDocId)
-          .not('embedding', 'is', null)
-
-        const { data: doc } = await supabase
-          .from('documents')
-          .select('total_chunks')
-          .eq('id', currentDocId)
-          .single()
-
-        const totalChunks = doc?.total_chunks || 0
-        const embedded = embeddedCount || 0
-        isComplete = embedded >= totalChunks
-
-        await supabase
-          .from('documents')
-          .update({ ingested_chunks: embedded })
-          .eq('id', currentDocId)
+        const syncedProgress = await syncPaidDocumentProgress(supabase, currentDocId)
+        const totalChunks = syncedProgress.total
+        const embedded = syncedProgress.embedded
+        isComplete = syncedProgress.complete
 
         console.log(`Paid progress: ${embedded}/${totalChunks} chunks for ${currentDocId}`)
 
         if (!isFullMode) break
       } while (!isComplete)
 
-      if (isComplete) {
-        await supabase
-          .from('documents')
-          .update({ ingestion_status: 'complete' })
-          .eq('id', currentDocId)
-      }
-
-      const { count: finalEmbedded } = await supabase
-        .from('chunks')
-        .select('id', { count: 'exact', head: true })
-        .eq('document_id', currentDocId)
-        .not('embedding', 'is', null)
-
-      const { data: finalDoc } = await supabase
-        .from('documents')
-        .select('total_chunks')
-        .eq('id', currentDocId)
-        .single()
+      const finalProgress = await syncPaidDocumentProgress(supabase, currentDocId, isComplete)
 
       results.push({
         documentId: currentDocId,
         processed: totalProcessed,
-        embedded: finalEmbedded || 0,
-        total: finalDoc?.total_chunks || 0,
-        complete: isComplete,
+        embedded: finalProgress.embedded,
+        total: finalProgress.total,
+        complete: finalProgress.complete,
       })
     } catch (docError) {
       console.error(`Error embedding document ${currentDocId}:`, docError)
