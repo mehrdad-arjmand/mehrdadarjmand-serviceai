@@ -527,8 +527,7 @@ async function processPaidTier(
         for (let i = 0; i < apiBatches.length; i += CONCURRENT_API_CALLS) {
           const concurrentBatches = apiBatches.slice(i, i + CONCURRENT_API_CALLS)
 
-          const batchResults: number[] = []
-          for (const batch of concurrentBatches) {
+          const batchResults = await Promise.all(concurrentBatches.map(async (batch) => {
               const texts = batch.map(c => {
                 const text = c.text
                 if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
@@ -546,10 +545,8 @@ async function processPaidTier(
                 if (updateError) throw updateError
               }
 
-              batchResults.push(batch.length)
-
-              await syncPaidDocumentProgress(supabase, currentDocId, true)
-          }
+              return batch.length
+          }))
 
           totalProcessed += batchResults.reduce((a, b) => a + b, 0)
 
