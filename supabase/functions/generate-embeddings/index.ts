@@ -465,6 +465,7 @@ async function processPaidTier(
 
     let totalProcessed = 0
     let isComplete = false
+    const startedAt = Date.now()
 
     try {
       do {
@@ -513,7 +514,30 @@ async function processPaidTier(
           )
 
           totalProcessed += batchResults.reduce((a, b) => a + b, 0)
+
+          const { count: embeddedCountAfterBatch } = await supabase
+            .from('chunks')
+            .select('id', { count: 'exact', head: true })
+            .eq('document_id', currentDocId)
+            .not('embedding', 'is', null)
+
+          await supabase
+            .from('documents')
+            .update({
+              ingested_chunks: embeddedCountAfterBatch || 0,
+              ingestion_status: 'processing_embeddings',
+              ingestion_stage: 'embedding',
+              ingestion_error: null,
+            })
+            .eq('id', currentDocId)
+
+          if (Date.now() - startedAt >= PAID_MAX_RUNTIME_MS) {
+            console.log(`Paid slice paused at ${embeddedCountAfterBatch || 0} chunks for ${currentDocId}`)
+            break
+          }
         }
+
+        if (Date.now() - startedAt >= PAID_MAX_RUNTIME_MS) break
 
         const { count: embeddedCount } = await supabase
           .from('chunks')
