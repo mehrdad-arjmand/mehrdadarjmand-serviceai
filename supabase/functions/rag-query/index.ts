@@ -866,8 +866,12 @@ Provide a clear, concise answer based on the actual procedural content in the co
       documentId: chunk.document_id || ''
     }))
 
-    // Eval uses rankedChunks up to 200
-    const evalSlice = rankedChunks.slice(0, Math.min(200, rankedChunks.length))
+    // Eval stores the answer-visible sources first so Source N citations align with ranks 1..topK.
+    const topChunkIds = new Set(topChunks.map((c: any) => c.id))
+    const evalSlice = [
+      ...topChunks,
+      ...rankedChunks.filter((c: any) => !topChunkIds.has(c.id)),
+    ].slice(0, Math.min(200, rankedChunks.length))
     const evalChunkTexts = evalSlice.map((c: any) => ({ id: c.id, text: c.text }))
     const topKEval = evalSlice.length
     console.log(`Eval scope: ${topKEval} vector-retrieved chunks`)
@@ -877,8 +881,8 @@ Provide a clear, concise answer based on the actual procedural content in the co
     const logPayload = {
       user_id: user.id,
       query_text: question,
-      retrieved_chunk_ids: topChunks.map((c: any) => c.id),
-      retrieved_similarities: topChunks.map((c: any) => c.similarity ?? 0),
+      retrieved_chunk_ids: evalSlice.map((c: any) => c.id),
+      retrieved_similarities: evalSlice.map((c: any) => c.similarity ?? 0),
       response_text: answer,
       citations_json: sources,
       input_tokens: usage.input_tokens,
@@ -908,7 +912,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
     const skipJudge = (req.headers.get('x-skip-judge') || '').toLowerCase() === 'true'
     const bgTask = (queryLogId && !skipJudge) ? (async () => {
       try {
-        await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval, apiTier)
+        await evaluateRetrievalBackground(supabase, queryLogId, question, answer, evalChunkTexts, topK, topKEval, apiTier)
       } catch (e) {
         console.error('Background eval error:', e)
       }
@@ -1581,10 +1585,20 @@ Is this chunk relevant to answering the query?`
   return { relevant: false, reasoning: 'LLM evaluation failed' }
 }
 
+function getCitedSourceRanks(responseText: string | null | undefined): Set<number> {
+  const ranks = new Set<number>()
+  for (const match of (responseText || '').matchAll(/\bSource\s+(\d+)\b/gi)) {
+    const rank = Number(match[1])
+    if (Number.isFinite(rank) && rank > 0) ranks.add(rank)
+  }
+  return ranks
+}
+
 async function evaluateRetrievalBackground(
   supabase: any,
   queryLogId: string,
   queryText: string,
+  responseText: string,
   chunkTexts: { id: string; text: string }[],
   topK: number,
   topKEval: number,
@@ -1619,9 +1633,22 @@ async function evaluateRetrievalBackground(
     if (labels[i]?.relevant && firstRelevantRank === null && i < topK) firstRelevantRank = i + 1
   }
 
+  for (const rank of getCitedSourceRanks(responseText)) {
+    const i = rank - 1
+    if (i >= 0 && i < Math.min(labels.length, topK) && labels[i]) {
+      labels[i] = {
+        ...labels[i],
+        relevant: true,
+        reasoning: labels[i].relevant ? labels[i].reasoning : 'Marked relevant because the assistant answer cited this source as supporting evidence.',
+      }
+      if (firstRelevantRank === null || rank < firstRelevantRank) firstRelevantRank = rank
+    }
+  }
+
   // If most of the judge calls failed, do NOT stamp evaluated_at with bogus zeros —
   // that pollutes the analytics "no judged-relevant chunk" rate. Persist labels for diagnosis only.
-  if (totalChecked > 0 && judgeFailures / totalChecked >= 0.5) {
+  const citedRelevantCount = labels.filter(l => l.relevant && l.rank <= topK).length
+  if (totalChecked > 0 && citedRelevantCount === 0 && judgeFailures / totalChecked >= 0.5) {
     await supabase.from('query_logs').update({
       relevance_labels: labels,
       eval_model: `${EVAL_MODEL} (judge_failed)`,

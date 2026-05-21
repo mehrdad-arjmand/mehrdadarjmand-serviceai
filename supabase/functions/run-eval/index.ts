@@ -120,6 +120,15 @@ Is this chunk relevant to answering the query?`
   return { relevant: false, reasoning: 'LLM evaluation failed' }
 }
 
+function getCitedSourceRanks(responseText: string | null | undefined): Set<number> {
+  const ranks = new Set<number>()
+  for (const match of (responseText || '').matchAll(/\bSource\s+(\d+)\b/gi)) {
+    const rank = Number(match[1])
+    if (Number.isFinite(rank) && rank > 0) ranks.add(rank)
+  }
+  return ranks
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -566,7 +575,7 @@ Deno.serve(async (req) => {
 
       let query = supabase
         .from('query_logs')
-        .select('id, query_text, retrieved_chunk_ids, top_k, top_k_eval')
+        .select('id, query_text, response_text, retrieved_chunk_ids, top_k, top_k_eval')
         .not('retrieved_chunk_ids', 'is', null)
         .order('created_at', { ascending: false })
         .limit(limit)
@@ -600,7 +609,8 @@ Deno.serve(async (req) => {
           .from('chunks')
           .select('id, text')
           .in('id', chunkIds.slice(0, 200))
-        const evalChunks = evalChunksData || []
+        const chunkById = new Map((evalChunksData || []).map((chunk: any) => [chunk.id, chunk]))
+        const evalChunks = chunkIds.slice(0, 200).map((id: string) => chunkById.get(id) || { id, text: null })
 
         const topKEval = evalChunks.length
 
@@ -639,8 +649,21 @@ Deno.serve(async (req) => {
           }
         }
 
+        for (const rank of getCitedSourceRanks(log.response_text)) {
+          const i = rank - 1
+          if (i >= 0 && i < Math.min(labels.length, k) && labels[i]) {
+            labels[i] = {
+              ...labels[i],
+              relevant: true,
+              reasoning: labels[i].relevant ? labels[i].reasoning : 'Marked relevant because the assistant answer cited this source as supporting evidence.',
+            }
+            if (firstRelevantRank === null || rank < firstRelevantRank) firstRelevantRank = rank
+          }
+        }
+
         // If most of the judge calls failed, do NOT stamp evaluated_at — that pollutes analytics.
-        if (topKEval > 0 && judgeFailures / topKEval >= 0.5) {
+        const citedRelevantCount = labels.filter(l => l.relevant && l.rank <= k).length
+        if (topKEval > 0 && citedRelevantCount === 0 && judgeFailures / topKEval >= 0.5) {
           await supabase.from('query_logs').update({
             relevance_labels: labels,
             eval_model: `${EVAL_MODEL} (judge_failed)`,
