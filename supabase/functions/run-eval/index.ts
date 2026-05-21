@@ -609,7 +609,8 @@ Deno.serve(async (req) => {
           .from('chunks')
           .select('id, text')
           .in('id', chunkIds.slice(0, 200))
-        const evalChunks = evalChunksData || []
+        const chunkById = new Map((evalChunksData || []).map((chunk: any) => [chunk.id, chunk]))
+        const evalChunks = chunkIds.slice(0, 200).map((id: string) => chunkById.get(id) || { id, text: null })
 
         const topKEval = evalChunks.length
 
