@@ -364,7 +364,7 @@ const Projects = () => {
     //  • Accuracy  → confusion-matrix totals: (TP + TN) / (TP+FP+FN+TN)
     //                Filter: evaluated_at NOT NULL AND total_relevant_chunks NOT NULL AND relevant_in_top_k NOT NULL
     //  • Latency   → P50 (median) of execution_time_ms across ALL logs
-    //  • Cost      → avg(upstream_inference_cost ?? 0) across ALL logs (same as analytics endpoint)
+    //  • Cost      → avg(upstream_inference_cost ?? 0) × 1,000 across ALL logs
     const PAGE = 1000;
     const logs: any[] = [];
     for (let from = 0; ; from += PAGE) {
@@ -400,10 +400,11 @@ const Projects = () => {
       .sort((a, b) => a - b);
     const p50 = times.length > 0 ? times[Math.max(0, Math.ceil(0.5 * times.length) - 1)] : 0;
 
-    // ── Avg cost (same as analytics endpoint: null treated as 0, across all logs) ──
+    // ── Avg cost per 1,000 queries (null treated as 0, across all logs) ──
     const avgCost = logs.length > 0
       ? logs.reduce((s, l) => s + (l.upstream_inference_cost ?? 0), 0) / logs.length
       : 0;
+    const avgCostPerThousand = avgCost * 1000;
 
     setMetrics([
       { label: "QUALITY", sublabel: "Accuracy", value: `${(accuracy * 100).toFixed(1)}%` },
@@ -412,7 +413,7 @@ const Projects = () => {
         sublabel: "Median latency (p50)",
         value: p50 >= 1000 ? `${(p50 / 1000).toFixed(1)} seconds` : `${p50} ms`,
       },
-      { label: "COST", sublabel: "Average cost per query", value: `$${avgCost.toFixed(6)}` },
+      { label: "COST", sublabel: "Average cost per 1,000 queries", value: `$${avgCostPerThousand.toFixed(4)}` },
     ]);
   };
 
