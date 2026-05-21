@@ -310,6 +310,10 @@ Deno.serve(async (req) => {
       // Clear prior rows for this benchmark so re-runs don't duplicate
       await supabase.from('query_logs').delete().eq('eval_model', EVAL_TAG)
 
+      // Fetch all doc ids once (hybrid retrieval needs explicit doc scope)
+      const { data: allDocs } = await supabase.from('documents').select('id')
+      const allDocIds = (allDocs || []).map((d: any) => d.id)
+
       for (const item of evalSet) {
         const k = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
         const t0 = Date.now()
