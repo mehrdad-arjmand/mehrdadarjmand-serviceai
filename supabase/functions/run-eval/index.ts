@@ -48,9 +48,7 @@ async function evaluateChunkRelevance(
   chunkText: string,
   apiTier: string
 ): Promise<{ relevant: boolean; reasoning: string }> {
-  const apiKey = apiTier === 'paid'
-    ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE'))
-    : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY'))
+  const apiKey = Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE')
   if (!apiKey) return { relevant: false, reasoning: 'GOOGLE_API_KEY not configured' }
 
   const prompt = `You are a strict retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains specific data, facts, or information that would need to be included in a complete answer to the query.
@@ -151,12 +149,13 @@ Deno.serve(async (req) => {
       const judgeFailedLogs = logs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
       const pendingLogs = logs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
 
-      // Retrieval eval: rows with first_relevant_rank AND total_relevant_chunks (matches Confusion Matrix eligibility)
-      const eligible = logs.filter(l => l.first_relevant_rank !== null && l.first_relevant_rank !== undefined && l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined)
-      const noJudgedRelevantCount = Math.max(0, evaluatedLogs.length - eligible.length)
+      // Valid scored rows include both hits and true no-hit retrieval misses.
+      // first_relevant_rank is null for a valid no-hit row, so never use it as the evaluated denominator.
+      const validScoredLogs = evaluatedLogs.filter(l => l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined && l.relevant_in_top_k !== null && l.relevant_in_top_k !== undefined)
+      const noJudgedRelevantCount = validScoredLogs.filter(l => (l.relevant_in_top_k ?? 0) === 0).length
 
       // Confusion-matrix-aligned per-query TP/FP/FN/TN
-      const perQ = eligible.map(l => {
+      const perQ = validScoredLogs.map(l => {
         const tp = l.relevant_in_top_k ?? 0
         const fp = Math.max(0, (l.top_k ?? 0) - tp)
         const fn = Math.max(0, (l.total_relevant_chunks ?? 0) - tp)
@@ -177,8 +176,8 @@ Deno.serve(async (req) => {
 
       // Macro F1 — average of per-query F1
       const avgF1 = perQ.length > 0 ? avg(perQ.map(q => q.f1)) : 0
-      const avgHitRate = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)) : 0
-      const mrr = eligible.length > 0 ? parseFloat(avg(eligible.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)) : 0
+      const avgHitRate = validScoredLogs.length > 0 ? parseFloat(avg(validScoredLogs.map(l => l.hit_rate_at_k ?? 0)).toFixed(4)) : 0
+      const mrr = validScoredLogs.length > 0 ? parseFloat(avg(validScoredLogs.map(l => l.first_relevant_rank ? 1 / l.first_relevant_rank : 0)).toFixed(4)) : 0
 
       // Abstention: scan response_text for non-answer language across ALL queries
       const ABSTENTION_RE = /not enough information|cannot (find|locate|answer)|don'?t have|do not have|insufficient (information|context|data)|context (does not|doesn'?t) contain|not (specified|provided|available|mentioned|covered) in (the )?(context|document|provided)|unable to (find|provide|answer)|no (information|details|specific|relevant)/i
@@ -201,14 +200,14 @@ Deno.serve(async (req) => {
           total: costs.reduce((s, v) => s + v, 0).toFixed(6),
         },
         retrieval_eval: evaluatedLogs.length > 0 ? {
-          evaluated_count: eligible.length,
+          evaluated_count: validScoredLogs.length,
           total_evaluated_count: evaluatedLogs.length,
           total_queries: logs.length,
           no_judged_relevant_count: noJudgedRelevantCount,
           judge_failed_count: judgeFailedLogs.length,
           abstention_count: abstentionCount,
           abstention_rate: parseFloat(abstentionRate.toFixed(4)),
-          no_hit_rate: parseFloat((noJudgedRelevantCount / evaluatedLogs.length).toFixed(4)),
+          no_hit_rate: parseFloat((noJudgedRelevantCount / Math.max(1, validScoredLogs.length)).toFixed(4)),
           avg_precision_at_k: parseFloat(aggPrecision.toFixed(4)),
           avg_recall_at_k: parseFloat(aggRecall.toFixed(4)),
           avg_hit_rate: avgHitRate,
@@ -470,31 +469,31 @@ Deno.serve(async (req) => {
         })
       }
 
-      const eligibleResults = perQueryResults.filter(r => r.first_relevant_rank !== null)
-      const sumRelevantInTopK = eligibleResults.reduce((sum, r) => sum + (r.relevant_in_top_k ?? 0), 0)
-      const sumTopK = eligibleResults.reduce((sum, r) => sum + (r.k ?? 0), 0)
-      const sumTotalRelevant = eligibleResults.reduce((sum, r) => sum + (r.total_relevant ?? 0), 0)
+      const validResults = perQueryResults
+      const sumRelevantInTopK = validResults.reduce((sum, r) => sum + (r.relevant_in_top_k ?? 0), 0)
+      const sumTopK = validResults.reduce((sum, r) => sum + (r.k ?? 0), 0)
+      const sumTotalRelevant = validResults.reduce((sum, r) => sum + (r.total_relevant ?? 0), 0)
       const avgPrecision = sumTopK > 0 ? sumRelevantInTopK / sumTopK : 0
       const avgRecall = sumTotalRelevant > 0 ? sumRelevantInTopK / sumTotalRelevant : 0
-      const avgHitRate = eligibleResults.length > 0 ? eligibleResults.reduce((s, r) => s + r.hit_rate, 0) / eligibleResults.length : 0
-      const mrr = eligibleResults.length > 0 ? eligibleResults.reduce((s, r) => s + (r.first_relevant_rank ? 1 / r.first_relevant_rank : 0), 0) / eligibleResults.length : 0
+      const avgHitRate = validResults.length > 0 ? validResults.reduce((s, r) => s + r.hit_rate, 0) / validResults.length : 0
+      const mrr = validResults.length > 0 ? validResults.reduce((s, r) => s + (r.first_relevant_rank ? 1 / r.first_relevant_rank : 0), 0) / validResults.length : 0
 
       await supabase.from('eval_runs').insert({
         created_by: user.id,
-        total_queries: eligibleResults.length,
+        total_queries: validResults.length,
         avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
         avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
         avg_hit_rate_at_k: parseFloat(avgHitRate.toFixed(4)),
         mrr: parseFloat(mrr.toFixed(4)),
         k_used: 'per-query top_k',
         eval_model: EVAL_MODEL,
-        notes: `Evaluated ${total} queries; aggregates use only rows with first_relevant_rank present.`,
+        notes: `Evaluated ${total} queries; aggregates include valid no-hit rows as retrieval misses.`,
       })
 
       return new Response(JSON.stringify({
         success: true,
         evaluated: total,
-        evaluated_nonzero: eligibleResults.length,
+        evaluated_nonzero: validResults.filter(r => r.first_relevant_rank !== null).length,
         eval_model: EVAL_MODEL,
         k_used: 'per-query top_k (top_k_eval stored separately)',
         ranking_confirmed: 'retrieved_chunk_ids stored in ranked order after re-ranking',

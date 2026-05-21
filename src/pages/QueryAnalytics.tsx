@@ -183,7 +183,7 @@ const QueryAnalytics = () => {
           .select('query_text, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
           .not('evaluated_at', 'is', null)
           .not('total_relevant_chunks', 'is', null)
-          .not('first_relevant_rank', 'is', null)
+          .not('relevant_in_top_k', 'is', null)
           .order('created_at', { ascending: false })
           .range(from, from + PAGE - 1);
         if (error || !data || data.length === 0) break;
@@ -431,7 +431,7 @@ const QueryAnalytics = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
-                  <div className="flex justify-between" title="Validly scored queries: at least one chunk in top-K judged relevant."><span className="text-muted-foreground">With judged-relevant chunk</span><span className="font-mono font-medium">{analytics.retrieval_eval.evaluated_count}</span></div>
+                  <div className="flex justify-between" title="Validly scored queries: judge completed, including both hits and no-hit retrieval misses."><span className="text-muted-foreground">Valid scored queries</span><span className="font-mono font-medium">{analytics.retrieval_eval.evaluated_count}</span></div>
                   <div className="flex justify-between" title="Queries where the AI judge errored (rate limit, parse error). Excluded from precision/recall/F1."><span className="text-muted-foreground">Judge failed (excluded)</span><span className="font-mono font-medium">{analytics.retrieval_eval.judge_failed_count ?? 0}</span></div>
                   <div className="flex justify-between" title="True retrieval misses: judge succeeded but found no relevant chunk in top-K."><span className="text-muted-foreground">No relevant chunk in top-K</span><span className="font-mono font-medium">{analytics.retrieval_eval.no_judged_relevant_count ?? 0} ({((analytics.retrieval_eval.no_hit_rate ?? 0) * 100).toFixed(1)}%)</span></div>
                   <div className="flex justify-between" title="Queries where the assistant answer said it could not find / had insufficient information. Detected via response text."><span className="text-muted-foreground">Abstentions (answer)</span><span className="font-mono font-medium">{analytics.retrieval_eval.abstention_count ?? 0} ({((analytics.retrieval_eval.abstention_rate ?? 0) * 100).toFixed(1)}%)</span></div>

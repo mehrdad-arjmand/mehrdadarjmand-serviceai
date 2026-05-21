@@ -895,7 +895,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
     // Background: evaluate only after the durable log row exists.
     const bgTask = queryLogId ? (async () => {
       try {
-        await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval)
+        await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval, apiTier)
       } catch (e) {
         console.error('Background eval error:', e)
       }
@@ -1485,14 +1485,21 @@ async function generateAnswer(systemPrompt: string, userPrompt: string, model: s
   }
 }
 
-const EVAL_MODEL = 'google/gemini-2.5-flash-lite'
+const EVAL_MODEL = 'google/gemini-2.5-flash'
+
+function getEvalApiKey(apiTier: string): string | null {
+  return apiTier === 'paid'
+    ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE') || null)
+    : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY') || null)
+}
 
 async function evaluateChunkRelevance(
   queryText: string,
-  chunkText: string
+  chunkText: string,
+  apiTier: string
 ): Promise<{ relevant: boolean; reasoning: string }> {
-  const apiKey = Deno.env.get('LOVABLE_API_KEY')
-  if (!apiKey) return { relevant: false, reasoning: 'LOVABLE_API_KEY not configured' }
+  const apiKey = getEvalApiKey(apiTier)
+  if (!apiKey) return { relevant: false, reasoning: 'GOOGLE_API_KEY not configured' }
 
   const prompt = `You are a strict retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains specific data, facts, or information that would need to be included in a complete answer to the query.
 
@@ -1513,46 +1520,40 @@ ${chunkText.slice(0, 2000)}
 
 Is this chunk relevant to answering the query?`
 
-  try {
-    const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: EVAL_MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0,
-        max_tokens: 200,
-      }),
-    })
+  let lastErr = ''
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: 'application/json' },
+        }),
+      })
 
-    if (!res.ok) return { relevant: false, reasoning: 'LLM evaluation failed' }
+      if (!res.ok) {
+        lastErr = `${res.status}`
+        if (res.status !== 429 && res.status < 500) break
+        await new Promise(r => setTimeout(r, 800 + attempt * 1500))
+        continue
+      }
 
-    const data = await res.json()
-    const text = data.choices?.[0]?.message?.content?.trim() ?? ''
-
-    const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      try {
+      const data = await res.json()
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ''
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0])
         return { relevant: !!parsed.relevant, reasoning: parsed.reasoning || '' }
-      } catch (parseErr) {
-        console.error('JSON parse failed for eval response:', jsonMatch[0].slice(0, 200))
       }
+      return { relevant: false, reasoning: 'Parse error' }
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err)
+      await new Promise(r => setTimeout(r, 800 + attempt * 1500))
     }
-
-    const lower = cleaned.toLowerCase()
-    if (lower.includes('"relevant": true') || lower.includes('"relevant":true')) {
-      return { relevant: true, reasoning: 'Parsed from text fallback' }
-    }
-
-    console.error('Could not parse eval LLM response:', text.slice(0, 300))
-  } catch (err) {
-    console.error('Eval chunk error:', err)
   }
-
-  return { relevant: false, reasoning: 'Parse error' }
+  console.error('Gemini eval chunk error:', lastErr)
+  return { relevant: false, reasoning: 'LLM evaluation failed' }
 }
 
 async function evaluateRetrievalBackground(
@@ -1561,7 +1562,8 @@ async function evaluateRetrievalBackground(
   queryText: string,
   chunkTexts: { id: string; text: string }[],
   topK: number,
-  topKEval: number
+  topKEval: number,
+  apiTier: string
 ) {
   const labels: { chunk_id: string; relevant: boolean; reasoning: string; rank: number }[] = []
   let firstRelevantRank: number | null = null
@@ -1569,9 +1571,9 @@ async function evaluateRetrievalBackground(
 
   for (let i = 0; i < Math.min(chunkTexts.length, topKEval); i++) {
     const { id: chunkId, text: chunkText } = chunkTexts[i]
-    const result = await evaluateChunkRelevance(queryText, chunkText)
+    const result = await evaluateChunkRelevance(queryText, chunkText, apiTier)
     // Treat parser/LLM failure as "unknown", not as a confirmed-irrelevant chunk.
-    const isFailure = result.reasoning === 'Parse error' || result.reasoning === 'LLM evaluation failed' || result.reasoning === 'LOVABLE_API_KEY not configured'
+    const isFailure = result.reasoning === 'Parse error' || result.reasoning === 'LLM evaluation failed' || result.reasoning === 'LOVABLE_API_KEY not configured' || result.reasoning === 'GOOGLE_API_KEY not configured'
     if (isFailure) judgeFailures++
     labels.push({ chunk_id: chunkId, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
