@@ -345,9 +345,10 @@ Deno.serve(async (req) => {
       const tagSuffix = adaptive ? ':adaptive' : ''
       const EVAL_TAG = `benchmark:${benchmarkName}${tagSuffix}`
 
-      // Only delete on the first batch (offset=0) so paginated runs accumulate
+      // Only delete the current mode on the first batch (offset=0) so paginated runs accumulate.
+      // Baseline and adaptive must coexist for side-by-side comparisons.
       if (offset === 0) {
-        await supabase.from('query_logs').delete().like('eval_model', `benchmark:${benchmarkName}%`)
+        await supabase.from('query_logs').delete().eq('eval_model', EVAL_TAG)
       }
 
       const { data: allDocs } = await supabase.from('documents').select('id')
