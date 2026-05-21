@@ -310,6 +310,10 @@ Deno.serve(async (req) => {
       // Clear prior rows for this benchmark so re-runs don't duplicate
       await supabase.from('query_logs').delete().eq('eval_model', EVAL_TAG)
 
+      // Fetch all doc ids once (hybrid retrieval needs explicit doc scope)
+      const { data: allDocs } = await supabase.from('documents').select('id')
+      const allDocIds = (allDocs || []).map((d: any) => d.id)
+
       for (const item of evalSet) {
         const k = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
         const t0 = Date.now()
@@ -330,8 +334,14 @@ Deno.serve(async (req) => {
         }
 
         const embeddingStr = `[${embedding.join(',')}]`
-        const { data: chunks } = await supabase.rpc('match_chunks', {
-          query_embedding: embeddingStr, match_threshold: 0.15, match_count: k, p_user_id: user.id
+        const { data: chunks } = await supabase.rpc('match_chunks_hybrid', {
+          query_text: item.query_text,
+          query_embedding: embeddingStr,
+          doc_ids: allDocIds,
+          match_count: k,
+          vec_pool: 100,
+          kw_pool: 100,
+          rrf_k: 60,
         })
 
         const retrievedIds: string[] = (chunks || []).map((c: any) => c.id)
