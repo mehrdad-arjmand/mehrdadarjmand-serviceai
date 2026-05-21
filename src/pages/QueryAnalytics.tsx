@@ -100,6 +100,7 @@ interface EvalRun {
 
 interface ConfusionRow {
   query: string;
+  created_at: string;
   top_k: number;
   top_k_eval: number;
   relevant_in_top_k: number;
