@@ -400,7 +400,7 @@ Deno.serve(async (req) => {
             continue
           }
 
-          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
           if (FAILURE_REASONS.has(result.reasoning)) judgeFailures++
           labels.push({ chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
 
@@ -577,7 +577,7 @@ Deno.serve(async (req) => {
         // Step 3: LLM-judge each expanded chunk
         let totalRelevantInScan = 0
         for (const chunk of expandedChunks) {
-          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
           if (result.relevant) totalRelevantInScan++
         }
 
@@ -588,7 +588,7 @@ Deno.serve(async (req) => {
 
         let relevantInTopK = 0
         for (const chunk of originalChunksInExpanded) {
-          const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+          const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
           if (result.relevant) relevantInTopK++
         }
 
@@ -602,7 +602,7 @@ Deno.serve(async (req) => {
         for (let i = 0; i < originalChunkIds.length; i++) {
           const chunk = expandedChunks.find((c: any) => c.id === originalChunkIds[i])
           if (chunk) {
-            const result = await evaluateChunkRelevance(log.query_text, chunk.text)
+            const result = await evaluateChunkRelevance(log.query_text, chunk.text, apiTier)
             if (result.relevant) { firstRelevantRank = i + 1; break }
           }
         }
