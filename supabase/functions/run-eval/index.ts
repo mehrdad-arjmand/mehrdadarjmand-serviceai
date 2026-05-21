@@ -485,15 +485,32 @@ Deno.serve(async (req) => {
         }
       })
 
+      const hitCount = results.filter(r => r.relevant_found > 0).length
+      const zeroHitCount = results.filter(r => r.relevant_found === 0).length
+      const avgK = results.reduce((s, r) => s + (r.k || 0), 0) / Math.max(1, results.length)
+      const avgJudgeP = judgeEnabled
+        ? results.filter(r => r.judge_precision !== null).reduce((s, r) => s + r.judge_precision, 0) / Math.max(1, results.filter(r => r.judge_precision !== null).length)
+        : null
+
       return new Response(JSON.stringify({
-        success: true, benchmark_name: benchmarkName, k: fixedKParam ? parseInt(fixedKParam) : null, k_used: fixedKParam ? `fixed k=${fixedKParam}` : 'per-question k_target', total_queries: results.length,
+        success: true,
+        benchmark_name: benchmarkName,
+        mode: adaptive ? `adaptive (pool=${POOL}, knee gap×${GAP_MULT}, K∈[${ADAPT_MIN_K},${ADAPT_MAX_K}])` : (fixedKParam ? `fixed k=${fixedKParam}` : 'per-question k_target'),
+        judge_enabled: judgeEnabled,
+        total_queries: results.length,
+        hit_count: hitCount,
+        zero_hit_count: zeroHitCount,
+        hit_rate: parseFloat((hitCount / Math.max(1, results.length)).toFixed(4)),
+        avg_k_used: parseFloat(avgK.toFixed(2)),
         avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
         avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
         avg_f1_at_k: parseFloat(avgF1.toFixed(4)),
+        avg_judge_precision: avgJudgeP !== null ? parseFloat(avgJudgeP.toFixed(4)) : null,
         tier_summary,
         results
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
+
 
     // ─── ACTION: run-retrieval-eval (LLM-based relevance evaluation) ───
     if (action === 'run-retrieval-eval') {
