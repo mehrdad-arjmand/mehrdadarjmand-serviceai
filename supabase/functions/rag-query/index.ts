@@ -1526,13 +1526,13 @@ async function evaluateChunkRelevance(
   const apiKey = getEvalApiKey(apiTier)
   if (!apiKey) return { relevant: false, reasoning: 'GOOGLE_API_KEY not configured' }
 
-  const prompt = `You are a strict retrieval evaluation judge. Given a user query and a retrieved document chunk, determine if the chunk contains specific data, facts, or information that would need to be included in a complete answer to the query.
+  const prompt = `You are a retrieval evaluation judge. Given a user query and a retrieved document chunk, decide whether the chunk contains information that would be useful in answering the query (directly answers it, OR provides supporting facts, definitions, context, parameters, or specifications a complete answer would cite).
 
-STRICT RULES:
-- A chunk is relevant ONLY if it contains specific data/facts that directly answer or are necessary for answering the query.
-- Chunks from the same document but different sections/tables than the one asked about are NOT relevant.
-- Headers, footers, table of contents entries, footnotes, and general introductory text are NOT relevant unless they contain answerable content.
-- Be strict: when in doubt, mark as NOT relevant.
+RULES:
+- Mark RELEVANT if the chunk contains any specific facts, data, instructions, or context that a thorough answer to the query would reasonably draw from — even partially.
+- Mark NOT RELEVANT only if the chunk is clearly off-topic, pure boilerplate (page numbers, headers/footers with no content, ToC entries), or unrelated to the query's subject.
+- Being from a different section/table than the "ideal" one does NOT by itself make a chunk irrelevant if it still discusses the same topic/equipment/issue.
+- When genuinely ambiguous, lean RELEVANT.
 
 Respond with ONLY a JSON object: {"relevant": true/false, "reasoning": "one sentence explanation"}
 
@@ -1594,22 +1594,33 @@ async function evaluateRetrievalBackground(
   let firstRelevantRank: number | null = null
   let judgeFailures = 0
 
-  for (let i = 0; i < Math.min(chunkTexts.length, topKEval); i++) {
-    const { id: chunkId, text: chunkText } = chunkTexts[i]
-    const result = await evaluateChunkRelevance(queryText, chunkText, apiTier)
-    // Treat parser/LLM failure as "unknown", not as a confirmed-irrelevant chunk.
-    const isFailure = result.reasoning === 'Parse error' || result.reasoning === 'LLM evaluation failed' || result.reasoning === 'LOVABLE_API_KEY not configured' || result.reasoning === 'GOOGLE_API_KEY not configured'
-    if (isFailure) judgeFailures++
-    labels.push({ chunk_id: chunkId, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 })
+  const totalChecked = Math.min(chunkTexts.length, topKEval)
+  const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'LOVABLE_API_KEY not configured', 'GOOGLE_API_KEY not configured', 'Chunk not found'])
+  const CONCURRENCY = 25
 
-    if (result.relevant && firstRelevantRank === null && i < topK) {
-      firstRelevantRank = i + 1
-    }
+  for (let start = 0; start < totalChecked; start += CONCURRENCY) {
+    const end = Math.min(start + CONCURRENCY, totalChecked)
+    const idxs: number[] = []
+    for (let i = start; i < end; i++) idxs.push(i)
+    await Promise.all(idxs.map(async (i) => {
+      const chunk = chunkTexts[i]
+      if (!chunk?.text) {
+        labels[i] = { chunk_id: chunk?.id || 'unknown', relevant: false, reasoning: 'Chunk not found', rank: i + 1 }
+        judgeFailures++
+        return
+      }
+      const result = await evaluateChunkRelevance(queryText, chunk.text, apiTier)
+      if (FAILURE_REASONS.has(result.reasoning)) judgeFailures++
+      labels[i] = { chunk_id: chunk.id, relevant: result.relevant, reasoning: result.reasoning, rank: i + 1 }
+    }))
+  }
+
+  for (let i = 0; i < labels.length; i++) {
+    if (labels[i]?.relevant && firstRelevantRank === null && i < topK) firstRelevantRank = i + 1
   }
 
   // If most of the judge calls failed, do NOT stamp evaluated_at with bogus zeros —
   // that pollutes the analytics "no judged-relevant chunk" rate. Persist labels for diagnosis only.
-  const totalChecked = Math.min(chunkTexts.length, topKEval)
   if (totalChecked > 0 && judgeFailures / totalChecked >= 0.5) {
     await supabase.from('query_logs').update({
       relevance_labels: labels,
