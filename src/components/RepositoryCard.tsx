@@ -894,7 +894,6 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
     setIsLoadingDocuments(true);
     fetchDocuments();
     const docsChannel = supabase.channel('repository-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments).subscribe();
-    const chunksChannel = supabase.channel('repository-chunks').on('postgres_changes', { event: '*', schema: 'public', table: 'chunks' }, fetchDocuments).subscribe();
 
     const poll = setInterval(async () => {
       const docs = documentsRef.current;
@@ -991,7 +990,6 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
 
     return () => {
       supabase.removeChannel(docsChannel);
-      supabase.removeChannel(chunksChannel);
       clearInterval(poll);
       clearScheduledRecoveryTimers();
     };
