@@ -147,8 +147,9 @@ Deno.serve(async (req) => {
         if (page.length < PAGE) break
       }
 
-      // Exclude benchmark rows from global portfolio analytics — they live in the
-      // benchmark section only and would skew accuracy/precision/recall.
+      // Benchmark rows are excluded from latency/tokens/cost (production portfolio
+      // metrics only), but INCLUDED in retrieval_eval so the Retrieval Quality
+      // card matches the Confusion Matrix (which shows every evaluated row).
       const isBenchmarkRow = (l: any) => {
         const em = (l.eval_model || '') as string
         const rt = (l.response_text || '') as string
@@ -156,7 +157,7 @@ Deno.serve(async (req) => {
       }
       const logs = rawLogs.filter(l => !isBenchmarkRow(l))
 
-      if (logs.length === 0) {
+      if (rawLogs.length === 0) {
         return new Response(JSON.stringify({ error: 'No query logs found' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       }
 
@@ -170,12 +171,12 @@ Deno.serve(async (req) => {
       }
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
-      const evaluatedLogs = logs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
-      const judgeFailedLogs = logs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
-      const pendingLogs = logs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
+      // Retrieval eval uses ALL evaluated rows (benchmark + ad-hoc) so the count
+      // matches the Confusion Matrix exactly.
+      const evaluatedLogs = rawLogs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
+      const judgeFailedLogs = rawLogs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
+      const pendingLogs = rawLogs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
 
-      // Valid scored rows include both hits and true no-hit retrieval misses.
-      // first_relevant_rank is null for a valid no-hit row, so never use it as the evaluated denominator.
       const validScoredLogs = evaluatedLogs.filter(l => l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined && l.relevant_in_top_k !== null && l.relevant_in_top_k !== undefined)
       const noJudgedRelevantCount = validScoredLogs.filter(l => (l.relevant_in_top_k ?? 0) === 0).length
 
@@ -227,7 +228,7 @@ Deno.serve(async (req) => {
         retrieval_eval: evaluatedLogs.length > 0 ? {
           evaluated_count: validScoredLogs.length,
           total_evaluated_count: evaluatedLogs.length,
-          total_queries: logs.length,
+          total_queries: rawLogs.length,
           no_judged_relevant_count: noJudgedRelevantCount,
           judge_failed_count: judgeFailedLogs.length,
           abstention_count: abstentionCount,
