@@ -908,7 +908,7 @@ Provide a clear, concise answer based on the actual procedural content in the co
     const skipJudge = (req.headers.get('x-skip-judge') || '').toLowerCase() === 'true'
     const bgTask = (queryLogId && !skipJudge) ? (async () => {
       try {
-        await evaluateRetrievalBackground(supabase, queryLogId, question, evalChunkTexts, topK, topKEval, apiTier)
+        await evaluateRetrievalBackground(supabase, queryLogId, question, answer, evalChunkTexts, topK, topKEval, apiTier)
       } catch (e) {
         console.error('Background eval error:', e)
       }
