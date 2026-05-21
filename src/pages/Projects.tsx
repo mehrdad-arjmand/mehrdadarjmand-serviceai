@@ -333,7 +333,7 @@ const Projects = () => {
   const [metrics, setMetrics] = useState<MetricCard[]>([
   { label: "QUALITY", sublabel: "Accuracy", value: "—" },
   { label: "TIME", sublabel: "Median latency (p50)", value: "—" },
-  { label: "COST", sublabel: "Average cost per query", value: "—" }]
+  { label: "COST", sublabel: "Average cost per 1,000 queries", value: "—" }]
 
   );
 
