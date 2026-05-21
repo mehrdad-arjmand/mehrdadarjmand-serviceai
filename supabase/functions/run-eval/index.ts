@@ -15,23 +15,39 @@ async function verifyAdmin(req: Request) {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) throw new Error('Unauthorized')
 
-  const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-    headers: { Authorization: authHeader, apikey: supabaseAnonKey },
-  })
-  if (!userRes.ok) throw new Error('Unauthorized')
-  const user = await userRes.json()
-  if (!user?.id) throw new Error('Unauthorized')
-
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
+  const benchUserId = req.headers.get('x-benchmark-user-id')
+  const bearerToken = authHeader.slice(7).trim()
+  let user: { id: string } | null = null
+
+  // Benchmark bypass: bearer must match bench_secrets.service_role
+  if (benchUserId) {
+    const { data: benchRow } = await supabase
+      .from('bench_secrets').select('value').eq('key', 'service_role').maybeSingle()
+    if (benchRow?.value && benchRow.value === bearerToken) {
+      user = { id: benchUserId }
+    }
+  }
+
+  if (!user) {
+    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { Authorization: authHeader, apikey: supabaseAnonKey },
+    })
+    if (!userRes.ok) throw new Error('Unauthorized')
+    const u = await userRes.json()
+    if (!u?.id) throw new Error('Unauthorized')
+    user = { id: u.id }
+  }
+
   const { data: isAdmin } = await supabase.rpc('check_is_admin', { check_user_id: user.id })
   if (!isAdmin) throw new Error('Forbidden: admin only')
 
-  // Get user's API tier
   const { data: userApiTier } = await supabase.rpc('get_user_api_tier', { p_user_id: user.id })
   const apiTier = userApiTier || 'free'
 
   return { supabase, user, apiTier }
 }
+
 
 function getEmbeddingApiKey(apiTier: string): string {
   const key = apiTier === 'paid'
