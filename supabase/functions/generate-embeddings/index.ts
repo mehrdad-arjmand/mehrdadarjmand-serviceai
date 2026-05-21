@@ -660,6 +660,7 @@ async function processPaidTier(
           ingestion_stage: complete ? 'complete' : 'embedding',
           ingested_chunks: embedded,
           ingestion_error: complete ? null : (docError instanceof Error ? docError.message.slice(0, 1000) : 'Embedding paused before completion; retry will resume remaining chunks.'),
+          embedding_locked_until: null,
         })
         .eq('id', currentDocId)
 
