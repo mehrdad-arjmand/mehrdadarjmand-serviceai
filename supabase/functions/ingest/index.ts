@@ -486,7 +486,17 @@ Deno.serve(async (req) => {
 
         await triggerEmbeddings(allReadyDocIds, `${allReadyDocIds.length} document(s)`) 
       }
-    })()
+    })().catch(async (err) => {
+      console.error('backgroundWork uncaught error, marking in-progress docs as failed:', err)
+      const errMsg = err instanceof Error ? err.message : 'Unknown background error'
+      const stuckIds = workItems.map(w => w.doc.id)
+      if (stuckIds.length > 0) {
+        await supabase.from('documents')
+          .update({ ingestion_status: 'failed', ingestion_stage: 'failed', ingestion_error: errMsg.slice(0, 1000) })
+          .in('id', stuckIds)
+          .in('ingestion_status', ['pending', 'in_progress', 'processing_embeddings'])
+      }
+    })
 
     ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
 
@@ -542,14 +552,22 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
     return { text: applyRegexNormalization(pageTexts), pageCount }
   }
 
+  // Hard wall-clock timeout so the Edge Function can't silently hang on Gemini.
+  // If cleaning takes too long, fall back to regex normalization and continue.
+  const CLEAN_TIMEOUT_MS = 90_000
   try {
-    const cleanedText = await cleanGarbledText(pageTexts, googleApiKey, apiTier)
+    const cleanedText = await Promise.race([
+      cleanGarbledText(pageTexts, googleApiKey, apiTier),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error(`cleanGarbledText timeout after ${CLEAN_TIMEOUT_MS}ms`)), CLEAN_TIMEOUT_MS)
+      ),
+    ])
     if (cleanedText && cleanedText.length > 50) {
       console.log(`Google AI cleaned text: ${cleanedText.length} characters`)
       return { text: cleanedText, pageCount }
     }
   } catch (err) {
-    console.error('Google AI text cleanup failed:', err)
+    console.error('Google AI text cleanup failed/timed out, using regex fallback:', err)
   }
 
   return { text: applyRegexNormalization(pageTexts), pageCount }
