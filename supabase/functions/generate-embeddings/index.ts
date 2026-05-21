@@ -5,10 +5,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-// ── Paid tier config (unchanged) ──
-const BATCH_EMBED_SIZE_PAID = 10
-const CHUNKS_PER_FETCH = 20
-const PAID_MAX_RUNTIME_MS = 20_000
+// ── Paid tier config ──
+const BATCH_EMBED_SIZE_PAID = 50
+const CHUNKS_PER_FETCH = 150
+const PAID_MAX_RUNTIME_MS = 55_000
 const MAX_CHUNK_TEXT_LENGTH = 6000
 
 // ── Free tier config (serial + resumable) ──
@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════════
       // PAID TIER: Original full-document processing (unchanged)
       // ═══════════════════════════════════════════════════════════════════
-      const results = await processPaidTier(supabase, apiKey, docIds, isFullMode, userId)
+      const results = await processPaidTier(supabase, apiKey, docIds, isFullMode, userId, supabaseUrl, supabaseServiceKey, supabaseAnonKey)
       return new Response(
         JSON.stringify({ success: true, tier: 'paid', documents: results }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
