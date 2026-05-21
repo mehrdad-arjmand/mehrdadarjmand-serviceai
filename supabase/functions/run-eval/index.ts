@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
     if (action === 'analytics') {
       // Paginate to bypass PostgREST 1000-row cap
       const PAGE = 1000
-      const logs: any[] = []
+      const rawLogs: any[] = []
       for (let from = 0; ; from += PAGE) {
         const { data: page, error } = await supabase
           .from('query_logs')
@@ -143,9 +143,18 @@ Deno.serve(async (req) => {
           .range(from, from + PAGE - 1)
         if (error) break
         if (!page || page.length === 0) break
-        logs.push(...page)
+        rawLogs.push(...page)
         if (page.length < PAGE) break
       }
+
+      // Exclude benchmark rows from global portfolio analytics — they live in the
+      // benchmark section only and would skew accuracy/precision/recall.
+      const isBenchmarkRow = (l: any) => {
+        const em = (l.eval_model || '') as string
+        const rt = (l.response_text || '') as string
+        return em === 'benchmark' || em.startsWith('benchmark:') || rt.startsWith('[benchmark:')
+      }
+      const logs = rawLogs.filter(l => !isBenchmarkRow(l))
 
       if (logs.length === 0) {
         return new Response(JSON.stringify({ error: 'No query logs found' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
@@ -348,14 +357,18 @@ Deno.serve(async (req) => {
       const evalSet = evalSetAll.slice(offset, offset + limit)
 
       const results: any[] = []
-      // Keep eval_model as the evaluation method: benchmark by default,
-      // concrete judge model only when an LLM judge was explicitly requested.
+      // Keep eval_model semantics simple: 'benchmark' (default) or judge model name.
       const runTag = `benchmark:${benchmarkName}${adaptive ? ':adaptive' : ''}${judgeEnabled ? ':judge' : ''}`
       const EVAL_TAG = judgeEnabled ? EVAL_MODEL : 'benchmark'
 
-      // Only delete the current mode on the first batch (offset=0) so paginated runs accumulate.
+      // Each new benchmark run REPLACES all previous benchmark rows so the
+      // global Query Analytics / confusion matrix never accumulates duplicates.
+      // Match every benchmark variant: legacy tags ('benchmark:<name>[:judge|:adaptive]')
+      // and rows where response_text carries the benchmark marker.
       if (offset === 0) {
-        await supabase.from('query_logs').delete().eq('eval_model', EVAL_TAG)
+        await supabase.from('query_logs').delete().or(
+          `eval_model.eq.benchmark,eval_model.like.benchmark:%,response_text.like.[benchmark:%`
+        )
       }
 
       const { data: allDocs } = await supabase.from('documents').select('id')

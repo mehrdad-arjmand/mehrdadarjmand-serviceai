@@ -195,14 +195,20 @@ const QueryAnalytics = () => {
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from('query_logs')
-          .select('query_text, created_at, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
+          .select('query_text, created_at, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank, eval_model, response_text')
           .not('evaluated_at', 'is', null)
           .not('total_relevant_chunks', 'is', null)
           .not('relevant_in_top_k', 'is', null)
           .order('created_at', { ascending: false })
           .range(from, from + PAGE - 1);
         if (error || !data || data.length === 0) break;
-        logs.push(...data);
+        // Exclude benchmark rows — they belong to the benchmark section, not portfolio analytics.
+        const filtered = data.filter((l: any) => {
+          const em = (l.eval_model || '') as string;
+          const rt = (l.response_text || '') as string;
+          return !(em === 'benchmark' || em.startsWith('benchmark:') || rt.startsWith('[benchmark:'));
+        });
+        logs.push(...filtered);
         if (data.length < PAGE) break;
       }
       if (logs.length === 0) return;
