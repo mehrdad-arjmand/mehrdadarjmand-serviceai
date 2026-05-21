@@ -195,7 +195,7 @@ const QueryAnalytics = () => {
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from('query_logs')
-          .select('query_text, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
+          .select('query_text, created_at, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank')
           .not('evaluated_at', 'is', null)
           .not('total_relevant_chunks', 'is', null)
           .not('relevant_in_top_k', 'is', null)
@@ -218,6 +218,7 @@ const QueryAnalytics = () => {
         const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
         return {
           query: l.query_text?.slice(0, 80) || '',
+          created_at: l.created_at,
           top_k: l.top_k ?? 0,
           top_k_eval: l.top_k_eval ?? 0,
           relevant_in_top_k: tp,
