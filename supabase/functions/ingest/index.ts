@@ -486,7 +486,17 @@ Deno.serve(async (req) => {
 
         await triggerEmbeddings(allReadyDocIds, `${allReadyDocIds.length} document(s)`) 
       }
-    })()
+    })().catch(async (err) => {
+      console.error('backgroundWork uncaught error, marking in-progress docs as failed:', err)
+      const errMsg = err instanceof Error ? err.message : 'Unknown background error'
+      const stuckIds = workItems.map(w => w.doc.id)
+      if (stuckIds.length > 0) {
+        await supabase.from('documents')
+          .update({ ingestion_status: 'failed', ingestion_stage: 'failed', ingestion_error: errMsg.slice(0, 1000) })
+          .in('id', stuckIds)
+          .in('ingestion_status', ['pending', 'in_progress', 'processing_embeddings'])
+      }
+    })
 
     ;(globalThis as any).EdgeRuntime?.waitUntil?.(backgroundWork)
 
