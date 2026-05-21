@@ -488,8 +488,8 @@ async function processPaidTier(
         for (let i = 0; i < apiBatches.length; i += CONCURRENT_API_CALLS) {
           const concurrentBatches = apiBatches.slice(i, i + CONCURRENT_API_CALLS)
 
-          const batchResults = await Promise.all(
-            concurrentBatches.map(async (batch) => {
+          const batchResults: number[] = []
+          for (const batch of concurrentBatches) {
               const texts = batch.map(c => {
                 const text = c.text
                 if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
@@ -509,9 +509,24 @@ async function processPaidTier(
                 )
               )
 
-              return batch.length
-            })
-          )
+              batchResults.push(batch.length)
+
+              const { count: embeddedCountAfterSingleBatch } = await supabase
+                .from('chunks')
+                .select('id', { count: 'exact', head: true })
+                .eq('document_id', currentDocId)
+                .not('embedding', 'is', null)
+
+              await supabase
+                .from('documents')
+                .update({
+                  ingested_chunks: embeddedCountAfterSingleBatch || 0,
+                  ingestion_status: 'processing_embeddings',
+                  ingestion_stage: 'embedding',
+                  ingestion_error: null,
+                })
+                .eq('id', currentDocId)
+          }
 
           totalProcessed += batchResults.reduce((a, b) => a + b, 0)
 
