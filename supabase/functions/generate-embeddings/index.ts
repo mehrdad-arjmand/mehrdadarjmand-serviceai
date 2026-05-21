@@ -6,8 +6,8 @@ const corsHeaders = {
 }
 
 // ── Paid tier config (unchanged) ──
-const BATCH_EMBED_SIZE_PAID = 25
-const CHUNKS_PER_FETCH = 50
+const BATCH_EMBED_SIZE_PAID = 10
+const CHUNKS_PER_FETCH = 20
 const PAID_MAX_RUNTIME_MS = 20_000
 const MAX_CHUNK_TEXT_LENGTH = 6000
 
@@ -449,6 +449,41 @@ async function processFreeTier(
 // ═══════════════════════════════════════════════════════════════════════════════
 // PAID TIER: Original full-document processing (unchanged from before)
 // ═══════════════════════════════════════════════════════════════════════════════
+async function syncPaidDocumentProgress(
+  supabase: ReturnType<typeof createClient>,
+  docId: string,
+  clearError = false,
+) {
+  const { count: embeddedCount } = await supabase
+    .from('chunks')
+    .select('id', { count: 'exact', head: true })
+    .eq('document_id', docId)
+    .not('embedding', 'is', null)
+
+  const { data: doc } = await supabase
+    .from('documents')
+    .select('total_chunks')
+    .eq('id', docId)
+    .single()
+
+  const embedded = embeddedCount || 0
+  const total = doc?.total_chunks || 0
+  const complete = total > 0 && embedded >= total
+  const updateData: Record<string, unknown> = {
+    ingested_chunks: embedded,
+    ingestion_status: complete ? 'complete' : 'processing_embeddings',
+    ingestion_stage: complete ? 'complete' : 'embedding',
+  }
+  if (clearError || complete) updateData.ingestion_error = null
+
+  await supabase
+    .from('documents')
+    .update(updateData)
+    .eq('id', docId)
+
+  return { embedded, total, complete }
+}
+
 async function processPaidTier(
   supabase: ReturnType<typeof createClient>,
   apiKey: string,
