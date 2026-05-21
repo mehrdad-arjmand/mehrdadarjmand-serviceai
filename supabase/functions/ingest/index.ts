@@ -517,6 +517,63 @@ Deno.serve(async (req) => {
   }
 })
 
+async function extractAndChunkPdf(
+  arrayBuffer: ArrayBuffer,
+  supabase: any,
+  docId: string,
+  equipment: string | null,
+): Promise<{ pageCount: number; totalChunks: number }> {
+  const { getDocument } = await import('https://esm.sh/pdfjs-serverless@0.2.2')
+  const document = await getDocument({ data: new Uint8Array(arrayBuffer), useSystemFonts: true }).promise
+  const pageCount = document.numPages
+  const chunkSize = 800
+  const overlapSize = 200
+  const step = chunkSize - overlapSize
+  const CHUNK_BATCH = 50
+
+  await supabase.from('documents').update({ page_count: pageCount, ingestion_stage: 'extracting' }).eq('id', docId)
+
+  let rollingText = ''
+  let chunkIndex = 0
+  let batch: { document_id: string; chunk_index: number; text: string; equipment: string | null }[] = []
+
+  const flush = async () => {
+    if (batch.length === 0) return
+    const { error } = await supabase.from('chunks').insert(batch)
+    if (error) throw error
+    batch = []
+    await supabase.from('documents').update({ ingestion_stage: 'chunking', total_chunks: chunkIndex }).eq('id', docId)
+  }
+
+  for (let i = 1; i <= pageCount; i++) {
+    const page = await document.getPage(i)
+    const content = await page.getTextContent()
+    const pageText = content.items.map((item: any) => item.str).join(' ').replace(/\s+/g, ' ').trim()
+    rollingText = `${rollingText}\n\n${pageText}`.trim()
+
+    while (rollingText.length >= chunkSize) {
+      const chunkText = rollingText.slice(0, chunkSize)
+      if (chunkText.trim().length > 0) {
+        batch.push({ document_id: docId, chunk_index: chunkIndex++, text: chunkText, equipment })
+      }
+      rollingText = rollingText.slice(step)
+      if (batch.length >= CHUNK_BATCH) await flush()
+    }
+
+    if (i % 10 === 0) {
+      await supabase.from('documents').update({ page_count: pageCount, ingestion_stage: 'extracting', total_chunks: chunkIndex }).eq('id', docId)
+    }
+  }
+
+  if (rollingText.trim().length > 0) {
+    batch.push({ document_id: docId, chunk_index: chunkIndex++, text: rollingText.slice(0, chunkSize), equipment })
+  }
+  await flush()
+
+  await supabase.from('documents').update({ total_chunks: chunkIndex, page_count: pageCount }).eq('id', docId)
+  return { pageCount, totalChunks: chunkIndex }
+}
+
 async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: string | null, apiTier?: string): Promise<{ text: string; pageCount: number }> {
   const { getDocument } = await import('https://esm.sh/pdfjs-serverless@0.2.2')
   const uint8Array = new Uint8Array(arrayBuffer)
