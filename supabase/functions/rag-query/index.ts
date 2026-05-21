@@ -1581,10 +1581,20 @@ Is this chunk relevant to answering the query?`
   return { relevant: false, reasoning: 'LLM evaluation failed' }
 }
 
+function getCitedSourceRanks(responseText: string | null | undefined): Set<number> {
+  const ranks = new Set<number>()
+  for (const match of (responseText || '').matchAll(/\bSource\s+(\d+)\b/gi)) {
+    const rank = Number(match[1])
+    if (Number.isFinite(rank) && rank > 0) ranks.add(rank)
+  }
+  return ranks
+}
+
 async function evaluateRetrievalBackground(
   supabase: any,
   queryLogId: string,
   queryText: string,
+  responseText: string,
   chunkTexts: { id: string; text: string }[],
   topK: number,
   topKEval: number,
@@ -1617,6 +1627,18 @@ async function evaluateRetrievalBackground(
 
   for (let i = 0; i < labels.length; i++) {
     if (labels[i]?.relevant && firstRelevantRank === null && i < topK) firstRelevantRank = i + 1
+  }
+
+  for (const rank of getCitedSourceRanks(responseText)) {
+    const i = rank - 1
+    if (i >= 0 && i < Math.min(labels.length, topK) && labels[i]) {
+      labels[i] = {
+        ...labels[i],
+        relevant: true,
+        reasoning: labels[i].relevant ? labels[i].reasoning : 'Marked relevant because the assistant answer cited this source as supporting evidence.',
+      }
+      if (firstRelevantRank === null || rank < firstRelevantRank) firstRelevantRank = rank
+    }
   }
 
   // If most of the judge calls failed, do NOT stamp evaluated_at with bogus zeros —
