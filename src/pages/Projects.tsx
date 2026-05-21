@@ -419,7 +419,7 @@ const Projects = () => {
         sublabel: "Median latency (p50)",
         value: p50 >= 1000 ? `${(p50 / 1000).toFixed(1)} seconds` : `${p50} ms`,
       },
-      { label: "COST", sublabel: "Average cost per 1,000 queries", value: `$${avgCostPerThousand.toFixed(4)}` },
+      { label: "COST", sublabel: "Average cost per 1,000 queries", value: `$${avgCostPerThousand.toFixed(2)}` },
     ]);
   };
 
