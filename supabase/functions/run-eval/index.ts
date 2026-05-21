@@ -469,31 +469,31 @@ Deno.serve(async (req) => {
         })
       }
 
-      const eligibleResults = perQueryResults.filter(r => r.first_relevant_rank !== null)
-      const sumRelevantInTopK = eligibleResults.reduce((sum, r) => sum + (r.relevant_in_top_k ?? 0), 0)
-      const sumTopK = eligibleResults.reduce((sum, r) => sum + (r.k ?? 0), 0)
-      const sumTotalRelevant = eligibleResults.reduce((sum, r) => sum + (r.total_relevant ?? 0), 0)
+      const validResults = perQueryResults
+      const sumRelevantInTopK = validResults.reduce((sum, r) => sum + (r.relevant_in_top_k ?? 0), 0)
+      const sumTopK = validResults.reduce((sum, r) => sum + (r.k ?? 0), 0)
+      const sumTotalRelevant = validResults.reduce((sum, r) => sum + (r.total_relevant ?? 0), 0)
       const avgPrecision = sumTopK > 0 ? sumRelevantInTopK / sumTopK : 0
       const avgRecall = sumTotalRelevant > 0 ? sumRelevantInTopK / sumTotalRelevant : 0
-      const avgHitRate = eligibleResults.length > 0 ? eligibleResults.reduce((s, r) => s + r.hit_rate, 0) / eligibleResults.length : 0
-      const mrr = eligibleResults.length > 0 ? eligibleResults.reduce((s, r) => s + (r.first_relevant_rank ? 1 / r.first_relevant_rank : 0), 0) / eligibleResults.length : 0
+      const avgHitRate = validResults.length > 0 ? validResults.reduce((s, r) => s + r.hit_rate, 0) / validResults.length : 0
+      const mrr = validResults.length > 0 ? validResults.reduce((s, r) => s + (r.first_relevant_rank ? 1 / r.first_relevant_rank : 0), 0) / validResults.length : 0
 
       await supabase.from('eval_runs').insert({
         created_by: user.id,
-        total_queries: eligibleResults.length,
+        total_queries: validResults.length,
         avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
         avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
         avg_hit_rate_at_k: parseFloat(avgHitRate.toFixed(4)),
         mrr: parseFloat(mrr.toFixed(4)),
         k_used: 'per-query top_k',
         eval_model: EVAL_MODEL,
-        notes: `Evaluated ${total} queries; aggregates use only rows with first_relevant_rank present.`,
+        notes: `Evaluated ${total} queries; aggregates include valid no-hit rows as retrieval misses.`,
       })
 
       return new Response(JSON.stringify({
         success: true,
         evaluated: total,
-        evaluated_nonzero: eligibleResults.length,
+        evaluated_nonzero: validResults.filter(r => r.first_relevant_rank !== null).length,
         eval_model: EVAL_MODEL,
         k_used: 'per-query top_k (top_k_eval stored separately)',
         ranking_confirmed: 'retrieved_chunk_ids stored in ranked order after re-ranking',
