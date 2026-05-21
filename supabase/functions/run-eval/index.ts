@@ -348,9 +348,10 @@ Deno.serve(async (req) => {
       const evalSet = evalSetAll.slice(offset, offset + limit)
 
       const results: any[] = []
-      // eval_model tag encodes mode + judge so CSV/Analytics can distinguish runs
-      const tagSuffix = `${adaptive ? ':adaptive' : ''}${judgeEnabled ? ':judge' : ''}`
-      const EVAL_TAG = `benchmark:${benchmarkName}${tagSuffix}`
+      // Keep eval_model as the evaluation method: benchmark by default,
+      // concrete judge model only when an LLM judge was explicitly requested.
+      const runTag = `benchmark:${benchmarkName}${adaptive ? ':adaptive' : ''}${judgeEnabled ? ':judge' : ''}`
+      const EVAL_TAG = judgeEnabled ? EVAL_MODEL : 'benchmark'
 
       // Only delete the current mode on the first batch (offset=0) so paginated runs accumulate.
       if (offset === 0) {
@@ -458,7 +459,7 @@ Deno.serve(async (req) => {
           query_text: item.query_text,
           retrieved_chunk_ids: retrievedIds,
           retrieved_similarities: retrievedSims,
-          response_text: `[${EVAL_TAG}] tier=${item.tier || 'n/a'} k=${kUsed}${adaptive ? `/pool=${POOL}` : ''}${judgeEnabled ? ' judge=on' : ''}`,
+          response_text: `[${runTag}] tier=${item.tier || 'n/a'} k=${kUsed}${adaptive ? `/pool=${POOL}` : ''}${judgeEnabled ? ` judge=${EVAL_MODEL}` : ''}`,
           citations_json: [],
           input_tokens: 0, output_tokens: 0, total_tokens: 0,
           execution_time_ms: elapsed,
