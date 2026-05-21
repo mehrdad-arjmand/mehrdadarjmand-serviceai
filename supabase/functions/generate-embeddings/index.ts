@@ -619,6 +619,15 @@ async function processPaidTier(
       } while (!isComplete)
 
       const finalProgress = await syncPaidDocumentProgress(supabase, currentDocId, isComplete)
+      await supabase
+        .from('documents')
+        .update({ embedding_locked_until: null })
+        .eq('id', currentDocId)
+
+      if (isFullMode && !finalProgress.complete) {
+        console.log(`Paid slice continuing immediately at ${finalProgress.embedded}/${finalProgress.total} chunks for ${currentDocId}`)
+        queuePaidContinuation(supabaseUrl, supabaseServiceKey, supabaseAnonKey, currentDocId)
+      }
 
       results.push({
         documentId: currentDocId,
