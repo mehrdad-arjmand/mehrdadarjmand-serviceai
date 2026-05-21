@@ -202,14 +202,11 @@ const QueryAnalytics = () => {
           .order('created_at', { ascending: false })
           .range(from, from + PAGE - 1);
         if (error || !data || data.length === 0) break;
-        // Exclude benchmark rows — they belong to the benchmark section, not portfolio analytics.
-        const filtered = data.filter((l: any) => {
-          const em = (l.eval_model || '') as string;
-          const rt = (l.response_text || '') as string;
-          return !(em === 'benchmark' || em.startsWith('benchmark:') || rt.startsWith('[benchmark:'));
-        });
-        logs.push(...filtered);
+        // Include all evaluated rows (benchmark + ad-hoc). Older benchmark runs are
+        // deleted on each new run, so only the latest benchmark is ever present.
+        logs.push(...data);
         if (data.length < PAGE) break;
+
       }
       if (logs.length === 0) return;
 
