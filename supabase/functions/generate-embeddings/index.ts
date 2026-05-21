@@ -559,57 +559,24 @@ async function processPaidTier(
 
         if (Date.now() - startedAt >= PAID_MAX_RUNTIME_MS) break
 
-        const { count: embeddedCount } = await supabase
-          .from('chunks')
-          .select('id', { count: 'exact', head: true })
-          .eq('document_id', currentDocId)
-          .not('embedding', 'is', null)
-
-        const { data: doc } = await supabase
-          .from('documents')
-          .select('total_chunks')
-          .eq('id', currentDocId)
-          .single()
-
-        const totalChunks = doc?.total_chunks || 0
-        const embedded = embeddedCount || 0
-        isComplete = embedded >= totalChunks
-
-        await supabase
-          .from('documents')
-          .update({ ingested_chunks: embedded })
-          .eq('id', currentDocId)
+        const syncedProgress = await syncPaidDocumentProgress(supabase, currentDocId)
+        const totalChunks = syncedProgress.total
+        const embedded = syncedProgress.embedded
+        isComplete = syncedProgress.complete
 
         console.log(`Paid progress: ${embedded}/${totalChunks} chunks for ${currentDocId}`)
 
         if (!isFullMode) break
       } while (!isComplete)
 
-      if (isComplete) {
-        await supabase
-          .from('documents')
-          .update({ ingestion_status: 'complete' })
-          .eq('id', currentDocId)
-      }
-
-      const { count: finalEmbedded } = await supabase
-        .from('chunks')
-        .select('id', { count: 'exact', head: true })
-        .eq('document_id', currentDocId)
-        .not('embedding', 'is', null)
-
-      const { data: finalDoc } = await supabase
-        .from('documents')
-        .select('total_chunks')
-        .eq('id', currentDocId)
-        .single()
+      const finalProgress = await syncPaidDocumentProgress(supabase, currentDocId, isComplete)
 
       results.push({
         documentId: currentDocId,
         processed: totalProcessed,
-        embedded: finalEmbedded || 0,
-        total: finalDoc?.total_chunks || 0,
-        complete: isComplete,
+        embedded: finalProgress.embedded,
+        total: finalProgress.total,
+        complete: finalProgress.complete,
       })
     } catch (docError) {
       console.error(`Error embedding document ${currentDocId}:`, docError)
