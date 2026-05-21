@@ -5,10 +5,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-// ── Paid tier config (unchanged) ──
-const BATCH_EMBED_SIZE_PAID = 10
-const CHUNKS_PER_FETCH = 20
-const PAID_MAX_RUNTIME_MS = 20_000
+// ── Paid tier config ──
+const BATCH_EMBED_SIZE_PAID = 50
+const CHUNKS_PER_FETCH = 150
+const PAID_MAX_RUNTIME_MS = 55_000
+const PAID_LOCK_DURATION_MS = 2 * 60_000
 const MAX_CHUNK_TEXT_LENGTH = 6000
 
 // ── Free tier config (serial + resumable) ──
@@ -132,7 +133,7 @@ Deno.serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════════
       // PAID TIER: Original full-document processing (unchanged)
       // ═══════════════════════════════════════════════════════════════════
-      const results = await processPaidTier(supabase, apiKey, docIds, isFullMode, userId)
+      const results = await processPaidTier(supabase, apiKey, docIds, isFullMode, userId, supabaseUrl, supabaseServiceKey, supabaseAnonKey)
       return new Response(
         JSON.stringify({ success: true, tier: 'paid', documents: results }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -484,14 +485,48 @@ async function syncPaidDocumentProgress(
   return { embedded, total, complete }
 }
 
+function queuePaidContinuation(
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  supabaseAnonKey: string,
+  docId: string,
+) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
+  const continuation = fetch(`${supabaseUrl}/functions/v1/generate-embeddings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${supabaseServiceKey}`,
+      'apikey': supabaseAnonKey,
+    },
+    body: JSON.stringify({ documentId: docId, mode: 'full' }),
+    signal: controller.signal,
+  })
+    .then(() => clearTimeout(timeoutId))
+    .catch((err) => {
+      clearTimeout(timeoutId)
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.log(`Paid continuation dispatched for ${docId}`)
+        return
+      }
+      console.error(`Paid continuation trigger failed for ${docId}:`, err)
+    })
+
+  ;(globalThis as any).EdgeRuntime?.waitUntil?.(continuation)
+}
+
 async function processPaidTier(
   supabase: ReturnType<typeof createClient>,
   apiKey: string,
   docIds: string[],
   isFullMode: boolean,
   userId: string,
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  supabaseAnonKey: string,
 ) {
-  const CONCURRENT_API_CALLS = 10
+  const CONCURRENT_API_CALLS = 3
   const results: { documentId: string; processed: number; embedded: number; total: number; complete: boolean }[] = []
 
   for (let docIndex = 0; docIndex < docIds.length; docIndex++) {
@@ -500,6 +535,35 @@ async function processPaidTier(
 
     let totalProcessed = 0
     let isComplete = false
+    const now = new Date()
+
+    const { data: paidDocMeta } = await supabase
+      .from('documents')
+      .select('embedding_locked_until, ingested_chunks, total_chunks')
+      .eq('id', currentDocId)
+      .single()
+
+    if (paidDocMeta?.embedding_locked_until && new Date(paidDocMeta.embedding_locked_until) > now) {
+      console.log(`Paid document ${currentDocId} is already being embedded until ${paidDocMeta.embedding_locked_until}; skipping duplicate worker`)
+      results.push({
+        documentId: currentDocId,
+        processed: 0,
+        embedded: paidDocMeta.ingested_chunks || 0,
+        total: paidDocMeta.total_chunks || 0,
+        complete: false,
+      })
+      continue
+    }
+
+    await supabase
+      .from('documents')
+      .update({
+        embedding_locked_until: new Date(Date.now() + PAID_LOCK_DURATION_MS).toISOString(),
+        ingestion_status: 'processing_embeddings',
+        ingestion_stage: 'embedding',
+      })
+      .eq('id', currentDocId)
+
     const startedAt = Date.now()
 
     try {
@@ -523,8 +587,7 @@ async function processPaidTier(
         for (let i = 0; i < apiBatches.length; i += CONCURRENT_API_CALLS) {
           const concurrentBatches = apiBatches.slice(i, i + CONCURRENT_API_CALLS)
 
-          const batchResults: number[] = []
-          for (const batch of concurrentBatches) {
+          const batchResults = await Promise.all(concurrentBatches.map(async (batch) => {
               const texts = batch.map(c => {
                 const text = c.text
                 if (typeof text !== 'string' || text.trim().length === 0) return 'empty chunk'
@@ -542,10 +605,8 @@ async function processPaidTier(
                 if (updateError) throw updateError
               }
 
-              batchResults.push(batch.length)
-
-              await syncPaidDocumentProgress(supabase, currentDocId, true)
-          }
+              return batch.length
+          }))
 
           totalProcessed += batchResults.reduce((a, b) => a + b, 0)
 
@@ -570,6 +631,15 @@ async function processPaidTier(
       } while (!isComplete)
 
       const finalProgress = await syncPaidDocumentProgress(supabase, currentDocId, isComplete)
+      await supabase
+        .from('documents')
+        .update({ embedding_locked_until: null })
+        .eq('id', currentDocId)
+
+      if (isFullMode && !finalProgress.complete) {
+        console.log(`Paid slice continuing immediately at ${finalProgress.embedded}/${finalProgress.total} chunks for ${currentDocId}`)
+        queuePaidContinuation(supabaseUrl, supabaseServiceKey, supabaseAnonKey, currentDocId)
+      }
 
       results.push({
         documentId: currentDocId,
@@ -602,6 +672,7 @@ async function processPaidTier(
           ingestion_stage: complete ? 'complete' : 'embedding',
           ingested_chunks: embedded,
           ingestion_error: complete ? null : (docError instanceof Error ? docError.message.slice(0, 1000) : 'Embedding paused before completion; retry will resume remaining chunks.'),
+          embedding_locked_until: null,
         })
         .eq('id', currentDocId)
 
