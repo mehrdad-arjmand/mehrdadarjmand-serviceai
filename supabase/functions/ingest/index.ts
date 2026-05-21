@@ -313,7 +313,9 @@ Deno.serve(async (req) => {
 
         console.log(`Triggering embeddings for ${label}: ${docIds.join(', ')}`)
 
-        try {
+        const triggerOne = async (docId: string, index: number) => {
+          if (index > 0) await new Promise(r => setTimeout(r, Math.min(index * 750, 6000)))
+
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 10000) // fire-and-forget handshake only
 
@@ -326,7 +328,7 @@ Deno.serve(async (req) => {
                 'Authorization': `Bearer ${supabaseServiceKey}`,
                 'apikey': supabaseAnonKey,
               },
-              body: JSON.stringify({ documentIds: docIds, mode: 'slice' }),
+              body: JSON.stringify({ documentId: docId, mode: 'full' }),
               signal: controller.signal,
             }
           )
@@ -334,31 +336,24 @@ Deno.serve(async (req) => {
 
           if (!embRes.ok) {
             const errText = await embRes.text().catch(() => 'unknown')
-            console.error(`Embeddings trigger failed for ${label}: ${embRes.status} - ${errText}`)
-            for (const docId of docIds) {
-              await supabase.from('documents').update({
-                ingestion_status: 'failed',
-                ingestion_error: `Embedding trigger failed: HTTP ${embRes.status}`
-              }).eq('id', docId)
-            }
+            console.error(`Embeddings trigger failed for ${docId}: ${embRes.status} - ${errText}`)
             return
           }
 
-          console.log(`Embeddings trigger accepted for ${label}`)
-        } catch (err) {
-          if (err instanceof DOMException && err.name === 'AbortError') {
-            console.log(`Embeddings trigger timed out for ${label}, continuing (function running server-side)`)
-            return
-          }
-
-          console.error(`Embeddings trigger error for ${label}:`, err)
-          for (const docId of docIds) {
-            await supabase.from('documents').update({
-              ingestion_status: 'failed',
-              ingestion_error: `Embedding trigger error: ${err instanceof Error ? err.message : 'Unknown'}`
-            }).eq('id', docId)
-          }
+          console.log(`Embeddings trigger accepted for ${docId}`)
         }
+
+        const settled = await Promise.allSettled(docIds.map((docId, index) => triggerOne(docId, index)))
+        settled.forEach((result, index) => {
+          if (result.status !== 'rejected') return
+          const err = result.reason
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            console.log(`Embeddings trigger timed out for ${docIds[index]}, continuing (function running server-side)`)
+            return
+          }
+
+          console.error(`Embeddings trigger error for ${docIds[index]}:`, err)
+        })
       }
 
       const processFile = async (
