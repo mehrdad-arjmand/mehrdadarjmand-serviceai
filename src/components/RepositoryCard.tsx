@@ -981,7 +981,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         await supabase.from('documents').update({
           ingestion_status: 'failed',
           ingestion_stage: 'failed',
-          ingestion_error: 'Extraction timed out before chunks were created. Large PDFs are limited to 50 pages; split the document and upload again.',
+          ingestion_error: 'Extraction stopped before chunks were created. Reprocess or upload again to restart ingestion.',
         }).eq('id', stuckDoc.id);
       }
     }, 10_000); // Check every 10 seconds
