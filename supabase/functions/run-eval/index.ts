@@ -320,35 +320,39 @@ Deno.serve(async (req) => {
       const fixedKParam = url.searchParams.get('k')
       const adaptive = url.searchParams.get('adaptive') === '1'
       const judgeEnabled = url.searchParams.get('judge') === '1'
+      const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
+      const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
       const POOL = 20
       const ADAPT_MIN_K = 3
       const ADAPT_MAX_K = 15
       const GAP_MULT = 2.0
 
-      const { data: evalSet } = await supabase
+      const { data: evalSetAll } = await supabase
         .from('eval_dataset')
         .select('*')
         .eq('benchmark_name', benchmarkName)
         .order('tier', { ascending: true })
         .order('query_text', { ascending: true })
 
-      if (!evalSet || evalSet.length === 0) {
+      if (!evalSetAll || evalSetAll.length === 0) {
         return new Response(JSON.stringify({ error: 'No eval dataset entries found.' }), {
           status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         })
       }
+      const evalSet = evalSetAll.slice(offset, offset + limit)
 
       const results: any[] = []
       const tagSuffix = adaptive ? ':adaptive' : ''
       const EVAL_TAG = `benchmark:${benchmarkName}${tagSuffix}`
 
-      // Per-user requirement: keep deleting prior benchmark rows so confusion
-      // matrix only reflects the latest run. Delete both fixed and adaptive
-      // variants of THIS benchmark so we never accumulate.
-      await supabase.from('query_logs').delete().like('eval_model', `benchmark:${benchmarkName}%`)
+      // Only delete on the first batch (offset=0) so paginated runs accumulate
+      if (offset === 0) {
+        await supabase.from('query_logs').delete().like('eval_model', `benchmark:${benchmarkName}%`)
+      }
 
       const { data: allDocs } = await supabase.from('documents').select('id')
       const allDocIds = (allDocs || []).map((d: any) => d.id)
+
 
       for (const item of evalSet) {
         const requestedK = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
