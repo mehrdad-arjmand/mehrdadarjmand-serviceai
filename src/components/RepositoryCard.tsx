@@ -40,6 +40,7 @@ interface Document {
   totalChunks: number;
   embeddedChunks: number;
   ingestionStatus: string;
+  ingestionStage: string | null;
   ingestionError: string | null;
   embeddingLockedUntil: string | null;
   embeddingRetryAfter: string | null;
@@ -541,6 +542,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         totalChunks: doc.total_chunks || chunks?.length || 0,
         embeddedChunks,
         ingestionStatus: doc.ingestion_status || 'pending',
+        ingestionStage: (doc as any).ingestion_stage || null,
         ingestionError: doc.ingestion_error || null,
         embeddingLockedUntil: (doc as any).embedding_locked_until || null,
         embeddingRetryAfter: (doc as any).embedding_retry_after || null,
