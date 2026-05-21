@@ -964,25 +964,25 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         if (freeQueueDoc) {
           await maybeResumeFreeTierDocument(freeQueueDoc, 'Free background queue recovery');
         }
+      }
 
-        // Also check for docs stuck at pending/queued with zero chunks (extraction never happened)
-        // These can't be recovered from client — mark them as failed so they don't block the queue
-        const stuckQueuedDocs = docs.filter((doc) => (
-          doc.totalChunks === 0 &&
-          doc.ingestionStatus !== 'complete' &&
-          doc.ingestionStatus !== 'failed' &&
-          // Mark as failed if stuck for more than 3 minutes (extraction shouldn't take that long)
-          (Date.now() - new Date(doc.createdAt).getTime()) > 3 * 60_000
-        ));
+      // Check every tier for docs stuck before chunking. Edge CPU termination can kill the
+      // worker before its catch handler runs, so the UI must force a terminal state.
+      const stuckQueuedDocs = docs.filter((doc) => (
+        doc.totalChunks === 0 &&
+        doc.ingestionStatus !== 'complete' &&
+        doc.ingestionStatus !== 'failed' &&
+        doc.ingestionStatus !== 'skipped' &&
+        (Date.now() - new Date(doc.createdAt).getTime()) > 3 * 60_000
+      ));
 
-        for (const stuckDoc of stuckQueuedDocs) {
-          console.warn(`Free tier: marking stuck doc "${stuckDoc.fileName}" (0 chunks, status=${stuckDoc.ingestionStatus}) as failed`);
-          await supabase.from('documents').update({
-            ingestion_status: 'failed',
-            ingestion_stage: 'failed',
-            ingestion_error: 'Extraction timed out (likely CPU limit for large PDFs). Click Reprocess to retry.',
-          }).eq('id', stuckDoc.id);
-        }
+      for (const stuckDoc of stuckQueuedDocs) {
+        console.warn(`Marking stuck doc "${stuckDoc.fileName}" (0 chunks, status=${stuckDoc.ingestionStatus}) as failed`);
+        await supabase.from('documents').update({
+          ingestion_status: 'failed',
+          ingestion_stage: 'failed',
+          ingestion_error: 'Extraction timed out before chunks were created. Large PDFs are limited to 50 pages; split the document and upload again.',
+        }).eq('id', stuckDoc.id);
       }
     }, 10_000); // Check every 10 seconds
 
