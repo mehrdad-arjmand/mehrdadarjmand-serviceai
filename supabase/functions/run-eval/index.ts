@@ -371,7 +371,7 @@ Deno.serve(async (req) => {
       console.log(`Evaluating ${logs.length} queries with LLM (${EVAL_MODEL})`)
 
       const perQueryResults: any[] = []
-      const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'LOVABLE_API_KEY not configured', 'Chunk not found'])
+      const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'GOOGLE_API_KEY not configured', 'LOVABLE_API_KEY not configured', 'Chunk not found'])
 
       for (const log of logs) {
         const chunkIds = log.retrieved_chunk_ids || []
