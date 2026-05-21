@@ -288,9 +288,27 @@ Deno.serve(async (req) => {
     }
 
     // ─── ACTION: run-eval (ground-truth benchmark; exact expected_chunk_ids) ───
+    // Query params:
+    //   benchmark = dataset name (default benchmark_100_v3_multigold)
+    //   k         = optional fixed K override
+    //   adaptive  = '1' → Strategy A score-gap knee detection.
+    //               Retrieves pool=20 hybrid, cuts at first gap > 2×median_gap,
+    //               clamps K to [3,15]. Metrics use K_used (the returned count),
+    //               NOT pool=20. top_k_eval records pool size for transparency.
+    //   judge     = '1' → after retrieval, also run LLM-as-judge on returned
+    //               chunks and store relevance_labels + judge_* metrics.
+    //               Normally OFF for benchmark (gold IDs are truth); flip ON
+    //               only for one-off comparison runs.
     if (action === 'run-eval') {
       const benchmarkName = url.searchParams.get('benchmark') ?? 'benchmark_100_v3_multigold'
       const fixedKParam = url.searchParams.get('k')
+      const adaptive = url.searchParams.get('adaptive') === '1'
+      const judgeEnabled = url.searchParams.get('judge') === '1'
+      const POOL = 20
+      const ADAPT_MIN_K = 3
+      const ADAPT_MAX_K = 15
+      const GAP_MULT = 2.0
+
       const { data: evalSet } = await supabase
         .from('eval_dataset')
         .select('*')
@@ -305,17 +323,20 @@ Deno.serve(async (req) => {
       }
 
       const results: any[] = []
-      const EVAL_TAG = `benchmark:${benchmarkName}`
+      const tagSuffix = adaptive ? ':adaptive' : ''
+      const EVAL_TAG = `benchmark:${benchmarkName}${tagSuffix}`
 
-      // Clear prior rows for this benchmark so re-runs don't duplicate
-      await supabase.from('query_logs').delete().eq('eval_model', EVAL_TAG)
+      // Per-user requirement: keep deleting prior benchmark rows so confusion
+      // matrix only reflects the latest run. Delete both fixed and adaptive
+      // variants of THIS benchmark so we never accumulate.
+      await supabase.from('query_logs').delete().like('eval_model', `benchmark:${benchmarkName}%`)
 
-      // Fetch all doc ids once (hybrid retrieval needs explicit doc scope)
       const { data: allDocs } = await supabase.from('documents').select('id')
       const allDocIds = (allDocs || []).map((d: any) => d.id)
 
       for (const item of evalSet) {
-        const k = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
+        const requestedK = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
+        const matchCount = adaptive ? POOL : requestedK
         const t0 = Date.now()
         const embResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
@@ -334,18 +355,42 @@ Deno.serve(async (req) => {
         }
 
         const embeddingStr = `[${embedding.join(',')}]`
-        const { data: chunks } = await supabase.rpc('match_chunks_hybrid', {
+        const { data: chunksRaw } = await supabase.rpc('match_chunks_hybrid', {
           query_text: item.query_text,
           query_embedding: embeddingStr,
           doc_ids: allDocIds,
-          match_count: k,
+          match_count: matchCount,
           vec_pool: 100,
           kw_pool: 100,
           rrf_k: 60,
         })
 
-        const retrievedIds: string[] = (chunks || []).map((c: any) => c.id)
-        const retrievedSims: number[] = (chunks || []).map((c: any) => c.similarity ?? 0)
+        const pool: any[] = chunksRaw || []
+        // ── Adaptive K cut (Strategy A: score-gap knee detection) ──
+        let cut = pool.length
+        let kUsed = pool.length
+        if (adaptive && pool.length > ADAPT_MIN_K) {
+          const scores = pool.map((c: any) => Number(c.rrf_score ?? c.similarity ?? 0))
+          const gaps: number[] = []
+          for (let i = 0; i < scores.length - 1; i++) gaps.push(scores[i] - scores[i + 1])
+          const sortedGaps = [...gaps].filter(g => g > 0).sort((a, b) => a - b)
+          const median = sortedGaps.length > 0
+            ? sortedGaps[Math.floor(sortedGaps.length / 2)]
+            : 0
+          let kneeIdx = -1
+          for (let i = 0; i < gaps.length; i++) {
+            if (median > 0 && gaps[i] > GAP_MULT * median) { kneeIdx = i; break }
+          }
+          cut = kneeIdx >= 0 ? (kneeIdx + 1) : pool.length
+          cut = Math.max(ADAPT_MIN_K, Math.min(ADAPT_MAX_K, cut))
+          kUsed = cut
+        } else {
+          kUsed = pool.length
+        }
+
+        const returned = pool.slice(0, kUsed)
+        const retrievedIds: string[] = returned.map((c: any) => c.id)
+        const retrievedSims: number[] = returned.map((c: any) => c.similarity ?? 0)
         const expectedIds = new Set(item.expected_chunk_ids || [])
         const relevant = retrievedIds.filter((id: string) => expectedIds.has(id))
         let firstRelevantRank: number | null = null
@@ -356,20 +401,44 @@ Deno.serve(async (req) => {
         const precision = retrievedIds.length > 0 ? relevant.length / retrievedIds.length : 0
         const recall = expectedIds.size > 0 ? relevant.length / expectedIds.size : 0
         const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0
+
+        // ── Optional LLM-as-judge pass on the returned chunks ──
+        let judgeLabels: any[] | null = null
+        let judgePrecision: number | null = null
+        let judgeRecall: number | null = null
+        if (judgeEnabled && returned.length > 0) {
+          judgeLabels = []
+          let judgeRelevant = 0
+          for (let i = 0; i < returned.length; i++) {
+            const c = returned[i]
+            const verdict = await evaluateChunkRelevance(item.query_text, c.text || '', apiTier)
+            judgeLabels.push({
+              chunk_id: c.id,
+              relevant: verdict.relevant,
+              reasoning: verdict.reasoning,
+              rank: i + 1,
+              gold: expectedIds.has(c.id),
+            })
+            if (verdict.relevant) judgeRelevant++
+          }
+          judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
+          // Judge recall denominator = judged-relevant count (judge has no global truth)
+          judgeRecall = judgeRelevant > 0 ? judgeRelevant / judgeRelevant : null
+        }
+
         const elapsed = Date.now() - t0
 
-        // Persist into query_logs so the benchmark shows up in analytics + confusion matrix
         await supabase.from('query_logs').insert({
           user_id: user.id,
           query_text: item.query_text,
           retrieved_chunk_ids: retrievedIds,
           retrieved_similarities: retrievedSims,
-          response_text: `[${EVAL_TAG}] tier=${item.tier || 'n/a'}`,
+          response_text: `[${EVAL_TAG}] tier=${item.tier || 'n/a'} k=${kUsed}${adaptive ? `/pool=${POOL}` : ''}${judgeEnabled ? ' judge=on' : ''}`,
           citations_json: [],
           input_tokens: 0, output_tokens: 0, total_tokens: 0,
           execution_time_ms: elapsed,
           top_k: retrievedIds.length,
-          top_k_eval: k,
+          top_k_eval: adaptive ? POOL : retrievedIds.length,
           total_relevant_chunks: expectedIds.size,
           relevant_in_top_k: relevant.length,
           precision_at_k: parseFloat(precision.toFixed(4)),
@@ -378,16 +447,21 @@ Deno.serve(async (req) => {
           first_relevant_rank: firstRelevantRank,
           eval_model: EVAL_TAG,
           evaluated_at: new Date().toISOString(),
+          relevance_labels: judgeLabels,
         })
 
         results.push({
-          query: item.query_text, tier: item.tier || 'uncategorized', k, retrieved_count: retrievedIds.length, expected_count: expectedIds.size,
+          query: item.query_text, tier: item.tier || 'uncategorized',
+          k: kUsed, pool: adaptive ? POOL : null,
+          retrieved_count: retrievedIds.length, expected_count: expectedIds.size,
           relevant_found: relevant.length,
           precision_at_k: parseFloat(precision.toFixed(4)),
           recall_at_k: parseFloat(recall.toFixed(4)),
           f1_at_k: parseFloat(f1.toFixed(4)),
+          judge_precision: judgePrecision !== null ? parseFloat(judgePrecision.toFixed(4)) : null,
         })
       }
+
 
       const sumRelevantFound = results.reduce((s, r) => s + r.relevant_found, 0)
       const sumRetrieved = results.reduce((s, r) => s + r.retrieved_count, 0)
