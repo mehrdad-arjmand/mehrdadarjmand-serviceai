@@ -662,7 +662,8 @@ Deno.serve(async (req) => {
         }
 
         // If most of the judge calls failed, do NOT stamp evaluated_at — that pollutes analytics.
-        if (topKEval > 0 && judgeFailures / topKEval >= 0.5) {
+        const citedRelevantCount = labels.filter(l => l.relevant && l.rank <= k).length
+        if (topKEval > 0 && citedRelevantCount === 0 && judgeFailures / topKEval >= 0.5) {
           await supabase.from('query_logs').update({
             relevance_labels: labels,
             eval_model: `${EVAL_MODEL} (judge_failed)`,
