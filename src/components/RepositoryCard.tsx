@@ -40,6 +40,7 @@ interface Document {
   totalChunks: number;
   embeddedChunks: number;
   ingestionStatus: string;
+  ingestionStage: string | null;
   ingestionError: string | null;
   embeddingLockedUntil: string | null;
   embeddingRetryAfter: string | null;
@@ -541,6 +542,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         totalChunks: doc.total_chunks || chunks?.length || 0,
         embeddedChunks,
         ingestionStatus: doc.ingestion_status || 'pending',
+        ingestionStage: (doc as any).ingestion_stage || null,
         ingestionError: doc.ingestion_error || null,
         embeddingLockedUntil: (doc as any).embedding_locked_until || null,
         embeddingRetryAfter: (doc as any).embedding_retry_after || null,
@@ -962,25 +964,25 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
         if (freeQueueDoc) {
           await maybeResumeFreeTierDocument(freeQueueDoc, 'Free background queue recovery');
         }
+      }
 
-        // Also check for docs stuck at pending/queued with zero chunks (extraction never happened)
-        // These can't be recovered from client — mark them as failed so they don't block the queue
-        const stuckQueuedDocs = docs.filter((doc) => (
-          doc.totalChunks === 0 &&
-          doc.ingestionStatus !== 'complete' &&
-          doc.ingestionStatus !== 'failed' &&
-          // Mark as failed if stuck for more than 3 minutes (extraction shouldn't take that long)
-          (Date.now() - new Date(doc.createdAt).getTime()) > 3 * 60_000
-        ));
+      // Check every tier for docs stuck before chunking. Edge CPU termination can kill the
+      // worker before its catch handler runs, so the UI must force a terminal state.
+      const stuckQueuedDocs = docs.filter((doc) => (
+        doc.totalChunks === 0 &&
+        doc.ingestionStatus !== 'complete' &&
+        doc.ingestionStatus !== 'failed' &&
+        doc.ingestionStatus !== 'skipped' &&
+        (Date.now() - new Date(doc.createdAt).getTime()) > 3 * 60_000
+      ));
 
-        for (const stuckDoc of stuckQueuedDocs) {
-          console.warn(`Free tier: marking stuck doc "${stuckDoc.fileName}" (0 chunks, status=${stuckDoc.ingestionStatus}) as failed`);
-          await supabase.from('documents').update({
-            ingestion_status: 'failed',
-            ingestion_stage: 'failed',
-            ingestion_error: 'Extraction timed out (likely CPU limit for large PDFs). Click Reprocess to retry.',
-          }).eq('id', stuckDoc.id);
-        }
+      for (const stuckDoc of stuckQueuedDocs) {
+        console.warn(`Marking stuck doc "${stuckDoc.fileName}" (0 chunks, status=${stuckDoc.ingestionStatus}) as failed`);
+        await supabase.from('documents').update({
+          ingestion_status: 'failed',
+          ingestion_stage: 'failed',
+          ingestion_error: 'Extraction timed out before chunks were created. Large PDFs are limited to 50 pages; split the document and upload again.',
+        }).eq('id', stuckDoc.id);
       }
     }, 10_000); // Check every 10 seconds
 
@@ -1591,7 +1593,14 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
       </span>
     );
     if (doc.ingestionStatus === 'in_progress' || doc.ingestionStatus === 'processing_embeddings') {
-      const progress = doc.totalChunks > 0 ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100) : 0;
+      const progress = doc.totalChunks > 0
+        ? Math.round((doc.embeddedChunks / doc.totalChunks) * 100)
+        : doc.ingestionStage === 'chunking'
+          ? 15
+          : doc.ingestionStage === 'extracting'
+            ? 8
+            : 4;
+      const label = doc.ingestionStatus === 'processing_embeddings' ? 'Embedding' : doc.ingestionStage === 'extracting' ? 'Extracting' : 'Processing';
       return (
         <span className="inline-flex items-center gap-1">
           <span className="inline-flex items-center text-xs font-medium rounded-full border overflow-hidden min-w-[90px]" style={{ borderColor: 'hsl(38 80% 75%)' }}>
@@ -1600,7 +1609,7 @@ export const RepositoryCard = ({ apiTier = "free", onDocumentSelect, permissions
                 className="absolute inset-y-0 left-0 transition-all duration-700 ease-out rounded-full"
                 style={{ width: `${progress}%`, background: 'hsl(32 95% 84%)' }}
               />
-              <span className="relative z-10 px-2.5" style={{ color: 'hsl(32 95% 35%)' }}>Processing</span>
+              <span className="relative z-10 px-2.5" style={{ color: 'hsl(32 95% 35%)' }}>{label}</span>
             </span>
           </span>
           {canWrite && (
