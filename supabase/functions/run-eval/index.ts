@@ -575,7 +575,7 @@ Deno.serve(async (req) => {
 
       let query = supabase
         .from('query_logs')
-        .select('id, query_text, retrieved_chunk_ids, top_k, top_k_eval')
+        .select('id, query_text, response_text, retrieved_chunk_ids, top_k, top_k_eval')
         .not('retrieved_chunk_ids', 'is', null)
         .order('created_at', { ascending: false })
         .limit(limit)
@@ -645,6 +645,18 @@ Deno.serve(async (req) => {
               firstRelevantRank = originalRank + 1
               break
             }
+          }
+        }
+
+        for (const rank of getCitedSourceRanks(log.response_text)) {
+          const i = rank - 1
+          if (i >= 0 && i < Math.min(labels.length, k) && labels[i]) {
+            labels[i] = {
+              ...labels[i],
+              relevant: true,
+              reasoning: labels[i].relevant ? labels[i].reasoning : 'Marked relevant because the assistant answer cited this source as supporting evidence.',
+            }
+            if (firstRelevantRank === null || rank < firstRelevantRank) firstRelevantRank = rank
           }
         }
 
