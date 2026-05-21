@@ -485,6 +485,25 @@ async function syncPaidDocumentProgress(
   return { embedded, total, complete }
 }
 
+function queuePaidContinuation(
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  supabaseAnonKey: string,
+  docId: string,
+) {
+  const continuation = fetch(`${supabaseUrl}/functions/v1/generate-embeddings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${supabaseServiceKey}`,
+      'apikey': supabaseAnonKey,
+    },
+    body: JSON.stringify({ documentId: docId, mode: 'full' }),
+  }).catch((err) => console.error(`Paid continuation trigger failed for ${docId}:`, err))
+
+  ;(globalThis as any).EdgeRuntime?.waitUntil?.(continuation)
+}
+
 async function processPaidTier(
   supabase: ReturnType<typeof createClient>,
   apiKey: string,
