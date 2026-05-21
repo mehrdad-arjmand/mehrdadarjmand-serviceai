@@ -257,9 +257,10 @@ Deno.serve(async (req) => {
         'total_relevant_chunks', 'relevant_in_top_k',
         'precision_at_k', 'recall_at_k', 'hit_rate_at_k',
         'first_relevant_rank',
-        'evaluated_at', 'eval_model',
+        'evaluated_at', 'eval_model', 'judge_used',
         'num_retrieved_chunks', 'num_citations', 'num_relevant_labels',
       ]
+
 
       const escapeCsvField = (val: unknown): string => {
         if (val === null || val === undefined) return ''
