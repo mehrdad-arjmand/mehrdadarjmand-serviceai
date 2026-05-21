@@ -491,6 +491,8 @@ function queuePaidContinuation(
   supabaseAnonKey: string,
   docId: string,
 ) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
   const continuation = fetch(`${supabaseUrl}/functions/v1/generate-embeddings`, {
     method: 'POST',
     headers: {
@@ -499,7 +501,17 @@ function queuePaidContinuation(
       'apikey': supabaseAnonKey,
     },
     body: JSON.stringify({ documentId: docId, mode: 'full' }),
-  }).catch((err) => console.error(`Paid continuation trigger failed for ${docId}:`, err))
+    signal: controller.signal,
+  })
+    .then(() => clearTimeout(timeoutId))
+    .catch((err) => {
+      clearTimeout(timeoutId)
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.log(`Paid continuation dispatched for ${docId}`)
+        return
+      }
+      console.error(`Paid continuation trigger failed for ${docId}:`, err)
+    })
 
   ;(globalThis as any).EdgeRuntime?.waitUntil?.(continuation)
 }
