@@ -287,9 +287,16 @@ Deno.serve(async (req) => {
       })
     }
 
-    // ─── ACTION: run-eval (ground-truth based, existing) ───
+    // ─── ACTION: run-eval (ground-truth benchmark; exact expected_chunk_ids) ───
     if (action === 'run-eval') {
-      const { data: evalSet } = await supabase.from('eval_dataset').select('*')
+      const benchmarkName = url.searchParams.get('benchmark') ?? 'benchmark_100_v3_multigold'
+      const fixedKParam = url.searchParams.get('k')
+      const { data: evalSet } = await supabase
+        .from('eval_dataset')
+        .select('*')
+        .eq('benchmark_name', benchmarkName)
+        .order('tier', { ascending: true })
+        .order('query_text', { ascending: true })
 
       if (!evalSet || evalSet.length === 0) {
         return new Response(JSON.stringify({ error: 'No eval dataset entries found.' }), {
@@ -297,10 +304,10 @@ Deno.serve(async (req) => {
         })
       }
 
-      const k = parseInt(url.searchParams.get('k') ?? '10')
       const results: any[] = []
 
       for (const item of evalSet) {
+        const k = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
         const embResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
           {
@@ -329,21 +336,45 @@ Deno.serve(async (req) => {
         const precision = retrievedIds.length > 0 ? relevant.length / retrievedIds.length : 0
         const recall = expectedIds.size > 0 ? relevant.length / expectedIds.size : 0
 
+        const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0
+
         results.push({
-          query: item.query_text, k, retrieved_count: retrievedIds.length, expected_count: expectedIds.size,
+          query: item.query_text, tier: item.tier || 'uncategorized', k, retrieved_count: retrievedIds.length, expected_count: expectedIds.size,
           relevant_found: relevant.length,
           precision_at_k: parseFloat(precision.toFixed(4)),
           recall_at_k: parseFloat(recall.toFixed(4)),
+          f1_at_k: parseFloat(f1.toFixed(4)),
         })
       }
 
-      const avgPrecision = results.reduce((s, r) => s + r.precision_at_k, 0) / results.length
-      const avgRecall = results.reduce((s, r) => s + r.recall_at_k, 0) / results.length
+      const sumRelevantFound = results.reduce((s, r) => s + r.relevant_found, 0)
+      const sumRetrieved = results.reduce((s, r) => s + r.retrieved_count, 0)
+      const sumExpected = results.reduce((s, r) => s + r.expected_count, 0)
+      const avgPrecision = sumRetrieved > 0 ? sumRelevantFound / sumRetrieved : 0
+      const avgRecall = sumExpected > 0 ? sumRelevantFound / sumExpected : 0
+      const avgF1 = results.reduce((s, r) => s + r.f1_at_k, 0) / results.length
+      const tiers = [...new Set(results.map(r => r.tier))]
+      const tier_summary = tiers.map(tier => {
+        const rows = results.filter(r => r.tier === tier)
+        const rel = rows.reduce((s, r) => s + r.relevant_found, 0)
+        const ret = rows.reduce((s, r) => s + r.retrieved_count, 0)
+        const exp = rows.reduce((s, r) => s + r.expected_count, 0)
+        return {
+          tier,
+          total_queries: rows.length,
+          avg_k: parseFloat((rows.reduce((s, r) => s + r.k, 0) / Math.max(1, rows.length)).toFixed(2)),
+          avg_precision_at_k: parseFloat(((ret > 0 ? rel / ret : 0)).toFixed(4)),
+          avg_recall_at_k: parseFloat(((exp > 0 ? rel / exp : 0)).toFixed(4)),
+          avg_f1_at_k: parseFloat((rows.reduce((s, r) => s + r.f1_at_k, 0) / Math.max(1, rows.length)).toFixed(4)),
+        }
+      })
 
       return new Response(JSON.stringify({
-        success: true, k, total_queries: results.length,
+        success: true, benchmark_name: benchmarkName, k: fixedKParam ? parseInt(fixedKParam) : null, k_used: fixedKParam ? `fixed k=${fixedKParam}` : 'per-question k_target', total_queries: results.length,
         avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
         avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
+        avg_f1_at_k: parseFloat(avgF1.toFixed(4)),
+        tier_summary,
         results
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }

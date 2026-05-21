@@ -32,14 +32,28 @@ interface AnalyticsData {
 }
 
 interface EvalResult {
-  k: number;
+  benchmark_name?: string;
+  k: number | null;
+  k_used?: string;
   total_queries: number;
   avg_precision_at_k: number;
   avg_recall_at_k: number;
+  avg_f1_at_k?: number;
+  tier_summary?: Array<{
+    tier: string;
+    total_queries: number;
+    avg_k: number;
+    avg_precision_at_k: number;
+    avg_recall_at_k: number;
+    avg_f1_at_k: number;
+  }>;
   results: Array<{
     query: string;
+    tier?: string;
+    k: number;
     precision_at_k: number;
     recall_at_k: number;
+    f1_at_k?: number;
     retrieved_count: number;
     expected_count: number;
     relevant_found: number;
@@ -270,7 +284,7 @@ const QueryAnalytics = () => {
   const runEval = async () => {
     setLoading("eval");
     try {
-      const res = await callEvalFunction("run-eval", { k: "10" });
+      const res = await callEvalFunction("run-eval", { benchmark: "benchmark_100_v3_multigold" });
       if (!res) return;
       const data = await res.json();
       if (data.success) setEvalResult(data);
@@ -514,36 +528,54 @@ const QueryAnalytics = () => {
         {evalResult && (
           <Card className="mb-8 border border-border/60 shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Ground-Truth Evaluation (k={evalResult.k})</CardTitle>
-              <CardDescription>{evalResult.total_queries} queries evaluated</CardDescription>
+              <CardTitle className="text-base">Ground-Truth Benchmark</CardTitle>
+              <CardDescription>{evalResult.benchmark_name || 'benchmark'} • {evalResult.total_queries} questions • {evalResult.k_used || `k=${evalResult.k}`}</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex gap-8 mb-6">
+              <div className="flex flex-wrap gap-8 mb-6">
                 <div>
-                  <p className="text-sm text-muted-foreground">Avg Precision@{evalResult.k}</p>
+                  <p className="text-sm text-muted-foreground">Precision@K</p>
                   <p className="text-2xl font-mono font-semibold text-foreground">{(evalResult.avg_precision_at_k * 100).toFixed(1)}%</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Avg Recall@{evalResult.k}</p>
+                  <p className="text-sm text-muted-foreground">Recall@K</p>
                   <p className="text-2xl font-mono font-semibold text-foreground">{(evalResult.avg_recall_at_k * 100).toFixed(1)}%</p>
                 </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">F1@K</p>
+                  <p className="text-2xl font-mono font-semibold text-foreground">{((evalResult.avg_f1_at_k ?? 0) * 100).toFixed(1)}%</p>
+                </div>
               </div>
+              {evalResult.tier_summary && evalResult.tier_summary.length > 0 && (
+                <div className="border rounded-lg overflow-hidden mb-6">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50"><tr><th className="text-left p-3 font-medium text-muted-foreground">Tier</th><th className="text-right p-3 font-medium text-muted-foreground">n</th><th className="text-right p-3 font-medium text-muted-foreground">Avg K</th><th className="text-right p-3 font-medium text-muted-foreground">Prec</th><th className="text-right p-3 font-medium text-muted-foreground">Recall</th><th className="text-right p-3 font-medium text-muted-foreground">F1</th></tr></thead>
+                    <tbody>{evalResult.tier_summary.map((r) => (<tr key={r.tier} className="border-t"><td className="p-3 capitalize">{r.tier}</td><td className="p-3 text-right font-mono">{r.total_queries}</td><td className="p-3 text-right font-mono">{r.avg_k.toFixed(2)}</td><td className="p-3 text-right font-mono">{(r.avg_precision_at_k * 100).toFixed(1)}%</td><td className="p-3 text-right font-mono">{(r.avg_recall_at_k * 100).toFixed(1)}%</td><td className="p-3 text-right font-mono">{(r.avg_f1_at_k * 100).toFixed(1)}%</td></tr>))}</tbody>
+                  </table>
+                </div>
+              )}
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
+                      <th className="text-left p-3 font-medium text-muted-foreground">Tier</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Query</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">K</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Precision</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Recall</th>
+                      <th className="text-right p-3 font-medium text-muted-foreground">F1</th>
                       <th className="text-right p-3 font-medium text-muted-foreground">Found</th>
                     </tr>
                   </thead>
                   <tbody>
                     {evalResult.results.map((r, i) => (
                       <tr key={i} className="border-t">
+                        <td className="p-3 text-muted-foreground capitalize">{r.tier || '—'}</td>
                         <td className="p-3 max-w-xs truncate">{r.query}</td>
+                        <td className="p-3 text-right font-mono">{r.k}</td>
                         <td className="p-3 text-right font-mono">{(r.precision_at_k * 100).toFixed(1)}%</td>
                         <td className="p-3 text-right font-mono">{(r.recall_at_k * 100).toFixed(1)}%</td>
+                        <td className="p-3 text-right font-mono">{((r.f1_at_k ?? 0) * 100).toFixed(1)}%</td>
                         <td className="p-3 text-right font-mono">{r.relevant_found}/{r.expected_count}</td>
                       </tr>
                     ))}
