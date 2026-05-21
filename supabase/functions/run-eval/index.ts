@@ -282,7 +282,12 @@ Deno.serve(async (req) => {
             rec[col] = Array.isArray((log as any).citations_json) ? (log as any).citations_json.length : 0
           } else if (col === 'num_relevant_labels') {
             rec[col] = Array.isArray((log as any).relevance_labels) ? (log as any).relevance_labels.length : 0
+          } else if (col === 'judge_used') {
+            const labels = (log as any).relevance_labels
+            const evalModel = (log as any).eval_model || ''
+            rec[col] = (Array.isArray(labels) && labels.length > 0) || evalModel.includes(':judge') ? 'true' : 'false'
           } else if (col === 'response_text') {
+
             // Truncate very long responses to keep CSV manageable
             const rt = (log as any).response_text || ''
             rec[col] = rt.length > 500 ? rt.slice(0, 500) + '...' : rt
