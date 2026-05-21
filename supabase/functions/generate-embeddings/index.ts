@@ -608,20 +608,37 @@ async function processPaidTier(
       })
     } catch (docError) {
       console.error(`Error embedding document ${currentDocId}:`, docError)
+      const { count: embeddedCountOnError } = await supabase
+        .from('chunks')
+        .select('id', { count: 'exact', head: true })
+        .eq('document_id', currentDocId)
+        .not('embedding', 'is', null)
+
+      const { data: docOnError } = await supabase
+        .from('documents')
+        .select('total_chunks')
+        .eq('id', currentDocId)
+        .single()
+
+      const embedded = embeddedCountOnError || 0
+      const total = docOnError?.total_chunks || 0
+      const complete = total > 0 && embedded >= total
       await supabase
         .from('documents')
         .update({
-          ingestion_status: 'failed',
-          ingestion_error: docError instanceof Error ? docError.message.slice(0, 1000) : 'Unknown error'
+          ingestion_status: complete ? 'complete' : 'processing_embeddings',
+          ingestion_stage: complete ? 'complete' : 'embedding',
+          ingested_chunks: embedded,
+          ingestion_error: complete ? null : (docError instanceof Error ? docError.message.slice(0, 1000) : 'Embedding paused before completion; retry will resume remaining chunks.'),
         })
         .eq('id', currentDocId)
 
       results.push({
         documentId: currentDocId,
         processed: totalProcessed,
-        embedded: 0,
-        total: 0,
-        complete: false,
+        embedded,
+        total,
+        complete,
       })
     }
   }
