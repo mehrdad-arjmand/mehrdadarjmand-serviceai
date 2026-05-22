@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-const EVAL_MODEL = 'google/gemini-2.5-flash'
+const EVAL_MODEL = 'google/gemini-2.5-flash-lite'
 
 async function verifyAdmin(req: Request) {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -90,7 +90,7 @@ Is this chunk relevant to answering the query?`
   let lastErr = ''
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
