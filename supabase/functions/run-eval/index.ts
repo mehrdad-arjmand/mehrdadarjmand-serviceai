@@ -156,9 +156,12 @@ Deno.serve(async (req) => {
         if (page.length < PAGE) break
       }
 
-      // Benchmark rows are excluded from latency/tokens/cost (production portfolio
-      // metrics only), but INCLUDED in retrieval_eval so the Retrieval Quality
-      // card matches the Confusion Matrix (which shows every evaluated row).
+      // Benchmark rows are excluded from EVERY metric on this page (latency,
+      // tokens, cost, retrieval eval, confusion matrix, projects KPI) so the
+      // counts on the Retrieval Quality card, Confusion Matrix card, Latency
+      // card, and Projects landing page Accuracy all reference the same row
+      // set. Do not relax this filter without also updating Projects.tsx and
+      // src/pages/QueryAnalytics.tsx :: fetchConfusionMatrix.
       const isBenchmarkRow = (l: any) => {
         const em = (l.eval_model || '') as string
         const rt = (l.response_text || '') as string
@@ -166,7 +169,7 @@ Deno.serve(async (req) => {
       }
       const logs = rawLogs.filter(l => !isBenchmarkRow(l))
 
-      if (rawLogs.length === 0) {
+      if (logs.length === 0) {
         return new Response(JSON.stringify({ error: 'No query logs found' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       }
 
@@ -180,11 +183,11 @@ Deno.serve(async (req) => {
       }
       const avg = (arr: number[]) => arr.length === 0 ? 0 : arr.reduce((s, v) => s + v, 0) / arr.length
 
-      // Retrieval eval uses ALL evaluated rows (benchmark + ad-hoc) so the count
-      // matches the Confusion Matrix exactly.
-      const evaluatedLogs = rawLogs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
-      const judgeFailedLogs = rawLogs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
-      const pendingLogs = rawLogs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
+      // Retrieval eval uses the SAME non-benchmark slice as latency/tokens/cost
+      // and the Confusion Matrix, so all evaluated counts on this page match.
+      const evaluatedLogs = logs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
+      const judgeFailedLogs = logs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
+      const pendingLogs = logs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
 
       const validScoredLogs = evaluatedLogs.filter(l => l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined && l.relevant_in_top_k !== null && l.relevant_in_top_k !== undefined)
       const noJudgedRelevantCount = validScoredLogs.filter(l => (l.relevant_in_top_k ?? 0) === 0).length
