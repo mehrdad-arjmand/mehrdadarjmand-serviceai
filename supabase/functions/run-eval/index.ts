@@ -455,6 +455,8 @@ Deno.serve(async (req) => {
         // ── LLM-as-judge pass (parallel) ──
         let judgeLabels: any[] | null = null
         let judgePrecision: number | null = null
+        let judgeHit: 0 | 1 | null = null
+        let judgeFirstRelevantRank: number | null = null
         if (judgeEnabled && returned.length > 0) {
           judgeLabels = new Array(returned.length)
           for (let start = 0; start < returned.length; start += JUDGE_CONCURRENCY) {
@@ -476,6 +478,9 @@ Deno.serve(async (req) => {
           }
           const judgeRelevant = judgeLabels.filter((l: any) => l && l.relevant).length
           judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
+          judgeHit = judgeRelevant > 0 ? 1 : 0
+          const firstJudgeIdx = judgeLabels.findIndex((l: any) => l && l.relevant)
+          judgeFirstRelevantRank = firstJudgeIdx >= 0 ? firstJudgeIdx + 1 : null
         }
 
         const elapsed = Date.now() - t0
@@ -496,6 +501,7 @@ Deno.serve(async (req) => {
           precision_at_k: parseFloat(precision.toFixed(4)),
           recall_at_k: parseFloat(recall.toFixed(4)),
           hit_rate_at_k: relevant.length > 0 ? 1 : 0,
+          judge_hit_rate_at_k: judgeHit,
           first_relevant_rank: firstRelevantRank,
           eval_model: EVAL_TAG,
           evaluated_at: new Date().toISOString(),
@@ -511,6 +517,8 @@ Deno.serve(async (req) => {
           recall_at_k: parseFloat(recall.toFixed(4)),
           f1_at_k: parseFloat(f1.toFixed(4)),
           judge_precision: judgePrecision !== null ? parseFloat(judgePrecision.toFixed(4)) : null,
+          judge_hit: judgeHit,
+          judge_first_relevant_rank: judgeFirstRelevantRank,
         }
       }
 
