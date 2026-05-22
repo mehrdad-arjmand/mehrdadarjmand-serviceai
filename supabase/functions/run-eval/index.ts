@@ -455,6 +455,8 @@ Deno.serve(async (req) => {
         // ── LLM-as-judge pass (parallel) ──
         let judgeLabels: any[] | null = null
         let judgePrecision: number | null = null
+        let judgeHit: 0 | 1 | null = null
+        let judgeFirstRelevantRank: number | null = null
         if (judgeEnabled && returned.length > 0) {
           judgeLabels = new Array(returned.length)
           for (let start = 0; start < returned.length; start += JUDGE_CONCURRENCY) {
@@ -476,6 +478,9 @@ Deno.serve(async (req) => {
           }
           const judgeRelevant = judgeLabels.filter((l: any) => l && l.relevant).length
           judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
+          judgeHit = judgeRelevant > 0 ? 1 : 0
+          const firstJudgeIdx = judgeLabels.findIndex((l: any) => l && l.relevant)
+          judgeFirstRelevantRank = firstJudgeIdx >= 0 ? firstJudgeIdx + 1 : null
         }
 
         const elapsed = Date.now() - t0
@@ -496,6 +501,7 @@ Deno.serve(async (req) => {
           precision_at_k: parseFloat(precision.toFixed(4)),
           recall_at_k: parseFloat(recall.toFixed(4)),
           hit_rate_at_k: relevant.length > 0 ? 1 : 0,
+          judge_hit_rate_at_k: judgeHit,
           first_relevant_rank: firstRelevantRank,
           eval_model: EVAL_TAG,
           evaluated_at: new Date().toISOString(),
@@ -511,6 +517,8 @@ Deno.serve(async (req) => {
           recall_at_k: parseFloat(recall.toFixed(4)),
           f1_at_k: parseFloat(f1.toFixed(4)),
           judge_precision: judgePrecision !== null ? parseFloat(judgePrecision.toFixed(4)) : null,
+          judge_hit: judgeHit,
+          judge_first_relevant_rank: judgeFirstRelevantRank,
         }
       }
 
@@ -550,6 +558,12 @@ Deno.serve(async (req) => {
       const avgJudgeP = judgeEnabled
         ? results.filter(r => r.judge_precision !== null).reduce((s, r) => s + r.judge_precision, 0) / Math.max(1, results.filter(r => r.judge_precision !== null).length)
         : null
+      const judgeHitRows = judgeEnabled ? results.filter((r: any) => r.judge_hit !== null && r.judge_hit !== undefined) : []
+      const judgeHitCount = judgeHitRows.filter((r: any) => r.judge_hit === 1).length
+      const judgeHitRate = judgeEnabled && judgeHitRows.length > 0 ? judgeHitCount / judgeHitRows.length : null
+      const judgeMrr = judgeEnabled && judgeHitRows.length > 0
+        ? judgeHitRows.reduce((s: number, r: any) => s + (r.judge_first_relevant_rank ? 1 / r.judge_first_relevant_rank : 0), 0) / judgeHitRows.length
+        : null
 
       return new Response(JSON.stringify({
         success: true,
@@ -560,6 +574,9 @@ Deno.serve(async (req) => {
         hit_count: hitCount,
         zero_hit_count: zeroHitCount,
         hit_rate: parseFloat((hitCount / Math.max(1, results.length)).toFixed(4)),
+        judge_hit_count: judgeEnabled ? judgeHitCount : null,
+        judge_hit_rate: judgeHitRate !== null ? parseFloat(judgeHitRate.toFixed(4)) : null,
+        judge_mrr: judgeMrr !== null ? parseFloat(judgeMrr.toFixed(4)) : null,
         avg_k_used: parseFloat(avgK.toFixed(2)),
         avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
         avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),

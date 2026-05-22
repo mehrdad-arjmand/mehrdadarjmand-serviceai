@@ -1,0 +1,1 @@
+ALTER TABLE public.query_logs ADD COLUMN IF NOT EXISTS judge_hit_rate_at_k smallint;
