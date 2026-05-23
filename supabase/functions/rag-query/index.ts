@@ -1432,54 +1432,7 @@ async function generateEmbedding(text: string, apiTier: string = 'free'): Promis
 }
 
 async function generateAnswer(systemPrompt: string, userPrompt: string, model: string = 'google/gemini-2.5-flash-lite'): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
-  // Prefer direct Google API to bypass Lovable gateway rate limits (user has paid Google API key).
-  // Falls back to Lovable gateway if GOOGLE_API_KEY is not configured.
-  const googleKey = Deno.env.get('GOOGLE_API_KEY')
-  const modelId = model.replace(/^google\//, '')
-
-  if (googleKey) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${googleKey}`
-    let resp: Response | null = null
-    let lastErr = ''
-    // Retry on 429/5xx (Gemini "model overloaded" returns 503 UNAVAILABLE).
-    for (let attempt = 0; attempt < 3; attempt++) {
-      resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 8192,
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        }),
-      })
-      if (resp.ok) break
-      lastErr = await resp.text()
-      const retriable = resp.status === 429 || resp.status >= 500
-      if (!retriable || attempt === 2) break
-      await new Promise(r => setTimeout(r, 600 * (attempt + 1) + Math.random() * 400))
-    }
-    if (resp && resp.ok) {
-      const data = await resp.json()
-      const content = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') ?? ''
-      const um = data.usageMetadata ?? {}
-      return {
-        content,
-        usage: {
-          input_tokens: um.promptTokenCount ?? 0,
-          output_tokens: um.candidatesTokenCount ?? 0,
-          total_tokens: um.totalTokenCount ?? 0,
-          upstream_inference_cost: 0,
-        },
-      }
-    }
-    // Google overloaded/unavailable → fall through to Lovable AI gateway as a backup.
-    console.warn(`Google API failed after retries (${resp?.status}); falling back to Lovable gateway. ${lastErr.slice(0, 200)}`)
-  }
-
+  // Use Lovable AI Gateway (free Gemini models).
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -1516,19 +1469,13 @@ async function generateAnswer(systemPrompt: string, userPrompt: string, model: s
 
 const EVAL_MODEL = 'google/gemini-2.5-flash'
 
-function getEvalApiKey(apiTier: string): string | null {
-  return apiTier === 'paid'
-    ? (Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE') || null)
-    : (Deno.env.get('GOOGLE_API_KEY_FREE') || Deno.env.get('GOOGLE_API_KEY') || null)
-}
-
 async function evaluateChunkRelevance(
   queryText: string,
   chunkText: string,
-  apiTier: string
+  _apiTier: string
 ): Promise<{ relevant: boolean; reasoning: string }> {
-  const apiKey = getEvalApiKey(apiTier)
-  if (!apiKey) return { relevant: false, reasoning: 'GOOGLE_API_KEY not configured' }
+  const apiKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!apiKey) return { relevant: false, reasoning: 'LOVABLE_API_KEY not configured' }
 
   const prompt = `You are a retrieval evaluation judge. Given a user query and a retrieved document chunk, decide whether the chunk contains information that would be useful in answering the query (directly answers it, OR provides supporting facts, definitions, context, parameters, or specifications a complete answer would cite).
 
@@ -1552,12 +1499,15 @@ Is this chunk relevant to answering the query?`
   let lastErr = ''
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: 'application/json' },
+          model: 'google/gemini-2.5-flash',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0,
+          max_tokens: 200,
+          response_format: { type: 'json_object' },
         }),
       })
 
@@ -1569,7 +1519,7 @@ Is this chunk relevant to answering the query?`
       }
 
       const data = await res.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ''
+      const text = data.choices?.[0]?.message?.content?.trim() ?? ''
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0])
@@ -1581,7 +1531,7 @@ Is this chunk relevant to answering the query?`
       await new Promise(r => setTimeout(r, 800 + attempt * 1500))
     }
   }
-  console.error('Gemini eval chunk error:', lastErr)
+  console.error('Lovable eval chunk error:', lastErr)
   return { relevant: false, reasoning: 'LLM evaluation failed' }
 }
 
