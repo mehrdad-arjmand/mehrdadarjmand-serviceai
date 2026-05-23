@@ -253,13 +253,10 @@ Deno.serve(async (req) => {
 
     // Background processing
     const backgroundWork = (async () => {
-      // Pick API key based on tier
-      const googleApiKeyPaid = Deno.env.get('GOOGLE_API_KEY')
-      const googleApiKeyFree = Deno.env.get('GOOGLE_API_KEY_FREE')
-      const googleApiKey = apiTier === 'paid'
-        ? googleApiKeyPaid
-        : googleApiKeyFree
-      console.log(`Using API key: ${apiTier === 'paid' ? 'PAID' : 'FREE'} (key ends with: ...${googleApiKey?.slice(-6) || 'NONE'})`)
+      // OCR text cleaning now goes through Lovable AI Gateway (free Gemini models).
+      // Variable name kept as `googleApiKey` to avoid changing downstream signatures.
+      const googleApiKey = Deno.env.get('LOVABLE_API_KEY')
+      console.log(`Using Lovable AI Gateway for OCR cleaning (key configured: ${googleApiKey ? 'yes' : 'no'})`)
 
       const triggerEmbeddings = async (docIds: string[], label: string) => {
         if (docIds.length === 0) return
