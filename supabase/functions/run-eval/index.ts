@@ -57,15 +57,14 @@ function getEmbeddingApiKey(apiTier: string): string {
   return key
 }
 
-// Use Google Gemini API directly (paid key) for LLM-based relevance evaluation.
-// Bypasses Lovable AI gateway to avoid shared-quota rate limits during benchmarks.
+// LLM-based relevance evaluation via Lovable AI Gateway (free models).
 async function evaluateChunkRelevance(
   queryText: string,
   chunkText: string,
-  apiTier: string
+  _apiTier: string
 ): Promise<{ relevant: boolean; reasoning: string }> {
-  const apiKey = Deno.env.get('GOOGLE_API_KEY') || Deno.env.get('GOOGLE_API_KEY_FREE')
-  if (!apiKey) return { relevant: false, reasoning: 'GOOGLE_API_KEY not configured' }
+  const apiKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!apiKey) return { relevant: false, reasoning: 'LOVABLE_API_KEY not configured' }
 
   const prompt = `You are a retrieval evaluation judge. Given a user query and a retrieved document chunk, decide whether the chunk contains information that would be useful in answering the query (directly answers it, OR provides supporting facts, definitions, context, parameters, or specifications a complete answer would cite).
 
@@ -86,23 +85,22 @@ ${chunkText.slice(0, 2000)}
 
 Is this chunk relevant to answering the query?`
 
-  // Retry once on 429/5xx
   let lastErr = ''
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: 'application/json' },
-        }),
-      }
-    )
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 200,
+        response_format: { type: 'json_object' },
+      }),
+    })
     if (res.ok) {
       const data = await res.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ''
+      const text = data.choices?.[0]?.message?.content?.trim() ?? ''
       try {
         const jsonMatch = text.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
@@ -116,7 +114,7 @@ Is this chunk relevant to answering the query?`
     if (res.status !== 429 && res.status < 500) break
     await new Promise(r => setTimeout(r, 800 + attempt * 1500))
   }
-  console.error('Gemini judge error:', lastErr)
+  console.error('Lovable judge error:', lastErr)
   return { relevant: false, reasoning: 'LLM evaluation failed' }
 }
 
