@@ -387,8 +387,8 @@ Deno.serve(async (req) => {
 
       // Parallel execution: process queries in concurrent batches.
       // Judge calls inside each query are also fanned out in parallel.
-      const CONCURRENCY = 8
-      const JUDGE_CONCURRENCY = 10
+      const CONCURRENCY = 4
+      const JUDGE_CONCURRENCY = 5
 
       const runOne = async (item: any) => {
         const requestedK = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
