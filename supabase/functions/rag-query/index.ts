@@ -505,8 +505,8 @@ Deno.serve(async (req) => {
             query_embedding: embeddingStr,
             doc_ids: effectiveDocIds,
             match_count: retrievalCount,
-            vec_pool: 150,
-            kw_pool: 150,
+            vec_pool: 200,
+            kw_pool: 200,
             rrf_k: 60,
           }
         )
