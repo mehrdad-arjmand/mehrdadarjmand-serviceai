@@ -391,7 +391,8 @@ Deno.serve(async (req) => {
       const JUDGE_CONCURRENCY = 5
 
       const runOne = async (item: any) => {
-        const requestedK = fixedKParam ? parseInt(fixedKParam) : (item.k_target || 5)
+        // Experiment: force K=5 uniformly across all tiers to isolate effect vs per-tier k_target (4/8)
+        const requestedK = fixedKParam ? parseInt(fixedKParam) : 5
         const matchCount = adaptive ? POOL : requestedK
         const t0 = Date.now()
         const embResponse = await fetch(
