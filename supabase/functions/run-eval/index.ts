@@ -440,7 +440,7 @@ Deno.serve(async (req) => {
 
       const results: any[] = []
       // Keep eval_model semantics simple: 'benchmark' (default) or judge model name.
-      const runTag = `benchmark:${benchmarkName}${adaptive ? ':adaptive' : ''}${judgeEnabled ? ':judge' : ''}`
+      const runTag = `benchmark:${benchmarkName}${adaptive ? ':adaptive' : ''}${rerankEnabled ? ':rerank' : ''}${judgeEnabled ? ':judge' : ''}`
       const EVAL_TAG = judgeEnabled ? EVAL_MODEL : 'benchmark'
 
       // Each new benchmark run REPLACES all previous benchmark rows so the
