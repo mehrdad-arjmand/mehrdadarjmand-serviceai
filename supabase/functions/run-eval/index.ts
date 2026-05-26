@@ -127,6 +127,74 @@ function getCitedSourceRanks(responseText: string | null | undefined): Set<numbe
   return ranks
 }
 
+// Cross-encoder-style rerank using Gemini Flash-Lite. Single batched call:
+// scores every candidate 0–10 against the query, returns the top-K candidates
+// sorted by score (ties broken by original RRF order). Falls back to the
+// original pool on any failure so the benchmark never crashes on rerank errors.
+async function rerankWithLLM(query: string, pool: any[], topK: number): Promise<any[] | null> {
+  const apiKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!apiKey || pool.length === 0) return null
+
+  const candidates = pool.map((c: any, i: number) => ({
+    idx: i,
+    text: (c.text || '').replace(/\s+/g, ' ').slice(0, 350),
+  }))
+
+  const prompt = `You are a retrieval reranker. Score each candidate chunk for how useful it is in answering the user query. Score 0 = totally off-topic, 10 = directly contains the answer or key supporting facts.
+
+Return ONLY a JSON object: {"scores":[{"idx":0,"score":7},{"idx":1,"score":2},...]} with one entry per candidate, same idx values as provided.
+
+Query: "${query}"
+
+Candidates:
+${candidates.map(c => `[${c.idx}] ${c.text}`).join('\n')}`
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 2000,
+        response_format: { type: 'json_object' },
+      }),
+    })
+    if (res.ok) {
+      try {
+        const data = await res.json()
+        const text = data.choices?.[0]?.message?.content?.trim() ?? ''
+        const jsonMatch = text.match(/\{[\s\S]*\}/)
+        if (!jsonMatch) return null
+        const parsed = JSON.parse(jsonMatch[0])
+        const scores: Array<{ idx: number; score: number }> = Array.isArray(parsed.scores) ? parsed.scores : []
+        if (scores.length === 0) return null
+        const scoreByIdx = new Map<number, number>()
+        for (const s of scores) {
+          if (typeof s?.idx === 'number' && typeof s?.score === 'number') {
+            scoreByIdx.set(s.idx, s.score)
+          }
+        }
+        const ranked = pool
+          .map((c: any, i: number) => ({ c, i, score: scoreByIdx.get(i) ?? -1 }))
+          .sort((a, b) => b.score - a.score || a.i - b.i)
+          .slice(0, topK)
+          .map(r => ({ ...r.c, rerank_score: r.score }))
+        return ranked
+      } catch (e) {
+        console.error('Rerank parse error:', e)
+        return null
+      }
+    }
+    if (res.status !== 429 && res.status < 500) break
+    await new Promise(r => setTimeout(r, 800 + attempt * 1500))
+  }
+  console.error('Rerank LLM call failed')
+  return null
+}
+
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -346,12 +414,15 @@ Deno.serve(async (req) => {
       const fixedKParam = url.searchParams.get('k')
       const adaptive = url.searchParams.get('adaptive') === '1'
       const judgeEnabled = url.searchParams.get('judge') === '1'
+      const rerankEnabled = url.searchParams.get('rerank') === '1'
+      const rerankPoolParam = parseInt(url.searchParams.get('rerank_pool') ?? '50', 10)
       const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
       const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
       const POOL = 20
       const ADAPT_MIN_K = 3
       const ADAPT_MAX_K = 15
       const GAP_MULT = 2.0
+
 
       const { data: evalSetAll } = await supabase
         .from('eval_dataset')
@@ -369,7 +440,7 @@ Deno.serve(async (req) => {
 
       const results: any[] = []
       // Keep eval_model semantics simple: 'benchmark' (default) or judge model name.
-      const runTag = `benchmark:${benchmarkName}${adaptive ? ':adaptive' : ''}${judgeEnabled ? ':judge' : ''}`
+      const runTag = `benchmark:${benchmarkName}${adaptive ? ':adaptive' : ''}${rerankEnabled ? ':rerank' : ''}${judgeEnabled ? ':judge' : ''}`
       const EVAL_TAG = judgeEnabled ? EVAL_MODEL : 'benchmark'
 
       // Each new benchmark run REPLACES all previous benchmark rows so the
@@ -387,13 +458,17 @@ Deno.serve(async (req) => {
 
       // Parallel execution: process queries in concurrent batches.
       // Judge calls inside each query are also fanned out in parallel.
-      const CONCURRENCY = 4
+      const CONCURRENCY = rerankEnabled ? 20 : 4
       const JUDGE_CONCURRENCY = 5
 
+
+
       const runOne = async (item: any) => {
-        // Experiment: uniform K=10 across all tiers (isolate K effect on lookup/edge)
+        // Baseline locked: K=10 uniform. Rerank experiment: retrieve a larger pool
+        // (rerank_pool, default 50), LLM-rerank, then slice to top-K.
         const requestedK = fixedKParam ? parseInt(fixedKParam) : 10
-        const matchCount = adaptive ? POOL : requestedK
+        const rerankPool = Math.max(requestedK, rerankPoolParam)
+        const matchCount = adaptive ? POOL : (rerankEnabled ? rerankPool : requestedK)
         const t0 = Date.now()
         const embResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
@@ -420,8 +495,21 @@ Deno.serve(async (req) => {
           rrf_k: 60,
         })
 
-        const pool: any[] = chunksRaw || []
+        let pool: any[] = chunksRaw || []
         let kUsed = pool.length
+
+        // ── Cross-encoder rerank pass ──
+        // Single batched Gemini Flash-Lite call: score each candidate 0–10, return top K by score.
+        let rerankMs = 0
+        if (rerankEnabled && pool.length > requestedK) {
+          const tR = Date.now()
+          const reranked = await rerankWithLLM(item.query_text, pool, requestedK)
+          rerankMs = Date.now() - tR
+          if (reranked && reranked.length > 0) {
+            pool = reranked
+          }
+        }
+
         if (adaptive && pool.length > ADAPT_MIN_K) {
           const scores = pool.map((c: any) => Number(c.rrf_score ?? c.similarity ?? 0))
           const gaps: number[] = []
@@ -435,7 +523,10 @@ Deno.serve(async (req) => {
           let cut = kneeIdx >= 0 ? (kneeIdx + 1) : pool.length
           cut = Math.max(ADAPT_MIN_K, Math.min(ADAPT_MAX_K, cut))
           kUsed = cut
+        } else {
+          kUsed = Math.min(requestedK, pool.length)
         }
+
 
         const returned = pool.slice(0, kUsed)
         const retrievedIds: string[] = returned.map((c: any) => c.id)
