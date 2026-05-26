@@ -137,7 +137,7 @@ async function rerankWithLLM(query: string, pool: any[], topK: number): Promise<
 
   const candidates = pool.map((c: any, i: number) => ({
     idx: i,
-    text: (c.text || '').replace(/\s+/g, ' ').slice(0, 600),
+    text: (c.text || '').replace(/\s+/g, ' ').slice(0, 350),
   }))
 
   const prompt = `You are a retrieval reranker. Score each candidate chunk for how useful it is in answering the user query. Score 0 = totally off-topic, 10 = directly contains the answer or key supporting facts.
