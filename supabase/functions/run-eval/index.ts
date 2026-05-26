@@ -346,12 +346,15 @@ Deno.serve(async (req) => {
       const fixedKParam = url.searchParams.get('k')
       const adaptive = url.searchParams.get('adaptive') === '1'
       const judgeEnabled = url.searchParams.get('judge') === '1'
+      const rerankEnabled = url.searchParams.get('rerank') === '1'
+      const rerankPoolParam = parseInt(url.searchParams.get('rerank_pool') ?? '50', 10)
       const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
       const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
       const POOL = 20
       const ADAPT_MIN_K = 3
       const ADAPT_MAX_K = 15
       const GAP_MULT = 2.0
+
 
       const { data: evalSetAll } = await supabase
         .from('eval_dataset')
