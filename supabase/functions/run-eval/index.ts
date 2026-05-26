@@ -394,9 +394,11 @@ Deno.serve(async (req) => {
       const JUDGE_CONCURRENCY = 5
 
       const runOne = async (item: any) => {
-        // Experiment: uniform K=10 across all tiers (isolate K effect on lookup/edge)
+        // Baseline locked: K=10 uniform. Rerank experiment: retrieve a larger pool
+        // (rerank_pool, default 50), LLM-rerank, then slice to top-K.
         const requestedK = fixedKParam ? parseInt(fixedKParam) : 10
-        const matchCount = adaptive ? POOL : requestedK
+        const rerankPool = Math.max(requestedK, rerankPoolParam)
+        const matchCount = adaptive ? POOL : (rerankEnabled ? rerankPool : requestedK)
         const t0 = Date.now()
         const embResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
@@ -423,8 +425,21 @@ Deno.serve(async (req) => {
           rrf_k: 60,
         })
 
-        const pool: any[] = chunksRaw || []
+        let pool: any[] = chunksRaw || []
         let kUsed = pool.length
+
+        // ── Cross-encoder rerank pass ──
+        // Single batched Gemini Flash-Lite call: score each candidate 0–10, return top K by score.
+        let rerankMs = 0
+        if (rerankEnabled && pool.length > requestedK) {
+          const tR = Date.now()
+          const reranked = await rerankWithLLM(item.query_text, pool, requestedK)
+          rerankMs = Date.now() - tR
+          if (reranked && reranked.length > 0) {
+            pool = reranked
+          }
+        }
+
         if (adaptive && pool.length > ADAPT_MIN_K) {
           const scores = pool.map((c: any) => Number(c.rrf_score ?? c.similarity ?? 0))
           const gaps: number[] = []
@@ -438,7 +453,10 @@ Deno.serve(async (req) => {
           let cut = kneeIdx >= 0 ? (kneeIdx + 1) : pool.length
           cut = Math.max(ADAPT_MIN_K, Math.min(ADAPT_MAX_K, cut))
           kUsed = cut
+        } else {
+          kUsed = Math.min(requestedK, pool.length)
         }
+
 
         const returned = pool.slice(0, kUsed)
         const retrievedIds: string[] = returned.map((c: any) => c.id)
