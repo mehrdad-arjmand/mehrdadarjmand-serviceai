@@ -458,8 +458,9 @@ Deno.serve(async (req) => {
 
       // Parallel execution: process queries in concurrent batches.
       // Judge calls inside each query are also fanned out in parallel.
-      const CONCURRENCY = 4
+      const CONCURRENCY = rerankEnabled ? 10 : 4
       const JUDGE_CONCURRENCY = 5
+
 
       const runOne = async (item: any) => {
         // Baseline locked: K=10 uniform. Rerank experiment: retrieve a larger pool
