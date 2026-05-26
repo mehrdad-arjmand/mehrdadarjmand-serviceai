@@ -127,6 +127,74 @@ function getCitedSourceRanks(responseText: string | null | undefined): Set<numbe
   return ranks
 }
 
+// Cross-encoder-style rerank using Gemini Flash-Lite. Single batched call:
+// scores every candidate 0–10 against the query, returns the top-K candidates
+// sorted by score (ties broken by original RRF order). Falls back to the
+// original pool on any failure so the benchmark never crashes on rerank errors.
+async function rerankWithLLM(query: string, pool: any[], topK: number): Promise<any[] | null> {
+  const apiKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!apiKey || pool.length === 0) return null
+
+  const candidates = pool.map((c: any, i: number) => ({
+    idx: i,
+    text: (c.text || '').replace(/\s+/g, ' ').slice(0, 600),
+  }))
+
+  const prompt = `You are a retrieval reranker. Score each candidate chunk for how useful it is in answering the user query. Score 0 = totally off-topic, 10 = directly contains the answer or key supporting facts.
+
+Return ONLY a JSON object: {"scores":[{"idx":0,"score":7},{"idx":1,"score":2},...]} with one entry per candidate, same idx values as provided.
+
+Query: "${query}"
+
+Candidates:
+${candidates.map(c => `[${c.idx}] ${c.text}`).join('\n')}`
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 2000,
+        response_format: { type: 'json_object' },
+      }),
+    })
+    if (res.ok) {
+      try {
+        const data = await res.json()
+        const text = data.choices?.[0]?.message?.content?.trim() ?? ''
+        const jsonMatch = text.match(/\{[\s\S]*\}/)
+        if (!jsonMatch) return null
+        const parsed = JSON.parse(jsonMatch[0])
+        const scores: Array<{ idx: number; score: number }> = Array.isArray(parsed.scores) ? parsed.scores : []
+        if (scores.length === 0) return null
+        const scoreByIdx = new Map<number, number>()
+        for (const s of scores) {
+          if (typeof s?.idx === 'number' && typeof s?.score === 'number') {
+            scoreByIdx.set(s.idx, s.score)
+          }
+        }
+        const ranked = pool
+          .map((c: any, i: number) => ({ c, i, score: scoreByIdx.get(i) ?? -1 }))
+          .sort((a, b) => b.score - a.score || a.i - b.i)
+          .slice(0, topK)
+          .map(r => ({ ...r.c, rerank_score: r.score }))
+        return ranked
+      } catch (e) {
+        console.error('Rerank parse error:', e)
+        return null
+      }
+    }
+    if (res.status !== 429 && res.status < 500) break
+    await new Promise(r => setTimeout(r, 800 + attempt * 1500))
+  }
+  console.error('Rerank LLM call failed')
+  return null
+}
+
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
