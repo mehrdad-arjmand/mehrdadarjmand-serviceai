@@ -1037,7 +1037,133 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    return new Response(JSON.stringify({ error: 'Unknown action. Use ?action=analytics|export|run-eval|run-retrieval-eval|run-expanded-eval|eval-runs' }), {
+    // ─── ACTION: expand-gold ───
+    // Judge-assisted gold expansion: for each item in source benchmark, retrieve
+    // top-K via the SAME hybrid pipeline used at eval time, judge every chunk that
+    // is NOT already gold, and append accepted chunks to expected_chunk_ids.
+    // Writes a NEW benchmark (default: <source>_expanded) so the original baseline
+    // is preserved for A/B comparison.
+    if (action === 'expand-gold') {
+      const sourceBenchmark = url.searchParams.get('source') ?? 'benchmark_100_v3_multigold'
+      const targetBenchmark = url.searchParams.get('target') ?? `${sourceBenchmark}_expanded`
+      const k = parseInt(url.searchParams.get('k') ?? '10', 10)
+      const limit = parseInt(url.searchParams.get('limit') ?? '200', 10)
+      const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
+      const dryRun = url.searchParams.get('dry_run') === '1'
+      const CONCURRENCY = 6
+      const JUDGE_CONCURRENCY = 8
+
+      const { data: src } = await supabase
+        .from('eval_dataset').select('*')
+        .eq('benchmark_name', sourceBenchmark)
+        .order('tier', { ascending: true })
+        .order('query_text', { ascending: true })
+      if (!src || src.length === 0) {
+        return new Response(JSON.stringify({ error: `No rows in ${sourceBenchmark}` }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
+      const items = src.slice(offset, offset + limit)
+
+      if (!dryRun && offset === 0) {
+        await supabase.from('eval_dataset').delete().eq('benchmark_name', targetBenchmark)
+      }
+
+      const { data: allDocs } = await supabase.from('documents').select('id')
+      const allDocIds = (allDocs || []).map((d: any) => d.id)
+
+      const tierStats: Record<string, { items: number; orig: number; added: number; judged: number }> = {}
+      const perItem: any[] = []
+
+      const processOne = async (item: any) => {
+        const tier = item.tier || 'uncategorized'
+        const goldSet = new Set<string>(item.expected_chunk_ids || [])
+        const origCount = goldSet.size
+
+        const embRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${getEmbeddingApiKey(apiTier)}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: { parts: [{ text: item.query_text }] }, outputDimensionality: 768 }) }
+        )
+        const embData = await embRes.json()
+        const embedding = embData.embedding?.values
+        if (!embedding) return { tier, query: item.query_text, error: 'embed_failed', orig_gold: origCount, accepted: 0, judged: 0 }
+
+        const { data: chunksRaw } = await supabase.rpc('match_chunks_hybrid', {
+          query_text: item.query_text,
+          query_embedding: `[${embedding.join(',')}]`,
+          doc_ids: allDocIds,
+          match_count: k,
+          vec_pool: 200, kw_pool: 200, rrf_k: 60,
+        })
+        const candidates = (chunksRaw || []).filter((c: any) => !goldSet.has(c.id))
+
+        const accepted: string[] = []
+        for (let s = 0; s < candidates.length; s += JUDGE_CONCURRENCY) {
+          const slice = candidates.slice(s, s + JUDGE_CONCURRENCY)
+          const verdicts = await Promise.all(
+            slice.map((c: any) => evaluateChunkRelevance(item.query_text, c.text || '', apiTier))
+          )
+          verdicts.forEach((v, idx) => { if (v.relevant) accepted.push(slice[idx].id) })
+        }
+
+        const expandedIds = Array.from(new Set<string>([...goldSet, ...accepted]))
+
+        if (!dryRun) {
+          await supabase.from('eval_dataset').insert({
+            query_text: item.query_text,
+            expected_chunk_ids: expandedIds,
+            description: item.description,
+            benchmark_name: targetBenchmark,
+            tier: item.tier,
+            answer_hint: item.answer_hint,
+            source_doc: item.source_doc,
+            source_chunk_id: item.source_chunk_id,
+            k_target: item.k_target,
+            locked: true,
+          })
+        }
+
+        const ts = tierStats[tier] ||= { items: 0, orig: 0, added: 0, judged: 0 }
+        ts.items++; ts.orig += origCount; ts.added += accepted.length; ts.judged += candidates.length
+
+        return {
+          tier, query: item.query_text.slice(0, 80),
+          orig_gold: origCount, judged: candidates.length, accepted: accepted.length,
+          new_gold_total: expandedIds.length,
+        }
+      }
+
+      for (let s = 0; s < items.length; s += CONCURRENCY) {
+        const batch = items.slice(s, s + CONCURRENCY)
+        const batchRes = await Promise.all(batch.map(processOne))
+        perItem.push(...batchRes)
+      }
+
+      const totalOrig = perItem.reduce((a, r) => a + (r.orig_gold || 0), 0)
+      const totalAdded = perItem.reduce((a, r) => a + (r.accepted || 0), 0)
+      const totalJudged = perItem.reduce((a, r) => a + (r.judged || 0), 0)
+
+      return new Response(JSON.stringify({
+        success: true, source: sourceBenchmark, target: targetBenchmark, dry_run: dryRun,
+        items_processed: perItem.length,
+        totals: {
+          orig_gold: totalOrig, judged: totalJudged, accepted: totalAdded,
+          avg_orig_per_q: +(totalOrig / Math.max(1, perItem.length)).toFixed(2),
+          avg_added_per_q: +(totalAdded / Math.max(1, perItem.length)).toFixed(2),
+          accept_rate: +(totalAdded / Math.max(1, totalJudged)).toFixed(4),
+        },
+        per_tier: Object.entries(tierStats).map(([tier, v]) => ({
+          tier, items: v.items,
+          avg_orig: +(v.orig / v.items).toFixed(2),
+          avg_added: +(v.added / v.items).toFixed(2),
+          accept_rate: +(v.added / Math.max(1, v.judged)).toFixed(4),
+        })),
+        per_item: perItem,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    return new Response(JSON.stringify({ error: 'Unknown action. Use ?action=analytics|export|run-eval|run-retrieval-eval|run-expanded-eval|eval-runs|expand-gold' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
