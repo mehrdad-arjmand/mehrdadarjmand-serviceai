@@ -410,7 +410,7 @@ Deno.serve(async (req) => {
     //               Normally OFF for benchmark (gold IDs are truth); flip ON
     //               only for one-off comparison runs.
     if (action === 'run-eval') {
-      const benchmarkName = url.searchParams.get('benchmark') ?? 'benchmark_100_v3_multigold'
+      const benchmarkName = url.searchParams.get('benchmark') ?? 'benchmark_100_v3_multigold_expanded'
       const fixedKParam = url.searchParams.get('k')
       const adaptive = url.searchParams.get('adaptive') === '1'
       const judgeEnabled = url.searchParams.get('judge') === '1'
