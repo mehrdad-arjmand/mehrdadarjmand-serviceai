@@ -418,6 +418,12 @@ Deno.serve(async (req) => {
       const rerankPoolParam = parseInt(url.searchParams.get('rerank_pool') ?? '50', 10)
       const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
       const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
+      // persist=1: treat this run as REAL user traffic — rows are not tagged as
+      // benchmark, never wiped, and DO flow into Query Analytics + Confusion
+      // Matrix + Projects KPI. Use for ad-hoc evaluation batches (e.g. the 100
+      // real-world questions). The locked benchmark set should NEVER pass
+      // persist=1, so it stays isolated and overwrites itself each run.
+      const persistAsReal = url.searchParams.get('persist') === '1'
       const POOL = 20
       const ADAPT_MIN_K = 3
       const ADAPT_MAX_K = 15
@@ -447,11 +453,13 @@ Deno.serve(async (req) => {
       // global Query Analytics / confusion matrix never accumulates duplicates.
       // Match every benchmark variant: legacy tags ('benchmark:<name>[:judge|:adaptive]')
       // and rows where response_text carries the benchmark marker.
-      if (offset === 0) {
+      // SKIPPED when persist=1: real-world runs persist alongside user traffic.
+      if (offset === 0 && !persistAsReal) {
         await supabase.from('query_logs').delete().or(
           `eval_model.eq.benchmark,eval_model.like.benchmark:%,response_text.like.[benchmark:%`
         )
       }
+
 
       const { data: allDocs } = await supabase.from('documents').select('id')
       const allDocIds = (allDocs || []).map((d: any) => d.id)
