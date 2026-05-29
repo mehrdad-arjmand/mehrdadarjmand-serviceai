@@ -671,6 +671,25 @@ Deno.serve(async (req) => {
         ? judgeHitRows.reduce((s: number, r: any) => s + (r.judge_first_relevant_rank ? 1 / r.judge_first_relevant_rank : 0), 0) / judgeHitRows.length
         : null
 
+      // Record this run in eval_runs so it appears in the eval history table.
+      // Only on the final batch (offset+limit covers full set) to avoid
+      // partial-batch noise.
+      const isFinalBatch = (offset + evalSet.length) >= evalSetAll.length
+      if (isFinalBatch) {
+        await supabase.from('eval_runs').insert({
+          created_by: user.id,
+          total_queries: results.length,
+          avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
+          avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
+          avg_hit_rate_at_k: parseFloat((hitCount / Math.max(1, results.length)).toFixed(4)),
+          mrr: judgeMrr !== null ? parseFloat(judgeMrr.toFixed(4)) : 0,
+          k_used: fixedKParam ? `fixed k=${fixedKParam}` : (adaptive ? `adaptive pool=${POOL}` : 'k=10'),
+          eval_model: judgeEnabled ? EVAL_MODEL : 'retrieval-only',
+          notes: `${persistAsReal ? 'real-world' : 'benchmark'}=${benchmarkName}${rerankEnabled ? ' rerank=on' : ''}; judge_hit_rate=${judgeHitRate !== null ? judgeHitRate.toFixed(4) : 'n/a'}; f1=${avgF1.toFixed(4)}`,
+        })
+      }
+
+
       return new Response(JSON.stringify({
         success: true,
         benchmark_name: benchmarkName,
