@@ -575,7 +575,16 @@ Deno.serve(async (req) => {
             })
           }
           const judgeRelevant = judgeLabels.filter((l: any) => l && l.relevant).length
+          judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
+          judgeHit = judgeRelevant > 0 ? 1 : 0
+          const firstJudgeIdx = judgeLabels.findIndex((l: any) => l && l.relevant)
+          judgeFirstRelevantRank = firstJudgeIdx >= 0 ? firstJudgeIdx + 1 : null
+        }
+
+        const elapsed = Date.now() - t0
+
         await supabase.from('query_logs').insert({
+
           user_id: user.id,
           query_text: item.query_text,
           retrieved_chunk_ids: retrievedIds,
