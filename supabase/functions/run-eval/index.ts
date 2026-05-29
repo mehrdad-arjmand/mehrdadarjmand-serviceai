@@ -575,20 +575,16 @@ Deno.serve(async (req) => {
             })
           }
           const judgeRelevant = judgeLabels.filter((l: any) => l && l.relevant).length
-          judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
-          judgeHit = judgeRelevant > 0 ? 1 : 0
-          const firstJudgeIdx = judgeLabels.findIndex((l: any) => l && l.relevant)
-          judgeFirstRelevantRank = firstJudgeIdx >= 0 ? firstJudgeIdx + 1 : null
-        }
-
-        const elapsed = Date.now() - t0
-
         await supabase.from('query_logs').insert({
           user_id: user.id,
           query_text: item.query_text,
           retrieved_chunk_ids: retrievedIds,
           retrieved_similarities: retrievedSims,
-          response_text: `[${runTag}] tier=${item.tier || 'n/a'} k=${kUsed}${adaptive ? `/pool=${POOL}` : ''}${judgeEnabled ? ` judge=${EVAL_MODEL}` : ''}`,
+          // When persist=1, omit the [benchmark:...] prefix so Analytics
+          // includes the row in latency/tokens/cost/retrieval/confusion-matrix.
+          response_text: persistAsReal
+            ? `tier=${item.tier || 'n/a'} k=${kUsed}${judgeEnabled ? ` judge=${EVAL_MODEL}` : ''}`
+            : `[${runTag}] tier=${item.tier || 'n/a'} k=${kUsed}${adaptive ? `/pool=${POOL}` : ''}${judgeEnabled ? ` judge=${EVAL_MODEL}` : ''}`,
           citations_json: [],
           input_tokens: 0, output_tokens: 0, total_tokens: 0,
           execution_time_ms: elapsed,
@@ -597,6 +593,18 @@ Deno.serve(async (req) => {
           total_relevant_chunks: expectedIds.size,
           relevant_in_top_k: relevant.length,
           precision_at_k: parseFloat(precision.toFixed(4)),
+          recall_at_k: parseFloat(recall.toFixed(4)),
+          hit_rate_at_k: relevant.length > 0 ? 1 : 0,
+          judge_hit_rate_at_k: judgeHit,
+          first_relevant_rank: firstRelevantRank,
+          // EVAL_TAG would be 'benchmark' when judge is off; for real runs we
+          // store the judge model name (or 'realworld' fallback) so analytics
+          // filters that exclude 'benchmark*' still pass these rows through.
+          eval_model: persistAsReal ? (judgeEnabled ? EVAL_MODEL : 'realworld') : EVAL_TAG,
+          evaluated_at: new Date().toISOString(),
+          relevance_labels: judgeLabels,
+        })
+
           recall_at_k: parseFloat(recall.toFixed(4)),
           hit_rate_at_k: relevant.length > 0 ? 1 : 0,
           judge_hit_rate_at_k: judgeHit,
