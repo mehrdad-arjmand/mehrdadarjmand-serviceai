@@ -418,6 +418,12 @@ Deno.serve(async (req) => {
       const rerankPoolParam = parseInt(url.searchParams.get('rerank_pool') ?? '50', 10)
       const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
       const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
+      // persist=1: treat this run as REAL user traffic — rows are not tagged as
+      // benchmark, never wiped, and DO flow into Query Analytics + Confusion
+      // Matrix + Projects KPI. Use for ad-hoc evaluation batches (e.g. the 100
+      // real-world questions). The locked benchmark set should NEVER pass
+      // persist=1, so it stays isolated and overwrites itself each run.
+      const persistAsReal = url.searchParams.get('persist') === '1'
       const POOL = 20
       const ADAPT_MIN_K = 3
       const ADAPT_MAX_K = 15
@@ -447,11 +453,13 @@ Deno.serve(async (req) => {
       // global Query Analytics / confusion matrix never accumulates duplicates.
       // Match every benchmark variant: legacy tags ('benchmark:<name>[:judge|:adaptive]')
       // and rows where response_text carries the benchmark marker.
-      if (offset === 0) {
+      // SKIPPED when persist=1: real-world runs persist alongside user traffic.
+      if (offset === 0 && !persistAsReal) {
         await supabase.from('query_logs').delete().or(
           `eval_model.eq.benchmark,eval_model.like.benchmark:%,response_text.like.[benchmark:%`
         )
       }
+
 
       const { data: allDocs } = await supabase.from('documents').select('id')
       const allDocIds = (allDocs || []).map((d: any) => d.id)
@@ -576,11 +584,16 @@ Deno.serve(async (req) => {
         const elapsed = Date.now() - t0
 
         await supabase.from('query_logs').insert({
+
           user_id: user.id,
           query_text: item.query_text,
           retrieved_chunk_ids: retrievedIds,
           retrieved_similarities: retrievedSims,
-          response_text: `[${runTag}] tier=${item.tier || 'n/a'} k=${kUsed}${adaptive ? `/pool=${POOL}` : ''}${judgeEnabled ? ` judge=${EVAL_MODEL}` : ''}`,
+          // When persist=1, omit the [benchmark:...] prefix so Analytics
+          // includes the row in latency/tokens/cost/retrieval/confusion-matrix.
+          response_text: persistAsReal
+            ? `tier=${item.tier || 'n/a'} k=${kUsed}${judgeEnabled ? ` judge=${EVAL_MODEL}` : ''}`
+            : `[${runTag}] tier=${item.tier || 'n/a'} k=${kUsed}${adaptive ? `/pool=${POOL}` : ''}${judgeEnabled ? ` judge=${EVAL_MODEL}` : ''}`,
           citations_json: [],
           input_tokens: 0, output_tokens: 0, total_tokens: 0,
           execution_time_ms: elapsed,
@@ -593,10 +606,15 @@ Deno.serve(async (req) => {
           hit_rate_at_k: relevant.length > 0 ? 1 : 0,
           judge_hit_rate_at_k: judgeHit,
           first_relevant_rank: firstRelevantRank,
-          eval_model: EVAL_TAG,
+          // EVAL_TAG would be 'benchmark' when judge is off; for real runs we
+          // store the judge model name (or 'realworld' fallback) so analytics
+          // filters that exclude 'benchmark*' still pass these rows through.
+          eval_model: persistAsReal ? (judgeEnabled ? EVAL_MODEL : 'realworld') : EVAL_TAG,
           evaluated_at: new Date().toISOString(),
           relevance_labels: judgeLabels,
         })
+
+
 
         return {
           query: item.query_text, tier: item.tier || 'uncategorized',
@@ -654,6 +672,25 @@ Deno.serve(async (req) => {
       const judgeMrr = judgeEnabled && judgeHitRows.length > 0
         ? judgeHitRows.reduce((s: number, r: any) => s + (r.judge_first_relevant_rank ? 1 / r.judge_first_relevant_rank : 0), 0) / judgeHitRows.length
         : null
+
+      // Record this run in eval_runs so it appears in the eval history table.
+      // Only on the final batch (offset+limit covers full set) to avoid
+      // partial-batch noise.
+      const isFinalBatch = (offset + evalSet.length) >= evalSetAll.length
+      if (isFinalBatch) {
+        await supabase.from('eval_runs').insert({
+          created_by: user.id,
+          total_queries: results.length,
+          avg_precision_at_k: parseFloat(avgPrecision.toFixed(4)),
+          avg_recall_at_k: parseFloat(avgRecall.toFixed(4)),
+          avg_hit_rate_at_k: parseFloat((hitCount / Math.max(1, results.length)).toFixed(4)),
+          mrr: judgeMrr !== null ? parseFloat(judgeMrr.toFixed(4)) : 0,
+          k_used: fixedKParam ? `fixed k=${fixedKParam}` : (adaptive ? `adaptive pool=${POOL}` : 'k=10'),
+          eval_model: judgeEnabled ? EVAL_MODEL : 'retrieval-only',
+          notes: `${persistAsReal ? 'real-world' : 'benchmark'}=${benchmarkName}${rerankEnabled ? ' rerank=on' : ''}; judge_hit_rate=${judgeHitRate !== null ? judgeHitRate.toFixed(4) : 'n/a'}; f1=${avgF1.toFixed(4)}`,
+        })
+      }
+
 
       return new Response(JSON.stringify({
         success: true,
