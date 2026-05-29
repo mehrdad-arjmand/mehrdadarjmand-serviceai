@@ -605,14 +605,7 @@ Deno.serve(async (req) => {
           relevance_labels: judgeLabels,
         })
 
-          recall_at_k: parseFloat(recall.toFixed(4)),
-          hit_rate_at_k: relevant.length > 0 ? 1 : 0,
-          judge_hit_rate_at_k: judgeHit,
-          first_relevant_rank: firstRelevantRank,
-          eval_model: EVAL_TAG,
-          evaluated_at: new Date().toISOString(),
-          relevance_labels: judgeLabels,
-        })
+
 
         return {
           query: item.query_text, tier: item.tier || 'uncategorized',
