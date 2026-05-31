@@ -598,7 +598,11 @@ Deno.serve(async (req) => {
           input_tokens: 0, output_tokens: 0, total_tokens: 0,
           execution_time_ms: elapsed,
           top_k: retrievedIds.length,
-          top_k_eval: adaptive ? POOL : retrievedIds.length,
+          // Always record the candidate pool size (not the returned slice) so the
+          // confusion-matrix's TN ballast is comparable across runs. When persist=1
+          // these rows feed the live Analytics matrix; without this, TN collapses
+          // to 0 for non-adaptive runs and accuracy/precision look artificially low.
+          top_k_eval: persistAsReal ? POOL : (adaptive ? POOL : retrievedIds.length),
           total_relevant_chunks: expectedIds.size,
           relevant_in_top_k: relevant.length,
           precision_at_k: parseFloat(precision.toFixed(4)),
