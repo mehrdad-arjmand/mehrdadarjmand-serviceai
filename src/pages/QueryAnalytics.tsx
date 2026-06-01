@@ -655,13 +655,25 @@ const QueryAnalytics = () => {
         {/* Confusion Matrix */}
         {confusionMatrix && confusionMatrix.rows.length > 0 && (
           <Card className="mb-8 border border-border/60 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Grid3X3 className="h-4 w-4" />Confusion Matrix
-              </CardTitle>
-              <CardDescription>
-                {confusionMatrix.rows.length} evaluated queries
-              </CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-4">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Grid3X3 className="h-4 w-4" />Confusion Matrix
+                </CardTitle>
+                <CardDescription>
+                  {confusionMatrix.rows.length} evaluated queries · source: {matrixSource === 'judge' ? 'LLM judge labels' : 'gold answer set'}
+                </CardDescription>
+              </div>
+              <ToggleGroup
+                type="single"
+                size="sm"
+                value={matrixSource}
+                onValueChange={(v) => { if (v) setMatrixSource(v as 'gold' | 'judge'); }}
+                className="shrink-0"
+              >
+                <ToggleGroupItem value="gold" className="text-xs px-3">Gold</ToggleGroupItem>
+                <ToggleGroupItem value="judge" className="text-xs px-3">Judge</ToggleGroupItem>
+              </ToggleGroup>
             </CardHeader>
             <CardContent>
               {/* Aggregate KPIs */}
