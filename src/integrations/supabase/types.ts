@@ -439,7 +439,9 @@ export type Database = {
           hit_rate_at_k: number | null
           id: string
           input_tokens: number | null
+          judge_fp: number | null
           judge_hit_rate_at_k: number | null
+          judge_tp: number | null
           output_tokens: number | null
           precision_at_k: number | null
           query_text: string
@@ -466,7 +468,9 @@ export type Database = {
           hit_rate_at_k?: number | null
           id?: string
           input_tokens?: number | null
+          judge_fp?: number | null
           judge_hit_rate_at_k?: number | null
+          judge_tp?: number | null
           output_tokens?: number | null
           precision_at_k?: number | null
           query_text: string
@@ -493,7 +497,9 @@ export type Database = {
           hit_rate_at_k?: number | null
           id?: string
           input_tokens?: number | null
+          judge_fp?: number | null
           judge_hit_rate_at_k?: number | null
+          judge_tp?: number | null
           output_tokens?: number | null
           precision_at_k?: number | null
           query_text?: string
