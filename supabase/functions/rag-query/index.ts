@@ -1620,6 +1620,11 @@ async function evaluateRetrievalBackground(
     precision_at_k: parseFloat(precisionAtK.toFixed(4)),
     recall_at_k: parseFloat(recallAtK.toFixed(4)),
     hit_rate_at_k: hitRate,
+    // For rag-query, relevant_in_top_k IS already judge-based, but persist the
+    // dedicated judge_tp/judge_fp columns too so the Analytics matrix toggle
+    // treats this row consistently with run-eval rows (which store gold TP/FP).
+    judge_tp: relevantInTopK,
+    judge_fp: Math.max(0, topK - relevantInTopK),
     first_relevant_rank: firstRelevantRank,
     relevance_labels: labels,
     eval_model: EVAL_MODEL,

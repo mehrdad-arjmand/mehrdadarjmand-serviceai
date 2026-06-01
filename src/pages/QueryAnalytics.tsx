@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, BarChart3, Download, Loader2, Play, Shield, Target, History, Copy, Check, Grid3X3 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 interface AnalyticsData {
   sample_size: number;
@@ -154,7 +155,8 @@ const QueryAnalytics = () => {
   const [evalRuns, setEvalRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
-  const [confusionMatrix, setConfusionMatrix] = useState<ConfusionMatrix | null>(null);
+  const [confusionLogs, setConfusionLogs] = useState<any[] | null>(null);
+  const [matrixSource, setMatrixSource] = useState<'gold' | 'judge'>('gold');
 
   const callEvalFunction = async (action: string, params?: Record<string, string>) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -195,7 +197,7 @@ const QueryAnalytics = () => {
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from('query_logs')
-          .select('query_text, created_at, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank, eval_model, response_text')
+          .select('query_text, created_at, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank, eval_model, response_text, judge_tp, judge_fp')
           .not('evaluated_at', 'is', null)
           .not('total_relevant_chunks', 'is', null)
           .not('relevant_in_top_k', 'is', null)
@@ -206,7 +208,6 @@ const QueryAnalytics = () => {
         // queries only. This MUST match the filter used on the Projects landing
         // page (src/pages/Projects.tsx :: fetchMetrics) so the headline Accuracy
         // KPI and the matrix Accuracy total are pinned to the same value.
-        // Do not relax this filter without also updating Projects.tsx.
         const filtered = data.filter((l: any) => {
           const em = (l.eval_model || '') as string;
           const rt = (l.response_text || '') as string;
@@ -216,55 +217,66 @@ const QueryAnalytics = () => {
         if (data.length < PAGE) break;
       }
       if (logs.length === 0) return;
-
-      const rows: ConfusionRow[] = logs.map(l => {
-        const tp = l.relevant_in_top_k ?? 0;
-        const fp = (l.top_k ?? 0) - tp;
-        const fn = (l.total_relevant_chunks ?? 0) - tp;
-        const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
-        const total = tp + fp + fn + tn;
-        const precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
-        const recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
-        const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
-        return {
-          query: l.query_text?.slice(0, 80) || '',
-          created_at: l.created_at,
-          top_k: l.top_k ?? 0,
-          top_k_eval: l.top_k_eval ?? 0,
-          relevant_in_top_k: tp,
-          total_relevant_chunks: l.total_relevant_chunks ?? 0,
-          tp, fp, fn, tn,
-          accuracy: total > 0 ? (tp + tn) / total : 0,
-          precision,
-          recall,
-          f1,
-        };
-      });
-
-      const sumTp = rows.reduce((s, r) => s + r.tp, 0);
-      const sumFp = rows.reduce((s, r) => s + r.fp, 0);
-      const sumFn = rows.reduce((s, r) => s + r.fn, 0);
-      const sumTn = rows.reduce((s, r) => s + r.tn, 0);
-      const totalAll = sumTp + sumFp + sumFn + sumTn;
-      // Macro-F1: average of per-query F1 (matches Retrieval Quality card)
-      const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
-      const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
-      const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
-
-      setConfusionMatrix({
-        rows,
-        totals: {
-          tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
-          accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
-          precision: microPrecision,
-          recall: microRecall,
-          f1: macroF1,
-        },
-      });
+      setConfusionLogs(logs);
     } catch {
       console.error('Failed to compute confusion matrix');
     }
   };
+
+  // Compute matrix from cached logs, switchable between Gold and Judge sources.
+  // Gold: TP = `relevant_in_top_k` (gold-set intersection for run-eval rows;
+  //   for rag-query rows it's already judge-derived but we treat it as the
+  //   stored baseline). FN scales from `total_relevant_chunks`.
+  // Judge: TP = `judge_tp` (count of LLM-judged-relevant within top_k). FN
+  //   is unchanged (still grounded in `total_relevant_chunks`) so recall stays
+  //   comparable; only TP/FP swap.
+  const confusionMatrix: ConfusionMatrix | null = useMemo(() => {
+    if (!confusionLogs || confusionLogs.length === 0) return null;
+    const rows: ConfusionRow[] = confusionLogs.map((l: any) => {
+      const useJudge = matrixSource === 'judge' && l.judge_tp !== null && l.judge_tp !== undefined;
+      const tp = useJudge ? (l.judge_tp ?? 0) : (l.relevant_in_top_k ?? 0);
+      const fp = useJudge
+        ? (l.judge_fp ?? Math.max(0, (l.top_k ?? 0) - tp))
+        : Math.max(0, (l.top_k ?? 0) - tp);
+      const fn = Math.max(0, (l.total_relevant_chunks ?? 0) - (l.relevant_in_top_k ?? 0));
+      const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
+      const total = tp + fp + fn + tn;
+      const precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
+      const recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
+      const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+      return {
+        query: l.query_text?.slice(0, 80) || '',
+        created_at: l.created_at,
+        top_k: l.top_k ?? 0,
+        top_k_eval: l.top_k_eval ?? 0,
+        relevant_in_top_k: tp,
+        total_relevant_chunks: l.total_relevant_chunks ?? 0,
+        tp, fp, fn, tn,
+        accuracy: total > 0 ? (tp + tn) / total : 0,
+        precision,
+        recall,
+        f1,
+      };
+    });
+    const sumTp = rows.reduce((s, r) => s + r.tp, 0);
+    const sumFp = rows.reduce((s, r) => s + r.fp, 0);
+    const sumFn = rows.reduce((s, r) => s + r.fn, 0);
+    const sumTn = rows.reduce((s, r) => s + r.tn, 0);
+    const totalAll = sumTp + sumFp + sumFn + sumTn;
+    const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
+    const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
+    const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
+    return {
+      rows,
+      totals: {
+        tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
+        accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
+        precision: microPrecision,
+        recall: microRecall,
+        f1: macroF1,
+      },
+    };
+  }, [confusionLogs, matrixSource]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -643,13 +655,25 @@ const QueryAnalytics = () => {
         {/* Confusion Matrix */}
         {confusionMatrix && confusionMatrix.rows.length > 0 && (
           <Card className="mb-8 border border-border/60 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Grid3X3 className="h-4 w-4" />Confusion Matrix
-              </CardTitle>
-              <CardDescription>
-                {confusionMatrix.rows.length} evaluated queries
-              </CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-4">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Grid3X3 className="h-4 w-4" />Confusion Matrix
+                </CardTitle>
+                <CardDescription>
+                  {confusionMatrix.rows.length} evaluated queries · source: {matrixSource === 'judge' ? 'LLM judge labels' : 'gold answer set'}
+                </CardDescription>
+              </div>
+              <ToggleGroup
+                type="single"
+                size="sm"
+                value={matrixSource}
+                onValueChange={(v) => { if (v) setMatrixSource(v as 'gold' | 'judge'); }}
+                className="shrink-0"
+              >
+                <ToggleGroupItem value="gold" className="text-xs px-3">Gold</ToggleGroupItem>
+                <ToggleGroupItem value="judge" className="text-xs px-3">Judge</ToggleGroupItem>
+              </ToggleGroup>
             </CardHeader>
             <CardContent>
               {/* Aggregate KPIs */}
