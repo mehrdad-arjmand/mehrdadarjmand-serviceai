@@ -609,6 +609,11 @@ Deno.serve(async (req) => {
           recall_at_k: parseFloat(recall.toFixed(4)),
           hit_rate_at_k: relevant.length > 0 ? 1 : 0,
           judge_hit_rate_at_k: judgeHit,
+          // Persist judge-derived TP/FP counts so the Analytics confusion matrix
+          // can be rendered against the LLM judge labels instead of the tiny
+          // gold sets. judge_tp = relevant labels within rank<=top_k.
+          judge_tp: judgeLabels ? judgeLabels.filter((l: any) => l && l.relevant && (l.rank ?? 0) <= retrievedIds.length).length : null,
+          judge_fp: judgeLabels ? Math.max(0, retrievedIds.length - judgeLabels.filter((l: any) => l && l.relevant && (l.rank ?? 0) <= retrievedIds.length).length) : null,
           first_relevant_rank: firstRelevantRank,
           // EVAL_TAG would be 'benchmark' when judge is off; for real runs we
           // store the judge model name (or 'realworld' fallback) so analytics
