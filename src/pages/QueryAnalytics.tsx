@@ -673,7 +673,7 @@ const QueryAnalytics = () => {
                   <Grid3X3 className="h-4 w-4" />Confusion Matrix
                 </CardTitle>
                 <CardDescription>
-                  {confusionMatrix.rows.length} evaluated queries · source: {matrixSource === 'judge' ? 'LLM judge labels' : 'gold answer set'}
+                  {confusionMatrix ? `${confusionMatrix.rows.length} evaluated queries` : '0 evaluated queries'} · source: {matrixSource === 'judge' ? 'LLM judge labels (ad-hoc + real-world)' : 'gold answer set (locked 100-question benchmark)'}
                 </CardDescription>
               </div>
               <ToggleGroup
