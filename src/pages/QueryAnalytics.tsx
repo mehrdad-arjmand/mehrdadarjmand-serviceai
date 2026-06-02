@@ -145,11 +145,11 @@ SELECT
 FROM query_logs
 WHERE evaluated_at IS NOT NULL;`;
 
-const LOCKED_BENCHMARK_NAME = 'benchmark_100_v3_multigold_expanded';
+const LOCKED_BENCHMARK_NAMES = ['benchmark_100_v3_multigold', 'benchmark_100_v3_multigold_expanded'];
 
 const isLockedBenchmarkRow = (log: any) => {
   const responseText = (log.response_text || '') as string;
-  return responseText.startsWith(`[benchmark:${LOCKED_BENCHMARK_NAME}`);
+  return LOCKED_BENCHMARK_NAMES.some((name) => responseText.startsWith(`[benchmark:${name}`));
 };
 
 const isJudgeFailureLabel = (label: any) => {
