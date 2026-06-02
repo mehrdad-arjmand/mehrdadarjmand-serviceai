@@ -224,7 +224,7 @@ Deno.serve(async (req) => {
       for (let from = 0; ; from += PAGE) {
         const { data: page, error } = await supabase
           .from('query_logs')
-          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at, eval_model, response_text')
+          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at, eval_model, response_text, judge_tp, judge_fp, relevance_labels')
           .order('created_at', { ascending: true })
           .range(from, from + PAGE - 1)
         if (error) break
@@ -265,15 +265,21 @@ Deno.serve(async (req) => {
       const judgeFailedLogs = logs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
       const pendingLogs = logs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
 
-      const validScoredLogs = evaluatedLogs.filter(l => l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined && l.relevant_in_top_k !== null && l.relevant_in_top_k !== undefined)
-      const noJudgedRelevantCount = validScoredLogs.filter(l => (l.relevant_in_top_k ?? 0) === 0).length
+      const validScoredLogs = evaluatedLogs.filter(l => {
+        if (hasMostlyFailedJudgeLabels(l.relevance_labels)) return false
+        return l.judge_tp !== null && l.judge_tp !== undefined && l.judge_fp !== null && l.judge_fp !== undefined
+      })
+      const noJudgedRelevantCount = validScoredLogs.filter(l => (l.judge_tp ?? 0) === 0).length
 
       // Confusion-matrix-aligned per-query TP/FP/FN/TN
       const perQ = validScoredLogs.map(l => {
-        const tp = l.relevant_in_top_k ?? 0
-        const fp = Math.max(0, (l.top_k ?? 0) - tp)
-        const fn = Math.max(0, (l.total_relevant_chunks ?? 0) - tp)
-        const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn)
+        const labels = Array.isArray(l.relevance_labels) ? l.relevance_labels : []
+        const judgedPool = labels.length > 0 ? labels.length : (l.top_k_eval ?? 0)
+        const totalRelevant = labels.length > 0 ? labels.filter((label: any) => label?.relevant === true).length : (l.total_relevant_chunks ?? 0)
+        const tp = l.judge_tp ?? 0
+        const fp = l.judge_fp ?? Math.max(0, (l.top_k ?? 0) - tp)
+        const fn = Math.max(0, totalRelevant - tp)
+        const tn = Math.max(0, judgedPool - (l.top_k ?? 0) - fn)
         const p = (tp + fp) > 0 ? tp / (tp + fp) : 0
         const r = (tp + fn) > 0 ? tp / (tp + fn) : 0
         const f1 = (p + r) > 0 ? (2 * p * r) / (p + r) : 0
