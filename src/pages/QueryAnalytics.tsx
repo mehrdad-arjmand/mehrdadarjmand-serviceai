@@ -226,7 +226,6 @@ const QueryAnalytics = () => {
         logs.push(...filtered);
         if (data.length < PAGE) break;
       }
-      if (logs.length === 0) return;
       setConfusionLogs(logs);
     } catch {
       console.error('Failed to compute confusion matrix');
