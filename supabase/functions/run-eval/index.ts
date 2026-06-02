@@ -555,6 +555,9 @@ Deno.serve(async (req) => {
         let judgePrecision: number | null = null
         let judgeHit: 0 | 1 | null = null
         let judgeFirstRelevantRank: number | null = null
+        let judgeFailures = 0
+        let judgeUsable = true
+        const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'LOVABLE_API_KEY not configured', 'GOOGLE_API_KEY not configured', 'Chunk not found'])
         if (judgeEnabled && returned.length > 0) {
           judgeLabels = new Array(returned.length)
           for (let start = 0; start < returned.length; start += JUDGE_CONCURRENCY) {
@@ -565,6 +568,7 @@ Deno.serve(async (req) => {
             verdicts.forEach((verdict, idx) => {
               const i = start + idx
               const c = returned[i]
+              if (FAILURE_REASONS.has(verdict.reasoning)) judgeFailures++
               judgeLabels![i] = {
                 chunk_id: c.id,
                 relevant: verdict.relevant,
@@ -575,6 +579,7 @@ Deno.serve(async (req) => {
             })
           }
           const judgeRelevant = judgeLabels.filter((l: any) => l && l.relevant).length
+          judgeUsable = !(judgeRelevant === 0 && judgeFailures / Math.max(1, returned.length) >= 0.5)
           judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
           judgeHit = judgeRelevant > 0 ? 1 : 0
           const firstJudgeIdx = judgeLabels.findIndex((l: any) => l && l.relevant)
@@ -618,7 +623,9 @@ Deno.serve(async (req) => {
           // EVAL_TAG would be 'benchmark' when judge is off; for real runs we
           // store the judge model name (or 'realworld' fallback) so analytics
           // filters that exclude 'benchmark*' still pass these rows through.
-          eval_model: persistAsReal ? (judgeEnabled ? EVAL_MODEL : 'realworld') : EVAL_TAG,
+          eval_model: persistAsReal
+            ? (judgeEnabled ? (judgeUsable ? EVAL_MODEL : `${EVAL_MODEL} (judge_failed)`) : 'realworld')
+            : (judgeEnabled && !judgeUsable ? `${EVAL_MODEL} (judge_failed)` : EVAL_TAG),
           evaluated_at: new Date().toISOString(),
           relevance_labels: judgeLabels,
         })
