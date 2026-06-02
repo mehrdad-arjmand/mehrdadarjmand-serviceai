@@ -6,7 +6,7 @@ const corsHeaders = {
 }
 
 const EVAL_MODEL = 'google/gemini-2.5-flash-lite'
-const LOCKED_BENCHMARK_NAME = 'benchmark_100_v3_multigold_expanded'
+const LOCKED_BENCHMARK_NAMES = ['benchmark_100_v3_multigold', 'benchmark_100_v3_multigold_expanded']
 
 function isJudgeFailureLabel(label: any): boolean {
   const reason = String(label?.reasoning || '').toLowerCase()
@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
       // src/pages/QueryAnalytics.tsx :: fetchConfusionMatrix.
       const isBenchmarkRow = (l: any) => {
         const rt = (l.response_text || '') as string
-        return rt.startsWith(`[benchmark:${LOCKED_BENCHMARK_NAME}`)
+        return LOCKED_BENCHMARK_NAMES.some((name) => rt.startsWith(`[benchmark:${name}`))
       }
       const logs = rawLogs.filter(l => !isBenchmarkRow(l))
 
@@ -436,7 +436,7 @@ Deno.serve(async (req) => {
       const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
       // Only the locked benchmark may be tagged as benchmark. Any other named
       // dataset/run is ad-hoc by definition and must flow into Judge analytics.
-      const persistAsReal = url.searchParams.get('persist') === '1' || benchmarkName !== LOCKED_BENCHMARK_NAME
+      const persistAsReal = url.searchParams.get('persist') === '1' || !LOCKED_BENCHMARK_NAMES.includes(benchmarkName)
       const POOL = 20
       const ADAPT_MIN_K = 3
       const ADAPT_MAX_K = 15
