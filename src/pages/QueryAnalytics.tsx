@@ -215,22 +215,14 @@ const QueryAnalytics = () => {
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from('query_logs')
-          .select('query_text, created_at, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank, eval_model, response_text, judge_tp, judge_fp')
+          .select('query_text, created_at, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, first_relevant_rank, eval_model, response_text, judge_tp, judge_fp, relevance_labels')
           .not('evaluated_at', 'is', null)
           .not('total_relevant_chunks', 'is', null)
           .not('relevant_in_top_k', 'is', null)
           .order('created_at', { ascending: false })
           .range(from, from + PAGE - 1);
         if (error || !data || data.length === 0) break;
-        // EXCLUDE benchmark rows — confusion matrix must reflect production/ad-hoc
-        // queries only. This MUST match the filter used on the Projects landing
-        // page (src/pages/Projects.tsx :: fetchMetrics) so the headline Accuracy
-        // KPI and the matrix Accuracy total are pinned to the same value.
-        const filtered = data.filter((l: any) => {
-          const em = (l.eval_model || '') as string;
-          const rt = (l.response_text || '') as string;
-          return !(em === 'benchmark' || em.startsWith('benchmark:') || rt.startsWith('[benchmark:'));
-        });
+        const filtered = data.filter((l: any) => matrixSource === 'gold' ? isLockedBenchmarkRow(l) : !isLockedBenchmarkRow(l));
         logs.push(...filtered);
         if (data.length < PAGE) break;
       }
@@ -301,7 +293,7 @@ const QueryAnalytics = () => {
       fetchAnalytics();
       fetchConfusionMatrix();
     }
-  }, [isAdmin]);
+  }, [isAdmin, matrixSource]);
 
   const exportCSV = async () => {
     setLoading("export");
