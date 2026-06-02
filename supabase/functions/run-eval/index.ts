@@ -6,6 +6,7 @@ const corsHeaders = {
 }
 
 const EVAL_MODEL = 'google/gemini-2.5-flash-lite'
+const LOCKED_BENCHMARK_NAME = 'benchmark_100_v3_multigold_expanded'
 
 async function verifyAdmin(req: Request) {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -229,9 +230,8 @@ Deno.serve(async (req) => {
       // set. Do not relax this filter without also updating Projects.tsx and
       // src/pages/QueryAnalytics.tsx :: fetchConfusionMatrix.
       const isBenchmarkRow = (l: any) => {
-        const em = (l.eval_model || '') as string
         const rt = (l.response_text || '') as string
-        return em === 'benchmark' || em.startsWith('benchmark:') || rt.startsWith('[benchmark:')
+        return rt.startsWith(`[benchmark:${LOCKED_BENCHMARK_NAME}`)
       }
       const logs = rawLogs.filter(l => !isBenchmarkRow(l))
 
