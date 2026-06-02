@@ -6,6 +6,17 @@ const corsHeaders = {
 }
 
 const EVAL_MODEL = 'google/gemini-2.5-flash-lite'
+const LOCKED_BENCHMARK_NAMES = ['benchmark_100_v3_multigold', 'benchmark_100_v3_multigold_expanded']
+
+function isJudgeFailureLabel(label: any): boolean {
+  const reason = String(label?.reasoning || '').toLowerCase()
+  return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found')
+}
+
+function hasMostlyFailedJudgeLabels(labels: any): boolean {
+  if (!Array.isArray(labels) || labels.length === 0) return false
+  return labels.filter(isJudgeFailureLabel).length / labels.length >= 0.5
+}
 
 async function verifyAdmin(req: Request) {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -213,7 +224,7 @@ Deno.serve(async (req) => {
       for (let from = 0; ; from += PAGE) {
         const { data: page, error } = await supabase
           .from('query_logs')
-          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at, eval_model, response_text')
+          .select('execution_time_ms, input_tokens, output_tokens, total_tokens, upstream_inference_cost, precision_at_k, recall_at_k, hit_rate_at_k, first_relevant_rank, relevant_in_top_k, total_relevant_chunks, top_k, top_k_eval, evaluated_at, eval_model, response_text, judge_tp, judge_fp, relevance_labels')
           .order('created_at', { ascending: true })
           .range(from, from + PAGE - 1)
         if (error) break
@@ -229,9 +240,8 @@ Deno.serve(async (req) => {
       // set. Do not relax this filter without also updating Projects.tsx and
       // src/pages/QueryAnalytics.tsx :: fetchConfusionMatrix.
       const isBenchmarkRow = (l: any) => {
-        const em = (l.eval_model || '') as string
         const rt = (l.response_text || '') as string
-        return em === 'benchmark' || em.startsWith('benchmark:') || rt.startsWith('[benchmark:')
+        return LOCKED_BENCHMARK_NAMES.some((name) => rt.startsWith(`[benchmark:${name}`))
       }
       const logs = rawLogs.filter(l => !isBenchmarkRow(l))
 
@@ -255,15 +265,21 @@ Deno.serve(async (req) => {
       const judgeFailedLogs = logs.filter(l => (l.eval_model || '').includes('judge_failed') && (l.evaluated_at === null || l.evaluated_at === undefined))
       const pendingLogs = logs.filter(l => (l.evaluated_at === null || l.evaluated_at === undefined) && !(l.eval_model || '').includes('judge_failed'))
 
-      const validScoredLogs = evaluatedLogs.filter(l => l.total_relevant_chunks !== null && l.total_relevant_chunks !== undefined && l.relevant_in_top_k !== null && l.relevant_in_top_k !== undefined)
-      const noJudgedRelevantCount = validScoredLogs.filter(l => (l.relevant_in_top_k ?? 0) === 0).length
+      const validScoredLogs = evaluatedLogs.filter(l => {
+        if (hasMostlyFailedJudgeLabels(l.relevance_labels)) return false
+        return l.judge_tp !== null && l.judge_tp !== undefined && l.judge_fp !== null && l.judge_fp !== undefined
+      })
+      const noJudgedRelevantCount = validScoredLogs.filter(l => (l.judge_tp ?? 0) === 0).length
 
       // Confusion-matrix-aligned per-query TP/FP/FN/TN
       const perQ = validScoredLogs.map(l => {
-        const tp = l.relevant_in_top_k ?? 0
-        const fp = Math.max(0, (l.top_k ?? 0) - tp)
-        const fn = Math.max(0, (l.total_relevant_chunks ?? 0) - tp)
-        const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn)
+        const labels = Array.isArray(l.relevance_labels) ? l.relevance_labels : []
+        const judgedPool = labels.length > 0 ? labels.length : (l.top_k_eval ?? 0)
+        const totalRelevant = labels.length > 0 ? labels.filter((label: any) => label?.relevant === true).length : (l.total_relevant_chunks ?? 0)
+        const tp = l.judge_tp ?? 0
+        const fp = l.judge_fp ?? Math.max(0, (l.top_k ?? 0) - tp)
+        const fn = Math.max(0, totalRelevant - tp)
+        const tn = Math.max(0, judgedPool - (l.top_k ?? 0) - fn)
         const p = (tp + fp) > 0 ? tp / (tp + fp) : 0
         const r = (tp + fn) > 0 ? tp / (tp + fn) : 0
         const f1 = (p + r) > 0 ? (2 * p * r) / (p + r) : 0
@@ -418,12 +434,9 @@ Deno.serve(async (req) => {
       const rerankPoolParam = parseInt(url.searchParams.get('rerank_pool') ?? '50', 10)
       const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
       const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
-      // persist=1: treat this run as REAL user traffic — rows are not tagged as
-      // benchmark, never wiped, and DO flow into Query Analytics + Confusion
-      // Matrix + Projects KPI. Use for ad-hoc evaluation batches (e.g. the 100
-      // real-world questions). The locked benchmark set should NEVER pass
-      // persist=1, so it stays isolated and overwrites itself each run.
-      const persistAsReal = url.searchParams.get('persist') === '1'
+      // Only the locked benchmark may be tagged as benchmark. Any other named
+      // dataset/run is ad-hoc by definition and must flow into Judge analytics.
+      const persistAsReal = url.searchParams.get('persist') === '1' || !LOCKED_BENCHMARK_NAMES.includes(benchmarkName)
       const POOL = 20
       const ADAPT_MIN_K = 3
       const ADAPT_MAX_K = 15
@@ -555,6 +568,9 @@ Deno.serve(async (req) => {
         let judgePrecision: number | null = null
         let judgeHit: 0 | 1 | null = null
         let judgeFirstRelevantRank: number | null = null
+        let judgeFailures = 0
+        let judgeUsable = true
+        const FAILURE_REASONS = new Set(['Parse error', 'LLM evaluation failed', 'LOVABLE_API_KEY not configured', 'GOOGLE_API_KEY not configured', 'Chunk not found'])
         if (judgeEnabled && returned.length > 0) {
           judgeLabels = new Array(returned.length)
           for (let start = 0; start < returned.length; start += JUDGE_CONCURRENCY) {
@@ -565,6 +581,7 @@ Deno.serve(async (req) => {
             verdicts.forEach((verdict, idx) => {
               const i = start + idx
               const c = returned[i]
+              if (FAILURE_REASONS.has(verdict.reasoning)) judgeFailures++
               judgeLabels![i] = {
                 chunk_id: c.id,
                 relevant: verdict.relevant,
@@ -575,6 +592,7 @@ Deno.serve(async (req) => {
             })
           }
           const judgeRelevant = judgeLabels.filter((l: any) => l && l.relevant).length
+          judgeUsable = !(judgeRelevant === 0 && judgeFailures / Math.max(1, returned.length) >= 0.5)
           judgePrecision = returned.length > 0 ? judgeRelevant / returned.length : 0
           judgeHit = judgeRelevant > 0 ? 1 : 0
           const firstJudgeIdx = judgeLabels.findIndex((l: any) => l && l.relevant)
@@ -618,7 +636,9 @@ Deno.serve(async (req) => {
           // EVAL_TAG would be 'benchmark' when judge is off; for real runs we
           // store the judge model name (or 'realworld' fallback) so analytics
           // filters that exclude 'benchmark*' still pass these rows through.
-          eval_model: persistAsReal ? (judgeEnabled ? EVAL_MODEL : 'realworld') : EVAL_TAG,
+          eval_model: persistAsReal
+            ? (judgeEnabled ? (judgeUsable ? EVAL_MODEL : `${EVAL_MODEL} (judge_failed)`) : 'realworld')
+            : (judgeEnabled && !judgeUsable ? `${EVAL_MODEL} (judge_failed)` : EVAL_TAG),
           evaluated_at: new Date().toISOString(),
           relevance_labels: judgeLabels,
         })
