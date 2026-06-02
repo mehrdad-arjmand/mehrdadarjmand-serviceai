@@ -783,6 +783,8 @@ const QueryAnalytics = () => {
                   </TableBody>
                 </Table>
               </div>
+              </>
+              )}
             </CardContent>
           </Card>
         )}
