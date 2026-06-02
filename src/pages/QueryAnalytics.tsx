@@ -438,8 +438,10 @@ const QueryAnalytics = () => {
 
         {/* Analytics cards */}
         {loading === "analytics" && !analytics && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="grid gap-6 mb-8 md:grid-cols-2 lg:grid-cols-4">
+            {[0,1,2,3].map(i => (
+              <div key={i} className="h-44 rounded-lg border border-border/60 bg-muted/20 animate-pulse" />
+            ))}
           </div>
         )}
 
