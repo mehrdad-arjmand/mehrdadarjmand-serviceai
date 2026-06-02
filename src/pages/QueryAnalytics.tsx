@@ -114,6 +114,7 @@ interface ConfusionRow {
   precision: number;
   recall: number;
   f1: number;
+  evalIssue?: string | null;
 }
 
 interface ConfusionMatrix {
@@ -143,6 +144,23 @@ SELECT
     THEN 1.0 / first_relevant_rank ELSE 0 END) AS mrr
 FROM query_logs
 WHERE evaluated_at IS NOT NULL;`;
+
+const LOCKED_BENCHMARK_NAME = 'benchmark_100_v3_multigold_expanded';
+
+const isLockedBenchmarkRow = (log: any) => {
+  const responseText = (log.response_text || '') as string;
+  return responseText.startsWith(`[benchmark:${LOCKED_BENCHMARK_NAME}`);
+};
+
+const isJudgeFailureLabel = (label: any) => {
+  const reason = String(label?.reasoning || '').toLowerCase();
+  return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found');
+};
+
+const hasMostlyFailedJudgeLabels = (labels: any[] | null | undefined) => {
+  if (!Array.isArray(labels) || labels.length === 0) return false;
+  return labels.filter(isJudgeFailureLabel).length / labels.length >= 0.5;
+};
 
 const QueryAnalytics = () => {
   const navigate = useNavigate();
