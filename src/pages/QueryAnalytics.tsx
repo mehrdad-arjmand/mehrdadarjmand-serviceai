@@ -147,11 +147,6 @@ WHERE evaluated_at IS NOT NULL;`;
 
 const LOCKED_BENCHMARK_NAMES = ['benchmark_100_v3_multigold', 'benchmark_100_v3_multigold_expanded'];
 
-const isLockedBenchmarkRow = (log: any) => {
-  const responseText = (log.response_text || '') as string;
-  return LOCKED_BENCHMARK_NAMES.some((name) => responseText.startsWith(`[benchmark:${name}`));
-};
-
 const isJudgeFailureLabel = (label: any) => {
   const reason = String(label?.reasoning || '').toLowerCase();
   return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found');
@@ -174,6 +169,7 @@ const QueryAnalytics = () => {
   const [loading, setLoading] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
   const [confusionLogs, setConfusionLogs] = useState<any[] | null>(null);
+  const [goldQuerySet, setGoldQuerySet] = useState<Set<string>>(new Set());
   const [matrixSource, setMatrixSource] = useState<'gold' | 'judge'>('gold');
 
   const callEvalFunction = async (action: string, params?: Record<string, string>) => {
@@ -208,8 +204,17 @@ const QueryAnalytics = () => {
     }
   };
 
+  // Fetch evaluated logs ONCE plus the gold question set, then derive
+  // Gold/Judge slices client-side. Toggling the matrix source does NOT refetch.
   const fetchConfusionMatrix = async () => {
     try {
+      const goldRes = await supabase
+        .from('eval_dataset')
+        .select('query_text')
+        .in('benchmark_name', LOCKED_BENCHMARK_NAMES);
+      const goldSet = new Set<string>((goldRes.data || []).map((r: any) => (r.query_text || '').trim()));
+      setGoldQuerySet(goldSet);
+
       const PAGE = 1000;
       const logs: any[] = [];
       for (let from = 0; ; from += PAGE) {
@@ -222,8 +227,7 @@ const QueryAnalytics = () => {
           .order('created_at', { ascending: false })
           .range(from, from + PAGE - 1);
         if (error || !data || data.length === 0) break;
-        const filtered = data.filter((l: any) => matrixSource === 'gold' ? isLockedBenchmarkRow(l) : !isLockedBenchmarkRow(l));
-        logs.push(...filtered);
+        logs.push(...data);
         if (data.length < PAGE) break;
       }
       setConfusionLogs(logs);
@@ -233,13 +237,17 @@ const QueryAnalytics = () => {
   };
 
   // Compute matrix from cached logs, switchable between Gold and Judge sources.
-  // Gold is only the locked 100-question benchmark.
-  // Judge is every non-locked/ad-hoc row with usable LLM labels.
+  // Gold = rows whose query_text belongs to a locked benchmark dataset.
+  // Judge = every other evaluated row that has usable LLM labels.
   const confusionMatrix: ConfusionMatrix | null = useMemo(() => {
-    if (!confusionLogs || confusionLogs.length === 0) return null;
+    if (!confusionLogs) return null;
+    const sliceLogs = confusionLogs.filter((l: any) => {
+      const isGold = goldQuerySet.has((l.query_text || '').trim());
+      return matrixSource === 'gold' ? isGold : !isGold;
+    });
     const usableLogs = matrixSource === 'judge'
-      ? confusionLogs.filter((l: any) => (l.judge_tp !== null && l.judge_tp !== undefined) && !hasMostlyFailedJudgeLabels(l.relevance_labels))
-      : confusionLogs;
+      ? sliceLogs.filter((l: any) => (l.judge_tp !== null && l.judge_tp !== undefined) && !hasMostlyFailedJudgeLabels(l.relevance_labels))
+      : sliceLogs;
     const rows: ConfusionRow[] = usableLogs.map((l: any) => {
       const useJudge = matrixSource === 'judge';
       const labels = Array.isArray(l.relevance_labels) ? l.relevance_labels : [];
@@ -288,14 +296,17 @@ const QueryAnalytics = () => {
         f1: macroF1,
       },
     };
-  }, [confusionLogs, matrixSource]);
+  }, [confusionLogs, goldQuerySet, matrixSource]);
 
+  // Fetch analytics + confusion logs ONCE in parallel on mount.
+  // Toggling Gold/Judge no longer refetches anything.
   useEffect(() => {
     if (isAdmin) {
       fetchAnalytics();
       fetchConfusionMatrix();
     }
-  }, [isAdmin, matrixSource]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
   const exportCSV = async () => {
     setLoading("export");
@@ -427,8 +438,10 @@ const QueryAnalytics = () => {
 
         {/* Analytics cards */}
         {loading === "analytics" && !analytics && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="grid gap-6 mb-8 md:grid-cols-2 lg:grid-cols-4">
+            {[0,1,2,3].map(i => (
+              <div key={i} className="h-44 rounded-lg border border-border/60 bg-muted/20 animate-pulse" />
+            ))}
           </div>
         )}
 

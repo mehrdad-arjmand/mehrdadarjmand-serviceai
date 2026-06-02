@@ -360,55 +360,75 @@ const Projects = () => {
   };
 
   const fetchMetrics = async () => {
-    // Mirror QueryAnalytics exactly:
-    //  • Accuracy  → confusion-matrix totals: (TP + TN) / (TP+FP+FN+TN)
-    //                Filter: evaluated_at NOT NULL AND total_relevant_chunks NOT NULL AND relevant_in_top_k NOT NULL
+    // Mirror QueryAnalytics Judge confusion matrix EXACTLY:
+    //  • Accuracy  → judge-based (TP + TN) / (TP+FP+FN+TN), ad-hoc/real-world only,
+    //                excluding gold benchmark rows and rows whose judge labels failed.
     //  • Latency   → P50 (median) of execution_time_ms across ALL logs
     //  • Cost      → avg(upstream_inference_cost ?? 0) × 1,000 across ALL logs
+    const LOCKED = ['benchmark_100_v3_multigold', 'benchmark_100_v3_multigold_expanded'];
+    const isJudgeFailureLabel = (label: any) => {
+      const reason = String(label?.reasoning || '').toLowerCase();
+      return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found');
+    };
+    const hasMostlyFailedJudgeLabels = (labels: any[] | null | undefined) => {
+      if (!Array.isArray(labels) || labels.length === 0) return false;
+      return labels.filter(isJudgeFailureLabel).length / labels.length >= 0.5;
+    };
+
     const PAGE = 1000;
     const rawLogs: any[] = [];
     for (let from = 0; ; from += PAGE) {
       const { data: page, error } = await supabase
         .from("query_logs")
-        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, relevant_in_top_k, total_relevant_chunks, evaluated_at, eval_model, response_text")
+        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, judge_tp, judge_fp, relevance_labels, query_text, evaluated_at")
         .range(from, from + PAGE - 1);
       if (error || !page || page.length === 0) break;
       rawLogs.push(...page);
       if (page.length < PAGE) break;
     }
-    // Exclude benchmark rows — portfolio metrics reflect production queries only.
-    const logs = rawLogs.filter((l: any) => {
-      const em = (l.eval_model || "") as string;
-      const rt = (l.response_text || "") as string;
-      return !(em === "benchmark" || em.startsWith("benchmark:") || rt.startsWith("[benchmark:"));
-    });
-    if (logs.length === 0) return;
+    if (rawLogs.length === 0) return;
 
-    // ── Accuracy (same filter + formula as QueryAnalytics confusion matrix totals) ──
-    const matrixLogs = logs.filter(
-      (l) => l.evaluated_at != null && l.total_relevant_chunks != null && l.relevant_in_top_k != null
+    // Gold (locked benchmark) question set — excluded from the judge accuracy slice
+    const goldRes = await supabase
+      .from("eval_dataset")
+      .select("query_text")
+      .in("benchmark_name", LOCKED);
+    const goldSet = new Set<string>((goldRes.data || []).map((r: any) => (r.query_text || "").trim()));
+
+    // ── Judge-based accuracy (same as QueryAnalytics Judge confusion matrix) ──
+    const judgeLogs = rawLogs.filter((l) =>
+      l.evaluated_at != null &&
+      l.judge_tp != null &&
+      l.judge_fp != null &&
+      !goldSet.has((l.query_text || "").trim()) &&
+      !hasMostlyFailedJudgeLabels(l.relevance_labels)
     );
     let sumTP = 0, sumFP = 0, sumFN = 0, sumTN = 0;
-    matrixLogs.forEach((l) => {
-      const tp = l.relevant_in_top_k ?? 0;
-      const fp = Math.max(0, (l.top_k ?? 0) - tp);
-      const fn = Math.max(0, (l.total_relevant_chunks ?? 0) - tp);
-      const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
+    judgeLogs.forEach((l) => {
+      const labels = Array.isArray(l.relevance_labels) ? l.relevance_labels : [];
+      const judgedPool = labels.length > 0 ? labels.length : (l.top_k_eval ?? 0);
+      const totalRelevant = labels.length > 0
+        ? labels.filter((x: any) => x?.relevant === true).length
+        : 0;
+      const tp = l.judge_tp ?? 0;
+      const fp = l.judge_fp ?? Math.max(0, (l.top_k ?? 0) - tp);
+      const fn = Math.max(0, totalRelevant - tp);
+      const tn = Math.max(0, judgedPool - (l.top_k ?? 0) - fn);
       sumTP += tp; sumFP += fp; sumFN += fn; sumTN += tn;
     });
     const totalAll = sumTP + sumFP + sumFN + sumTN;
     const accuracy = totalAll > 0 ? (sumTP + sumTN) / totalAll : 0;
 
-    // ── Latency P50 (same as analytics endpoint: percentile = arr[ceil(p/100*n)-1]) ──
-    const times = logs
+    // ── Latency P50 (across ALL logs) ──
+    const times = rawLogs
       .map((l) => l.execution_time_ms)
       .filter((v): v is number => typeof v === "number")
       .sort((a, b) => a - b);
     const p50 = times.length > 0 ? times[Math.max(0, Math.ceil(0.5 * times.length) - 1)] : 0;
 
-    // ── Avg cost per 1,000 queries (null treated as 0, across all logs) ──
-    const avgCost = logs.length > 0
-      ? logs.reduce((s, l) => s + (l.upstream_inference_cost ?? 0), 0) / logs.length
+    // ── Avg cost per 1,000 queries (across ALL logs) ──
+    const avgCost = rawLogs.length > 0
+      ? rawLogs.reduce((s, l) => s + (l.upstream_inference_cost ?? 0), 0) / rawLogs.length
       : 0;
     const avgCostPerThousand = avgCost * 1000;
 
