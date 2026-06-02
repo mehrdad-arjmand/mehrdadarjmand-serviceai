@@ -8,6 +8,16 @@ const corsHeaders = {
 const EVAL_MODEL = 'google/gemini-2.5-flash-lite'
 const LOCKED_BENCHMARK_NAME = 'benchmark_100_v3_multigold_expanded'
 
+function isJudgeFailureLabel(label: any): boolean {
+  const reason = String(label?.reasoning || '').toLowerCase()
+  return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found')
+}
+
+function hasMostlyFailedJudgeLabels(labels: any): boolean {
+  if (!Array.isArray(labels) || labels.length === 0) return false
+  return labels.filter(isJudgeFailureLabel).length / labels.length >= 0.5
+}
+
 async function verifyAdmin(req: Request) {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
