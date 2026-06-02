@@ -234,22 +234,24 @@ const QueryAnalytics = () => {
   };
 
   // Compute matrix from cached logs, switchable between Gold and Judge sources.
-  // Gold: TP = `relevant_in_top_k` (gold-set intersection for run-eval rows;
-  //   for rag-query rows it's already judge-derived but we treat it as the
-  //   stored baseline). FN scales from `total_relevant_chunks`.
-  // Judge: TP = `judge_tp` (count of LLM-judged-relevant within top_k). FN
-  //   is unchanged (still grounded in `total_relevant_chunks`) so recall stays
-  //   comparable; only TP/FP swap.
+  // Gold is only the locked 100-question benchmark.
+  // Judge is every non-locked/ad-hoc row with usable LLM labels.
   const confusionMatrix: ConfusionMatrix | null = useMemo(() => {
     if (!confusionLogs || confusionLogs.length === 0) return null;
-    const rows: ConfusionRow[] = confusionLogs.map((l: any) => {
-      const useJudge = matrixSource === 'judge' && l.judge_tp !== null && l.judge_tp !== undefined;
+    const usableLogs = matrixSource === 'judge'
+      ? confusionLogs.filter((l: any) => (l.judge_tp !== null && l.judge_tp !== undefined) && !hasMostlyFailedJudgeLabels(l.relevance_labels))
+      : confusionLogs;
+    const rows: ConfusionRow[] = usableLogs.map((l: any) => {
+      const useJudge = matrixSource === 'judge';
+      const labels = Array.isArray(l.relevance_labels) ? l.relevance_labels : [];
+      const judgedPool = useJudge && labels.length > 0 ? labels.length : (l.top_k_eval ?? 0);
       const tp = useJudge ? (l.judge_tp ?? 0) : (l.relevant_in_top_k ?? 0);
-      const fp = useJudge
-        ? (l.judge_fp ?? Math.max(0, (l.top_k ?? 0) - tp))
-        : Math.max(0, (l.top_k ?? 0) - tp);
-      const fn = Math.max(0, (l.total_relevant_chunks ?? 0) - (l.relevant_in_top_k ?? 0));
-      const tn = Math.max(0, (l.top_k_eval ?? 0) - (l.top_k ?? 0) - fn);
+      const fp = useJudge ? (l.judge_fp ?? Math.max(0, (l.top_k ?? 0) - tp)) : Math.max(0, (l.top_k ?? 0) - tp);
+      const totalRelevant = useJudge && labels.length > 0
+        ? labels.filter((label: any) => label?.relevant === true).length
+        : (l.total_relevant_chunks ?? 0);
+      const fn = Math.max(0, totalRelevant - tp);
+      const tn = Math.max(0, judgedPool - (l.top_k ?? 0) - fn);
       const total = tp + fp + fn + tn;
       const precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
       const recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
@@ -258,14 +260,15 @@ const QueryAnalytics = () => {
         query: l.query_text?.slice(0, 80) || '',
         created_at: l.created_at,
         top_k: l.top_k ?? 0,
-        top_k_eval: l.top_k_eval ?? 0,
+        top_k_eval: judgedPool,
         relevant_in_top_k: tp,
-        total_relevant_chunks: l.total_relevant_chunks ?? 0,
+        total_relevant_chunks: totalRelevant,
         tp, fp, fn, tn,
         accuracy: total > 0 ? (tp + tn) / total : 0,
         precision,
         recall,
         f1,
+        evalIssue: hasMostlyFailedJudgeLabels(l.relevance_labels) ? 'Judge failed' : null,
       };
     });
     const sumTp = rows.reduce((s, r) => s + r.tp, 0);
