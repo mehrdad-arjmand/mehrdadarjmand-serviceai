@@ -434,12 +434,9 @@ Deno.serve(async (req) => {
       const rerankPoolParam = parseInt(url.searchParams.get('rerank_pool') ?? '50', 10)
       const offset = parseInt(url.searchParams.get('offset') ?? '0', 10)
       const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
-      // persist=1: treat this run as REAL user traffic — rows are not tagged as
-      // benchmark, never wiped, and DO flow into Query Analytics + Confusion
-      // Matrix + Projects KPI. Use for ad-hoc evaluation batches (e.g. the 100
-      // real-world questions). The locked benchmark set should NEVER pass
-      // persist=1, so it stays isolated and overwrites itself each run.
-      const persistAsReal = url.searchParams.get('persist') === '1'
+      // Only the locked benchmark may be tagged as benchmark. Any other named
+      // dataset/run is ad-hoc by definition and must flow into Judge analytics.
+      const persistAsReal = url.searchParams.get('persist') === '1' || benchmarkName !== LOCKED_BENCHMARK_NAME
       const POOL = 20
       const ADAPT_MIN_K = 3
       const ADAPT_MAX_K = 15
