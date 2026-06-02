@@ -665,7 +665,7 @@ const QueryAnalytics = () => {
         )}
 
         {/* Confusion Matrix */}
-        {confusionMatrix && confusionMatrix.rows.length > 0 && (
+        {confusionLogs !== null && (
           <Card className="mb-8 border border-border/60 shadow-sm">
             <CardHeader className="flex flex-row items-start justify-between gap-4">
               <div>
@@ -673,7 +673,7 @@ const QueryAnalytics = () => {
                   <Grid3X3 className="h-4 w-4" />Confusion Matrix
                 </CardTitle>
                 <CardDescription>
-                  {confusionMatrix.rows.length} evaluated queries · source: {matrixSource === 'judge' ? 'LLM judge labels' : 'gold answer set'}
+                  {confusionMatrix ? `${confusionMatrix.rows.length} evaluated queries` : '0 evaluated queries'} · source: {matrixSource === 'judge' ? 'LLM judge labels (ad-hoc + real-world)' : 'gold answer set (locked 100-question benchmark)'}
                 </CardDescription>
               </div>
               <ToggleGroup
@@ -688,6 +688,17 @@ const QueryAnalytics = () => {
               </ToggleGroup>
             </CardHeader>
             <CardContent>
+              {!confusionMatrix || confusionMatrix.rows.length === 0 ? (
+                <div className="text-sm text-muted-foreground bg-muted/20 border border-dashed border-border/60 rounded-lg p-6 text-center">
+                  {matrixSource === 'gold' ? (
+                    <>No rows in the locked benchmark set yet. Re-run <span className="font-mono text-foreground">benchmark_100_v3_multigold</span> (or <span className="font-mono text-foreground">_expanded</span>) to populate Gold metrics. Switch to <span className="font-medium text-foreground">Judge</span> to see ad-hoc / real-world evaluated queries.</>
+                  ) : (
+                    <>No judge-labeled queries available. Run real-world queries (or a benchmark with <span className="font-mono text-foreground">judge=on</span>) to populate Judge metrics.</>
+                  )}
+                </div>
+              ) : (
+              <>
+
               {/* Aggregate KPIs */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
                 <div className="bg-muted/30 rounded-lg p-3">
@@ -772,6 +783,8 @@ const QueryAnalytics = () => {
                   </TableBody>
                 </Table>
               </div>
+              </>
+              )}
             </CardContent>
           </Card>
         )}
