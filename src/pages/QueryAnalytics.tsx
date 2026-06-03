@@ -753,7 +753,7 @@ const QueryAnalytics = () => {
                       <TableHead className="text-muted-foreground text-xs w-[110px]">Date</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[60px]">K</TableHead>
                       <TableHead className="text-center text-muted-foreground text-xs w-[120px]">TP/FP/FN/TN</TableHead>
-                      <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Acc</TableHead>
+                      <TableHead className="text-right text-muted-foreground text-xs w-[65px]" title="Hit: 1 if at least one relevant chunk was retrieved">Hit</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Prec</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Recall</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">F1</TableHead>
