@@ -273,7 +273,10 @@ const QueryAnalytics = () => {
         relevant_in_top_k: tp,
         total_relevant_chunks: totalRelevant,
         tp, fp, fn, tn,
-        accuracy: total > 0 ? (tp + tn) / total : 0,
+        // "Accuracy" in a top-K retrieval matrix is misleading (TN dominates and
+        // depends on an arbitrary corpus size). We display Hit Rate instead:
+        // per-row = 1 if at least one relevant chunk was retrieved, else 0.
+        accuracy: tp > 0 ? 1 : 0,
         precision,
         recall,
         f1,
@@ -284,7 +287,7 @@ const QueryAnalytics = () => {
     const sumFp = rows.reduce((s, r) => s + r.fp, 0);
     const sumFn = rows.reduce((s, r) => s + r.fn, 0);
     const sumTn = rows.reduce((s, r) => s + r.tn, 0);
-    const totalAll = sumTp + sumFp + sumFn + sumTn;
+    const hitCount = rows.filter(r => r.tp > 0).length;
     const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
     const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
     const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
@@ -292,7 +295,8 @@ const QueryAnalytics = () => {
       rows,
       totals: {
         tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
-        accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
+        // Aggregate "Accuracy" = Hit Rate = % of queries with at least one relevant in top-K.
+        accuracy: rows.length > 0 ? hitCount / rows.length : 0,
         precision: microPrecision,
         recall: microRecall,
         f1: macroF1,
@@ -717,7 +721,7 @@ const QueryAnalytics = () => {
               {/* Aggregate KPIs */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
                 <div className="bg-muted/30 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground mb-0.5">Accuracy</p>
+                  <p className="text-xs text-muted-foreground mb-0.5" title="% of queries where at least one relevant chunk was retrieved in top-K">Hit Rate</p>
                   <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
                 </div>
                 <div className="bg-muted/30 rounded-lg p-3">
@@ -749,7 +753,7 @@ const QueryAnalytics = () => {
                       <TableHead className="text-muted-foreground text-xs w-[110px]">Date</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[60px]">K</TableHead>
                       <TableHead className="text-center text-muted-foreground text-xs w-[120px]">TP/FP/FN/TN</TableHead>
-                      <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Acc</TableHead>
+                      <TableHead className="text-right text-muted-foreground text-xs w-[65px]" title="Hit: 1 if at least one relevant chunk was retrieved">Hit</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Prec</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">Recall</TableHead>
                       <TableHead className="text-right text-muted-foreground text-xs w-[65px]">F1</TableHead>
