@@ -251,7 +251,9 @@ const QueryAnalytics = () => {
     const rows: ConfusionRow[] = usableLogs.map((l: any) => {
       const useJudge = matrixSource === 'judge';
       const labels = Array.isArray(l.relevance_labels) ? l.relevance_labels : [];
-      const judgedPool = useJudge && labels.length > 0 ? labels.length : (l.top_k_eval ?? 0);
+      // Judge pool = full retrieval/eval pool (e.g. 200), so TP+FP+FN+TN sums to the pool
+      // size per row. Non-retrieved chunks the judge didn't see are treated as TN.
+      const judgedPool = l.top_k_eval ?? (useJudge ? labels.length : 0);
       const tp = useJudge ? (l.judge_tp ?? 0) : (l.relevant_in_top_k ?? 0);
       const fp = useJudge ? (l.judge_fp ?? Math.max(0, (l.top_k ?? 0) - tp)) : Math.max(0, (l.top_k ?? 0) - tp);
       const totalRelevant = useJudge && labels.length > 0
