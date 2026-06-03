@@ -273,7 +273,10 @@ const QueryAnalytics = () => {
         relevant_in_top_k: tp,
         total_relevant_chunks: totalRelevant,
         tp, fp, fn, tn,
-        accuracy: total > 0 ? (tp + tn) / total : 0,
+        // "Accuracy" in a top-K retrieval matrix is misleading (TN dominates and
+        // depends on an arbitrary corpus size). We display Hit Rate instead:
+        // per-row = 1 if at least one relevant chunk was retrieved, else 0.
+        accuracy: tp > 0 ? 1 : 0,
         precision,
         recall,
         f1,
@@ -284,7 +287,7 @@ const QueryAnalytics = () => {
     const sumFp = rows.reduce((s, r) => s + r.fp, 0);
     const sumFn = rows.reduce((s, r) => s + r.fn, 0);
     const sumTn = rows.reduce((s, r) => s + r.tn, 0);
-    const totalAll = sumTp + sumFp + sumFn + sumTn;
+    const hitCount = rows.filter(r => r.tp > 0).length;
     const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
     const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
     const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
@@ -292,7 +295,8 @@ const QueryAnalytics = () => {
       rows,
       totals: {
         tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
-        accuracy: totalAll > 0 ? (sumTp + sumTn) / totalAll : 0,
+        // Aggregate "Accuracy" = Hit Rate = % of queries with at least one relevant in top-K.
+        accuracy: rows.length > 0 ? hitCount / rows.length : 0,
         precision: microPrecision,
         recall: microRecall,
         f1: macroF1,
