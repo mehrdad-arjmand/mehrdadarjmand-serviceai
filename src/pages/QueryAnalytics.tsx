@@ -721,7 +721,7 @@ const QueryAnalytics = () => {
               {/* Aggregate KPIs */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
                 <div className="bg-muted/30 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground mb-0.5">Accuracy</p>
+                  <p className="text-xs text-muted-foreground mb-0.5" title="% of queries where at least one relevant chunk was retrieved in top-K">Hit Rate</p>
                   <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
                 </div>
                 <div className="bg-muted/30 rounded-lg p-3">
