@@ -872,7 +872,9 @@ Provide a clear, concise answer based on the actual procedural content in the co
       ...topChunks,
       ...rankedChunks.filter((c: any) => !topChunkIds.has(c.id)),
     ].slice(0, Math.min(200, rankedChunks.length))
-    const evalChunkTexts = evalSlice.map((c: any) => ({ id: c.id, text: c.text }))
+    // Judge only the answer-visible top-K chunks. Keep top_k_eval as the 200-candidate
+    // retrieval pool so the analytics matrix still has a stable denominator/TN count.
+    const evalChunkTexts = topChunks.map((c: any) => ({ id: c.id, text: c.text }))
     const topKEval = evalSlice.length
     console.log(`Eval scope: ${topKEval} vector-retrieved chunks`)
 
@@ -1614,7 +1616,7 @@ async function evaluateRetrievalBackground(
   const hitRate = relevantInTopK > 0 ? 1 : 0
 
   const { error: updateError } = await supabase.from('query_logs').update({
-    top_k_eval: Math.min(topKEval, labels.length, 200),
+    top_k_eval: Math.min(topKEval, 200),
     total_relevant_chunks: totalRelevant,
     relevant_in_top_k: relevantInTopK,
     precision_at_k: parseFloat(precisionAtK.toFixed(4)),
