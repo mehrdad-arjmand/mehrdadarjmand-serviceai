@@ -152,9 +152,13 @@ const isJudgeFailureLabel = (label: any) => {
   return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found');
 };
 
-const hasMostlyFailedJudgeLabels = (labels: any[] | null | undefined) => {
+const hasMostlyFailedJudgeLabels = (labels: any[] | null | undefined, topK?: number) => {
   if (!Array.isArray(labels) || labels.length === 0) return false;
-  return labels.filter(isJudgeFailureLabel).length / labels.length >= 0.5;
+  const topKLabels = typeof topK === 'number' && topK > 0
+    ? labels.filter((label: any) => Number(label?.rank ?? 0) <= topK)
+    : labels;
+  const relevantScope = topKLabels.length > 0 ? topKLabels : labels;
+  return relevantScope.filter(isJudgeFailureLabel).length / relevantScope.length >= 0.5;
 };
 
 const QueryAnalytics = () => {
@@ -246,7 +250,7 @@ const QueryAnalytics = () => {
       return matrixSource === 'gold' ? isGold : !isGold;
     });
     const usableLogs = matrixSource === 'judge'
-      ? sliceLogs.filter((l: any) => (l.judge_tp !== null && l.judge_tp !== undefined) && !hasMostlyFailedJudgeLabels(l.relevance_labels))
+      ? sliceLogs.filter((l: any) => (l.judge_tp !== null && l.judge_tp !== undefined) && !hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k))
       : sliceLogs;
     const rows: ConfusionRow[] = usableLogs.map((l: any) => {
       const useJudge = matrixSource === 'judge';
@@ -280,7 +284,7 @@ const QueryAnalytics = () => {
         precision,
         recall,
         f1,
-        evalIssue: hasMostlyFailedJudgeLabels(l.relevance_labels) ? 'Judge failed' : null,
+        evalIssue: hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k) ? 'Judge failed' : null,
       };
     });
     const sumTp = rows.reduce((s, r) => s + r.tp, 0);
