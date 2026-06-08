@@ -724,7 +724,7 @@ const QueryAnalytics = () => {
                 type="single"
                 size="sm"
                 value={matrixSource}
-                onValueChange={(v) => { if (v) setMatrixSource(v as 'gold' | 'judge'); }}
+                onValueChange={(v) => { if (v) setMatrixSource(v as MatrixSource); }}
                 className="shrink-0"
               >
                 <ToggleGroupItem value="gold" className="text-xs px-3">Gold</ToggleGroupItem>
