@@ -122,6 +122,8 @@ interface ConfusionMatrix {
   totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number; f1: number };
 }
 
+type MatrixSource = 'gold' | 'judge';
+
 const SQL_REFERENCE = `-- Latency percentiles
 SELECT
   COUNT(*) AS sample_size,
@@ -174,7 +176,7 @@ const QueryAnalytics = () => {
   const [sqlCopied, setSqlCopied] = useState(false);
   const [confusionLogs, setConfusionLogs] = useState<any[] | null>(null);
   const [goldQuerySet, setGoldQuerySet] = useState<Set<string>>(new Set());
-  const [matrixSource, setMatrixSource] = useState<'gold' | 'judge'>('gold');
+  const [matrixSource, setMatrixSource] = useState<MatrixSource>('gold');
 
   const callEvalFunction = async (action: string, params?: Record<string, string>) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -240,20 +242,21 @@ const QueryAnalytics = () => {
     }
   };
 
-  // Compute matrix from cached logs, switchable between Gold and Judge sources.
-  // Gold = rows whose query_text belongs to a locked benchmark dataset.
-  // Judge = every other evaluated row that has usable LLM labels.
-  const confusionMatrix: ConfusionMatrix | null = useMemo(() => {
+  // Compute both matrices from one cached log set so every displayed count can
+  // reuse the same Judge/Gold source instead of drifting across loose variables.
+  const confusionMatrices: Record<MatrixSource, ConfusionMatrix> | null = useMemo(() => {
     if (!confusionLogs) return null;
-    const sliceLogs = confusionLogs.filter((l: any) => {
-      const isGold = goldQuerySet.has((l.query_text || '').trim());
-      return matrixSource === 'gold' ? isGold : !isGold;
-    });
-    const usableLogs = matrixSource === 'judge'
-      ? sliceLogs.filter((l: any) => (l.judge_tp !== null && l.judge_tp !== undefined) && !hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k))
-      : sliceLogs;
-    const rows: ConfusionRow[] = usableLogs.map((l: any) => {
-      const useJudge = matrixSource === 'judge';
+
+    const buildMatrix = (source: MatrixSource): ConfusionMatrix => {
+      const sliceLogs = confusionLogs.filter((l: any) => {
+        const isGold = goldQuerySet.has((l.query_text || '').trim());
+        return source === 'gold' ? isGold : !isGold;
+      });
+      const usableLogs = source === 'judge'
+        ? sliceLogs.filter((l: any) => (l.judge_tp !== null && l.judge_tp !== undefined) && !hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k))
+        : sliceLogs;
+      const rows: ConfusionRow[] = usableLogs.map((l: any) => {
+      const useJudge = source === 'judge';
       const labels = Array.isArray(l.relevance_labels) ? l.relevance_labels : [];
       // Judge pool = full retrieval/eval pool (e.g. 200), so TP+FP+FN+TN sums to the pool
       // size per row. Non-retrieved chunks the judge didn't see are treated as TN.
@@ -286,27 +289,45 @@ const QueryAnalytics = () => {
         f1,
         evalIssue: hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k) ? 'Judge failed' : null,
       };
-    });
-    const sumTp = rows.reduce((s, r) => s + r.tp, 0);
-    const sumFp = rows.reduce((s, r) => s + r.fp, 0);
-    const sumFn = rows.reduce((s, r) => s + r.fn, 0);
-    const sumTn = rows.reduce((s, r) => s + r.tn, 0);
-    const hitCount = rows.filter(r => r.tp > 0).length;
-    const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
-    const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
-    const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
-    return {
-      rows,
-      totals: {
-        tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
-        // Aggregate "Accuracy" = Hit Rate = % of queries with at least one relevant in top-K.
-        accuracy: rows.length > 0 ? hitCount / rows.length : 0,
-        precision: microPrecision,
-        recall: microRecall,
-        f1: macroF1,
-      },
+      });
+      const sumTp = rows.reduce((s, r) => s + r.tp, 0);
+      const sumFp = rows.reduce((s, r) => s + r.fp, 0);
+      const sumFn = rows.reduce((s, r) => s + r.fn, 0);
+      const sumTn = rows.reduce((s, r) => s + r.tn, 0);
+      const hitCount = rows.filter(r => r.tp > 0).length;
+      const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
+      const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
+      const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
+      return {
+        rows,
+        totals: {
+          tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
+          // Aggregate "Accuracy" = Hit Rate = % of queries with at least one relevant in top-K.
+          accuracy: rows.length > 0 ? hitCount / rows.length : 0,
+          precision: microPrecision,
+          recall: microRecall,
+          f1: macroF1,
+        },
+      };
     };
-  }, [confusionLogs, goldQuerySet, matrixSource]);
+
+    return { gold: buildMatrix('gold'), judge: buildMatrix('judge') };
+  }, [confusionLogs, goldQuerySet]);
+
+  const confusionMatrix = confusionMatrices?.[matrixSource] ?? null;
+  const judgeConfusionMatrix = confusionMatrices?.judge ?? null;
+  const judgeScoredQueryCount = judgeConfusionMatrix?.rows.length ?? analytics?.retrieval_eval?.evaluated_count ?? 0;
+  const judgeFailedCount = analytics?.retrieval_eval?.judge_failed_count ?? 0;
+  const judgeEvaluatedAttemptCount = judgeScoredQueryCount + judgeFailedCount;
+  const judgeNoHitCount = judgeConfusionMatrix
+    ? judgeConfusionMatrix.rows.filter(r => r.tp === 0).length
+    : analytics?.retrieval_eval?.no_judged_relevant_count ?? 0;
+  const judgeNoHitRate = judgeScoredQueryCount > 0
+    ? judgeNoHitCount / judgeScoredQueryCount
+    : analytics?.retrieval_eval?.no_hit_rate ?? 0;
+  const judgePrecision = judgeConfusionMatrix?.totals.precision ?? analytics?.retrieval_eval?.avg_precision_at_k ?? 0;
+  const judgeRecall = judgeConfusionMatrix?.totals.recall ?? analytics?.retrieval_eval?.avg_recall_at_k ?? 0;
+  const judgeF1 = judgeConfusionMatrix?.totals.f1 ?? analytics?.retrieval_eval?.avg_f1 ?? 0;
 
   // Fetch analytics + confusion logs ONCE in parallel on mount.
   // Toggling Gold/Judge no longer refetches anything.
