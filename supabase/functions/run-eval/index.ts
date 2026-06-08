@@ -13,9 +13,13 @@ function isJudgeFailureLabel(label: any): boolean {
   return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found')
 }
 
-function hasMostlyFailedJudgeLabels(labels: any): boolean {
+function hasMostlyFailedJudgeLabels(labels: any, topK?: number): boolean {
   if (!Array.isArray(labels) || labels.length === 0) return false
-  return labels.filter(isJudgeFailureLabel).length / labels.length >= 0.5
+  const topKLabels = typeof topK === 'number' && topK > 0
+    ? labels.filter((label: any) => Number(label?.rank ?? 0) <= topK)
+    : labels
+  const relevantScope = topKLabels.length > 0 ? topKLabels : labels
+  return relevantScope.filter(isJudgeFailureLabel).length / relevantScope.length >= 0.5
 }
 
 async function verifyAdmin(req: Request) {
@@ -236,7 +240,7 @@ Deno.serve(async (req) => {
       // Benchmark rows are excluded from EVERY metric on this page (latency,
       // tokens, cost, retrieval eval, confusion matrix, projects KPI) so the
       // counts on the Retrieval Quality card, Confusion Matrix card, Latency
-      // card, and Projects landing page Accuracy all reference the same row
+      // card, and Projects landing page Judge Hit Rate all reference the same row
       // set. Do not relax this filter without also updating Projects.tsx and
       // src/pages/QueryAnalytics.tsx :: fetchConfusionMatrix.
       const isBenchmarkRow = (l: any) => {
@@ -262,13 +266,13 @@ Deno.serve(async (req) => {
       // Retrieval eval uses the SAME non-benchmark slice as latency/tokens/cost
       // and the Confusion Matrix, so all evaluated counts on this page match.
       const evaluatedLogs = logs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
-      // judge_failed: evaluated rows whose LLM judge labels are mostly failures (rate limit / parse error / chunk-not-found).
+      // judge_failed: evaluated rows whose visible top-K LLM judge labels are mostly failures (rate limit / parse error / chunk-not-found).
       // These are excluded from precision/recall/F1 to avoid dragging the score down with eval-pipeline errors.
-      const judgeFailedLogs = evaluatedLogs.filter(l => hasMostlyFailedJudgeLabels(l.relevance_labels))
+      const judgeFailedLogs = evaluatedLogs.filter(l => hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k))
       const pendingLogs = logs.filter(l => l.evaluated_at === null || l.evaluated_at === undefined)
 
       const validScoredLogs = evaluatedLogs.filter(l => {
-        if (hasMostlyFailedJudgeLabels(l.relevance_labels)) return false
+        if (hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k)) return false
         return l.judge_tp !== null && l.judge_tp !== undefined && l.judge_fp !== null && l.judge_fp !== undefined
       })
       const noJudgedRelevantCount = validScoredLogs.filter(l => (l.judge_tp ?? 0) === 0).length
