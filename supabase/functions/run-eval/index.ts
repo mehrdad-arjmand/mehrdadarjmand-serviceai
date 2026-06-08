@@ -13,9 +13,13 @@ function isJudgeFailureLabel(label: any): boolean {
   return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found')
 }
 
-function hasMostlyFailedJudgeLabels(labels: any): boolean {
+function hasMostlyFailedJudgeLabels(labels: any, topK?: number): boolean {
   if (!Array.isArray(labels) || labels.length === 0) return false
-  return labels.filter(isJudgeFailureLabel).length / labels.length >= 0.5
+  const topKLabels = typeof topK === 'number' && topK > 0
+    ? labels.filter((label: any) => Number(label?.rank ?? 0) <= topK)
+    : labels
+  const relevantScope = topKLabels.length > 0 ? topKLabels : labels
+  return relevantScope.filter(isJudgeFailureLabel).length / relevantScope.length >= 0.5
 }
 
 async function verifyAdmin(req: Request) {
