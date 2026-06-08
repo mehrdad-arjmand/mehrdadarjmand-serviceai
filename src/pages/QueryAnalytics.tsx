@@ -521,17 +521,17 @@ const QueryAnalytics = () => {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Retrieval Quality</CardTitle>
                   <CardDescription>
-                    {analytics.retrieval_eval.total_evaluated_count ?? analytics.retrieval_eval.total_queries} / {analytics.retrieval_eval.total_queries} queries evaluated
+                    {judgeEvaluatedAttemptCount} / {analytics.retrieval_eval.total_queries} queries evaluated
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
-                  <div className="flex justify-between" title="Validly scored queries: judge completed, including both hits and no-hit retrieval misses."><span className="text-muted-foreground">Valid scored queries</span><span className="font-mono font-medium">{analytics.retrieval_eval.evaluated_count}</span></div>
-                  <div className="flex justify-between" title="Queries where the AI judge errored (rate limit, parse error). Excluded from precision/recall/F1."><span className="text-muted-foreground">Judge failed (excluded)</span><span className="font-mono font-medium">{analytics.retrieval_eval.judge_failed_count ?? 0}</span></div>
-                  <div className="flex justify-between" title="True retrieval misses: judge succeeded but found no relevant chunk in top-K."><span className="text-muted-foreground">No relevant chunk in top-K</span><span className="font-mono font-medium">{analytics.retrieval_eval.no_judged_relevant_count ?? 0} ({((analytics.retrieval_eval.no_hit_rate ?? 0) * 100).toFixed(1)}%)</span></div>
+                  <div className="flex justify-between" title="Same Judge-scored row count used by the Confusion Matrix Judge tab."><span className="text-muted-foreground">Valid scored queries</span><span className="font-mono font-medium">{judgeScoredQueryCount}</span></div>
+                  <div className="flex justify-between" title="Queries where the AI judge errored (rate limit, parse error). Excluded from precision/recall/F1."><span className="text-muted-foreground">Judge failed (excluded)</span><span className="font-mono font-medium">{judgeFailedCount}</span></div>
+                  <div className="flex justify-between" title="True retrieval misses: judge succeeded but found no relevant chunk in top-K."><span className="text-muted-foreground">No relevant chunk in top-K</span><span className="font-mono font-medium">{judgeNoHitCount} ({(judgeNoHitRate * 100).toFixed(1)}%)</span></div>
                   <div className="flex justify-between" title="Queries where the assistant answer said it could not find / had insufficient information. Detected via response text."><span className="text-muted-foreground">Abstentions (answer)</span><span className="font-mono font-medium">{analytics.retrieval_eval.abstention_count ?? 0} ({((analytics.retrieval_eval.abstention_rate ?? 0) * 100).toFixed(1)}%)</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_precision_at_k * 100).toFixed(1)}%</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Recall@K</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_recall_at_k * 100).toFixed(1)}%</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">F1 (macro)</span><span className="font-mono font-medium">{(analytics.retrieval_eval.avg_f1 * 100).toFixed(1)}%</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Precision@K</span><span className="font-mono font-medium">{(judgePrecision * 100).toFixed(1)}%</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Recall@K</span><span className="font-mono font-medium">{(judgeRecall * 100).toFixed(1)}%</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">F1 (macro)</span><span className="font-mono font-medium">{(judgeF1 * 100).toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">MRR</span><span className="font-mono font-medium">{analytics.retrieval_eval.mrr.toFixed(4)}</span></div>
                 </CardContent>
               </Card>
