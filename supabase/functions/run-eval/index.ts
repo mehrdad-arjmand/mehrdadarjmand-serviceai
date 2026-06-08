@@ -240,7 +240,7 @@ Deno.serve(async (req) => {
       // Benchmark rows are excluded from EVERY metric on this page (latency,
       // tokens, cost, retrieval eval, confusion matrix, projects KPI) so the
       // counts on the Retrieval Quality card, Confusion Matrix card, Latency
-      // card, and Projects landing page Accuracy all reference the same row
+      // card, and Projects landing page Judge Hit Rate all reference the same row
       // set. Do not relax this filter without also updating Projects.tsx and
       // src/pages/QueryAnalytics.tsx :: fetchConfusionMatrix.
       const isBenchmarkRow = (l: any) => {
