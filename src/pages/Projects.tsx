@@ -331,7 +331,7 @@ const Projects = () => {
   const [filterRole, setFilterRole] = useState("");
   const [projectMetadataFields, setProjectMetadataFields] = useState<Record<string, string[]>>({});
   const [metrics, setMetrics] = useState<MetricCard[]>([
-  { label: "QUALITY", sublabel: "Accuracy", value: "—" },
+  { label: "QUALITY", sublabel: "Judge hit rate", value: "—" },
   { label: "TIME", sublabel: "Median latency (p50)", value: "—" },
   { label: "COST", sublabel: "Average cost per 1,000 queries", value: "—" }]
 
@@ -361,8 +361,8 @@ const Projects = () => {
 
   const fetchMetrics = async () => {
     // Mirror QueryAnalytics Judge confusion matrix EXACTLY:
-    //  • Accuracy  → judge-based (TP + TN) / (TP+FP+FN+TN), ad-hoc/real-world only,
-    //                excluding gold benchmark rows and rows whose judge labels failed.
+    //  • Judge hit rate → % of ad-hoc/real-world judge rows with TP > 0,
+    //                     excluding gold benchmark rows and failed judge labels.
     //  • Latency   → P50 (median) of execution_time_ms across ALL logs
     //  • Cost      → avg(upstream_inference_cost ?? 0) × 1,000 across ALL logs
     const LOCKED = ['benchmark_100_v3_multigold', 'benchmark_100_v3_multigold_expanded'];
@@ -370,9 +370,13 @@ const Projects = () => {
       const reason = String(label?.reasoning || '').toLowerCase();
       return reason.includes('llm evaluation failed') || reason.includes('parse error') || reason.includes('not configured') || reason.includes('chunk not found');
     };
-    const hasMostlyFailedJudgeLabels = (labels: any[] | null | undefined) => {
+    const hasMostlyFailedJudgeLabels = (labels: any[] | null | undefined, topK?: number) => {
       if (!Array.isArray(labels) || labels.length === 0) return false;
-      return labels.filter(isJudgeFailureLabel).length / labels.length >= 0.5;
+      const topKLabels = typeof topK === 'number' && topK > 0
+        ? labels.filter((label: any) => Number(label?.rank ?? 0) <= topK)
+        : labels;
+      const relevantScope = topKLabels.length > 0 ? topKLabels : labels;
+      return relevantScope.filter(isJudgeFailureLabel).length / relevantScope.length >= 0.5;
     };
 
     const PAGE = 1000;
@@ -380,7 +384,7 @@ const Projects = () => {
     for (let from = 0; ; from += PAGE) {
       const { data: page, error } = await supabase
         .from("query_logs")
-        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, judge_tp, judge_fp, relevance_labels, query_text, evaluated_at")
+        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, judge_tp, judge_fp, relevance_labels, query_text, evaluated_at, total_relevant_chunks, relevant_in_top_k")
         .range(from, from + PAGE - 1);
       if (error || !page || page.length === 0) break;
       rawLogs.push(...page);
@@ -395,29 +399,17 @@ const Projects = () => {
       .in("benchmark_name", LOCKED);
     const goldSet = new Set<string>((goldRes.data || []).map((r: any) => (r.query_text || "").trim()));
 
-    // ── Judge-based accuracy (same as QueryAnalytics Judge confusion matrix) ──
+    // ── Judge hit rate (same numerator/denominator as QueryAnalytics Judge confusion matrix) ──
     const judgeLogs = rawLogs.filter((l) =>
       l.evaluated_at != null &&
+      l.total_relevant_chunks != null &&
+      l.relevant_in_top_k != null &&
       l.judge_tp != null &&
-      l.judge_fp != null &&
       !goldSet.has((l.query_text || "").trim()) &&
-      !hasMostlyFailedJudgeLabels(l.relevance_labels)
+      !hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k)
     );
-    let sumTP = 0, sumFP = 0, sumFN = 0, sumTN = 0;
-    judgeLogs.forEach((l) => {
-      const labels = Array.isArray(l.relevance_labels) ? l.relevance_labels : [];
-      const judgedPool = labels.length > 0 ? labels.length : (l.top_k_eval ?? 0);
-      const totalRelevant = labels.length > 0
-        ? labels.filter((x: any) => x?.relevant === true).length
-        : 0;
-      const tp = l.judge_tp ?? 0;
-      const fp = l.judge_fp ?? Math.max(0, (l.top_k ?? 0) - tp);
-      const fn = Math.max(0, totalRelevant - tp);
-      const tn = Math.max(0, judgedPool - (l.top_k ?? 0) - fn);
-      sumTP += tp; sumFP += fp; sumFN += fn; sumTN += tn;
-    });
-    const totalAll = sumTP + sumFP + sumFN + sumTN;
-    const accuracy = totalAll > 0 ? (sumTP + sumTN) / totalAll : 0;
+    const hitCount = judgeLogs.filter((l) => (l.judge_tp ?? 0) > 0).length;
+    const judgeHitRate = judgeLogs.length > 0 ? hitCount / judgeLogs.length : 0;
 
     // ── Latency P50 (across ALL logs) ──
     const times = rawLogs
@@ -433,7 +425,7 @@ const Projects = () => {
     const avgCostPerThousand = avgCost * 1000;
 
     setMetrics([
-      { label: "QUALITY", sublabel: "Accuracy", value: `${(accuracy * 100).toFixed(1)}%` },
+      { label: "QUALITY", sublabel: "Judge hit rate", value: `${(judgeHitRate * 100).toFixed(1)}%` },
       {
         label: "TIME",
         sublabel: "Median latency (p50)",
