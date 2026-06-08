@@ -262,13 +262,13 @@ Deno.serve(async (req) => {
       // Retrieval eval uses the SAME non-benchmark slice as latency/tokens/cost
       // and the Confusion Matrix, so all evaluated counts on this page match.
       const evaluatedLogs = logs.filter(l => l.evaluated_at !== null && l.evaluated_at !== undefined)
-      // judge_failed: evaluated rows whose LLM judge labels are mostly failures (rate limit / parse error / chunk-not-found).
+      // judge_failed: evaluated rows whose visible top-K LLM judge labels are mostly failures (rate limit / parse error / chunk-not-found).
       // These are excluded from precision/recall/F1 to avoid dragging the score down with eval-pipeline errors.
-      const judgeFailedLogs = evaluatedLogs.filter(l => hasMostlyFailedJudgeLabels(l.relevance_labels))
+      const judgeFailedLogs = evaluatedLogs.filter(l => hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k))
       const pendingLogs = logs.filter(l => l.evaluated_at === null || l.evaluated_at === undefined)
 
       const validScoredLogs = evaluatedLogs.filter(l => {
-        if (hasMostlyFailedJudgeLabels(l.relevance_labels)) return false
+        if (hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k)) return false
         return l.judge_tp !== null && l.judge_tp !== undefined && l.judge_fp !== null && l.judge_fp !== undefined
       })
       const noJudgedRelevantCount = validScoredLogs.filter(l => (l.judge_tp ?? 0) === 0).length
