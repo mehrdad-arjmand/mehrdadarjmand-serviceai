@@ -732,16 +732,29 @@ const QueryAnalytics = () => {
                   {confusionMatrix ? `${confusionMatrix.rows.length} evaluated queries` : '0 evaluated queries'} · source: {matrixSource === 'judge' ? 'LLM judge labels (ad-hoc + real-world)' : 'gold answer set (locked 100-question benchmark)'}
                 </CardDescription>
               </div>
-              <ToggleGroup
-                type="single"
-                size="sm"
-                value={matrixSource}
-                onValueChange={(v) => { if (v) setMatrixSource(v as MatrixSource); }}
-                className="shrink-0"
-              >
-                <ToggleGroupItem value="gold" className="text-xs px-3">Gold</ToggleGroupItem>
-                <ToggleGroupItem value="judge" className="text-xs px-3">Judge</ToggleGroupItem>
-              </ToggleGroup>
+              <div className="flex items-center gap-4 shrink-0">
+                {matrixSource === 'judge' && (
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="include-abstentions"
+                      checked={includeAbstentions}
+                      onCheckedChange={setIncludeAbstentions}
+                    />
+                    <Label htmlFor="include-abstentions" className="text-xs text-muted-foreground cursor-pointer" title="When off, rows where the judge found zero relevant chunks in the entire retrieval pool (TP=0 and FN=0) are excluded from Hit Rate / Precision / Recall / F1.">
+                      Include abstentions
+                    </Label>
+                  </div>
+                )}
+                <ToggleGroup
+                  type="single"
+                  size="sm"
+                  value={matrixSource}
+                  onValueChange={(v) => { if (v) setMatrixSource(v as MatrixSource); }}
+                >
+                  <ToggleGroupItem value="gold" className="text-xs px-3">Gold</ToggleGroupItem>
+                  <ToggleGroupItem value="judge" className="text-xs px-3">Judge</ToggleGroupItem>
+                </ToggleGroup>
+              </div>
             </CardHeader>
             <CardContent>
               {!confusionMatrix || confusionMatrix.rows.length === 0 ? (
