@@ -9,6 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 interface AnalyticsData {
   sample_size: number;
@@ -114,11 +116,13 @@ interface ConfusionRow {
   precision: number;
   recall: number;
   f1: number;
+  isAbstention?: boolean;
   evalIssue?: string | null;
 }
 
 interface ConfusionMatrix {
   rows: ConfusionRow[];
+  abstentionCount: number;
   totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number; f1: number };
 }
 
@@ -177,6 +181,7 @@ const QueryAnalytics = () => {
   const [confusionLogs, setConfusionLogs] = useState<any[] | null>(null);
   const [goldQuerySet, setGoldQuerySet] = useState<Set<string>>(new Set());
   const [matrixSource, setMatrixSource] = useState<MatrixSource>('gold');
+  const [includeAbstentions, setIncludeAbstentions] = useState<boolean>(true);
 
   const callEvalFunction = async (action: string, params?: Record<string, string>) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -268,10 +273,13 @@ const QueryAnalytics = () => {
         : (l.total_relevant_chunks ?? 0);
       const fn = Math.max(0, totalRelevant - tp);
       const tn = Math.max(0, judgedPool - (l.top_k ?? 0) - fn);
-      const total = tp + fp + fn + tn;
       const precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
       const recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
       const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+      // Abstention = judge scored the row but found 0 relevant chunks anywhere in the
+      // retrieval pool (TP=0 AND FN=0). The retriever surfaced nothing the judge would
+      // accept — semantically equivalent to "no answer possible from this corpus".
+      const isAbstention = useJudge && tp === 0 && fn === 0;
       return {
         query: l.query_text?.slice(0, 80) || '',
         created_at: l.created_at,
@@ -280,30 +288,34 @@ const QueryAnalytics = () => {
         relevant_in_top_k: tp,
         total_relevant_chunks: totalRelevant,
         tp, fp, fn, tn,
-        // "Accuracy" in a top-K retrieval matrix is misleading (TN dominates and
-        // depends on an arbitrary corpus size). We display Hit Rate instead:
-        // per-row = 1 if at least one relevant chunk was retrieved, else 0.
         accuracy: tp > 0 ? 1 : 0,
         precision,
         recall,
         f1,
+        isAbstention,
         evalIssue: hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k) ? 'Judge failed' : null,
       };
       });
-      const sumTp = rows.reduce((s, r) => s + r.tp, 0);
-      const sumFp = rows.reduce((s, r) => s + r.fp, 0);
-      const sumFn = rows.reduce((s, r) => s + r.fn, 0);
-      const sumTn = rows.reduce((s, r) => s + r.tn, 0);
-      const hitCount = rows.filter(r => r.tp > 0).length;
-      const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
+      const abstentionCount = rows.filter(r => r.isAbstention).length;
+      // Optionally exclude abstention rows from headline metrics so they reflect only
+      // queries where the corpus actually contained something the judge accepted.
+      const metricRows = (source === 'judge' && !includeAbstentions)
+        ? rows.filter(r => !r.isAbstention)
+        : rows;
+      const sumTp = metricRows.reduce((s, r) => s + r.tp, 0);
+      const sumFp = metricRows.reduce((s, r) => s + r.fp, 0);
+      const sumFn = metricRows.reduce((s, r) => s + r.fn, 0);
+      const sumTn = metricRows.reduce((s, r) => s + r.tn, 0);
+      const hitCount = metricRows.filter(r => r.tp > 0).length;
+      const macroF1 = metricRows.length > 0 ? metricRows.reduce((s, r) => s + r.f1, 0) / metricRows.length : 0;
       const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
       const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
       return {
         rows,
+        abstentionCount,
         totals: {
           tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
-          // Aggregate "Accuracy" = Hit Rate = % of queries with at least one relevant in top-K.
-          accuracy: rows.length > 0 ? hitCount / rows.length : 0,
+          accuracy: metricRows.length > 0 ? hitCount / metricRows.length : 0,
           precision: microPrecision,
           recall: microRecall,
           f1: macroF1,
@@ -312,7 +324,7 @@ const QueryAnalytics = () => {
     };
 
     return { gold: buildMatrix('gold'), judge: buildMatrix('judge') };
-  }, [confusionLogs, goldQuerySet]);
+  }, [confusionLogs, goldQuerySet, includeAbstentions]);
 
   const confusionMatrix = confusionMatrices?.[matrixSource] ?? null;
   const judgeConfusionMatrix = confusionMatrices?.judge ?? null;
@@ -720,16 +732,29 @@ const QueryAnalytics = () => {
                   {confusionMatrix ? `${confusionMatrix.rows.length} evaluated queries` : '0 evaluated queries'} · source: {matrixSource === 'judge' ? 'LLM judge labels (ad-hoc + real-world)' : 'gold answer set (locked 100-question benchmark)'}
                 </CardDescription>
               </div>
-              <ToggleGroup
-                type="single"
-                size="sm"
-                value={matrixSource}
-                onValueChange={(v) => { if (v) setMatrixSource(v as MatrixSource); }}
-                className="shrink-0"
-              >
-                <ToggleGroupItem value="gold" className="text-xs px-3">Gold</ToggleGroupItem>
-                <ToggleGroupItem value="judge" className="text-xs px-3">Judge</ToggleGroupItem>
-              </ToggleGroup>
+              <div className="flex items-center gap-4 shrink-0">
+                {matrixSource === 'judge' && (
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="include-abstentions"
+                      checked={includeAbstentions}
+                      onCheckedChange={setIncludeAbstentions}
+                    />
+                    <Label htmlFor="include-abstentions" className="text-xs text-muted-foreground cursor-pointer" title="When off, rows where the judge found zero relevant chunks in the entire retrieval pool (TP=0 and FN=0) are excluded from Hit Rate / Precision / Recall / F1.">
+                      Include abstentions
+                    </Label>
+                  </div>
+                )}
+                <ToggleGroup
+                  type="single"
+                  size="sm"
+                  value={matrixSource}
+                  onValueChange={(v) => { if (v) setMatrixSource(v as MatrixSource); }}
+                >
+                  <ToggleGroupItem value="gold" className="text-xs px-3">Gold</ToggleGroupItem>
+                  <ToggleGroupItem value="judge" className="text-xs px-3">Judge</ToggleGroupItem>
+                </ToggleGroup>
+              </div>
             </CardHeader>
             <CardContent>
               {!confusionMatrix || confusionMatrix.rows.length === 0 ? (
@@ -744,7 +769,7 @@ const QueryAnalytics = () => {
               <>
 
               {/* Aggregate KPIs */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
+              <div className={`grid grid-cols-2 ${matrixSource === 'judge' ? 'sm:grid-cols-6' : 'sm:grid-cols-5'} gap-4 mb-6`}>
                 <div className="bg-muted/30 rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-0.5" title="% of queries where at least one relevant chunk was retrieved in top-K">Hit Rate</p>
                   <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
@@ -761,6 +786,15 @@ const QueryAnalytics = () => {
                   <p className="text-xs text-muted-foreground mb-0.5">F1 (macro)</p>
                   <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.f1 * 100).toFixed(1)}%</p>
                 </div>
+                {matrixSource === 'judge' && (
+                  <div className="bg-muted/30 rounded-lg p-3" title="Judge-scored rows where TP=0 and FN=0: the judge found zero relevant chunks anywhere in the retrieval pool. Toggle 'Include abstentions' to exclude these from the headline metrics.">
+                    <p className="text-xs text-muted-foreground mb-0.5">Abstentions</p>
+                    <p className="text-xl font-mono font-semibold text-foreground">
+                      {confusionMatrix.abstentionCount}
+                      <span className="text-sm text-muted-foreground ml-1">({confusionMatrix.rows.length > 0 ? ((confusionMatrix.abstentionCount / confusionMatrix.rows.length) * 100).toFixed(1) : '0.0'}%)</span>
+                    </p>
+                  </div>
+                )}
                 <div className="bg-muted/30 rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-0.5">TP / FP / FN / TN</p>
                   <p className="text-lg font-mono font-medium text-foreground">
