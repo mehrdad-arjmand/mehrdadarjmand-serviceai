@@ -179,6 +179,7 @@ const QueryAnalytics = () => {
   const [confusionLogs, setConfusionLogs] = useState<any[] | null>(null);
   const [goldQuerySet, setGoldQuerySet] = useState<Set<string>>(new Set());
   const [matrixSource, setMatrixSource] = useState<MatrixSource>('gold');
+  const [includeAbstentions, setIncludeAbstentions] = useState<boolean>(true);
 
   const callEvalFunction = async (action: string, params?: Record<string, string>) => {
     const { data: { session } } = await supabase.auth.getSession();
