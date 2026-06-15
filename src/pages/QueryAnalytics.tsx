@@ -270,10 +270,13 @@ const QueryAnalytics = () => {
         : (l.total_relevant_chunks ?? 0);
       const fn = Math.max(0, totalRelevant - tp);
       const tn = Math.max(0, judgedPool - (l.top_k ?? 0) - fn);
-      const total = tp + fp + fn + tn;
       const precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
       const recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
       const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+      // Abstention = judge scored the row but found 0 relevant chunks anywhere in the
+      // retrieval pool (TP=0 AND FN=0). The retriever surfaced nothing the judge would
+      // accept — semantically equivalent to "no answer possible from this corpus".
+      const isAbstention = useJudge && tp === 0 && fn === 0;
       return {
         query: l.query_text?.slice(0, 80) || '',
         created_at: l.created_at,
@@ -282,30 +285,34 @@ const QueryAnalytics = () => {
         relevant_in_top_k: tp,
         total_relevant_chunks: totalRelevant,
         tp, fp, fn, tn,
-        // "Accuracy" in a top-K retrieval matrix is misleading (TN dominates and
-        // depends on an arbitrary corpus size). We display Hit Rate instead:
-        // per-row = 1 if at least one relevant chunk was retrieved, else 0.
         accuracy: tp > 0 ? 1 : 0,
         precision,
         recall,
         f1,
+        isAbstention,
         evalIssue: hasMostlyFailedJudgeLabels(l.relevance_labels, l.top_k) ? 'Judge failed' : null,
       };
       });
-      const sumTp = rows.reduce((s, r) => s + r.tp, 0);
-      const sumFp = rows.reduce((s, r) => s + r.fp, 0);
-      const sumFn = rows.reduce((s, r) => s + r.fn, 0);
-      const sumTn = rows.reduce((s, r) => s + r.tn, 0);
-      const hitCount = rows.filter(r => r.tp > 0).length;
-      const macroF1 = rows.length > 0 ? rows.reduce((s, r) => s + r.f1, 0) / rows.length : 0;
+      const abstentionCount = rows.filter(r => r.isAbstention).length;
+      // Optionally exclude abstention rows from headline metrics so they reflect only
+      // queries where the corpus actually contained something the judge accepted.
+      const metricRows = (source === 'judge' && !includeAbstentions)
+        ? rows.filter(r => !r.isAbstention)
+        : rows;
+      const sumTp = metricRows.reduce((s, r) => s + r.tp, 0);
+      const sumFp = metricRows.reduce((s, r) => s + r.fp, 0);
+      const sumFn = metricRows.reduce((s, r) => s + r.fn, 0);
+      const sumTn = metricRows.reduce((s, r) => s + r.tn, 0);
+      const hitCount = metricRows.filter(r => r.tp > 0).length;
+      const macroF1 = metricRows.length > 0 ? metricRows.reduce((s, r) => s + r.f1, 0) / metricRows.length : 0;
       const microPrecision = (sumTp + sumFp) > 0 ? sumTp / (sumTp + sumFp) : 0;
       const microRecall = (sumTp + sumFn) > 0 ? sumTp / (sumTp + sumFn) : 0;
       return {
         rows,
+        abstentionCount,
         totals: {
           tp: sumTp, fp: sumFp, fn: sumFn, tn: sumTn,
-          // Aggregate "Accuracy" = Hit Rate = % of queries with at least one relevant in top-K.
-          accuracy: rows.length > 0 ? hitCount / rows.length : 0,
+          accuracy: metricRows.length > 0 ? hitCount / metricRows.length : 0,
           precision: microPrecision,
           recall: microRecall,
           f1: macroF1,
@@ -314,7 +321,7 @@ const QueryAnalytics = () => {
     };
 
     return { gold: buildMatrix('gold'), judge: buildMatrix('judge') };
-  }, [confusionLogs, goldQuerySet]);
+  }, [confusionLogs, goldQuerySet, includeAbstentions]);
 
   const confusionMatrix = confusionMatrices?.[matrixSource] ?? null;
   const judgeConfusionMatrix = confusionMatrices?.judge ?? null;
