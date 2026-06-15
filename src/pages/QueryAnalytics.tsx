@@ -114,11 +114,13 @@ interface ConfusionRow {
   precision: number;
   recall: number;
   f1: number;
+  isAbstention?: boolean;
   evalIssue?: string | null;
 }
 
 interface ConfusionMatrix {
   rows: ConfusionRow[];
+  abstentionCount: number;
   totals: { tp: number; fp: number; fn: number; tn: number; accuracy: number; precision: number; recall: number; f1: number };
 }
 
