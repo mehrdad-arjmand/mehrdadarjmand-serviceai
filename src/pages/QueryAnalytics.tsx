@@ -769,7 +769,7 @@ const QueryAnalytics = () => {
               <>
 
               {/* Aggregate KPIs */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
+              <div className={`grid grid-cols-2 ${matrixSource === 'judge' ? 'sm:grid-cols-6' : 'sm:grid-cols-5'} gap-4 mb-6`}>
                 <div className="bg-muted/30 rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-0.5" title="% of queries where at least one relevant chunk was retrieved in top-K">Hit Rate</p>
                   <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.accuracy * 100).toFixed(1)}%</p>
@@ -786,6 +786,15 @@ const QueryAnalytics = () => {
                   <p className="text-xs text-muted-foreground mb-0.5">F1 (macro)</p>
                   <p className="text-xl font-mono font-semibold text-foreground">{(confusionMatrix.totals.f1 * 100).toFixed(1)}%</p>
                 </div>
+                {matrixSource === 'judge' && (
+                  <div className="bg-muted/30 rounded-lg p-3" title="Judge-scored rows where TP=0 and FN=0: the judge found zero relevant chunks anywhere in the retrieval pool. Toggle 'Include abstentions' to exclude these from the headline metrics.">
+                    <p className="text-xs text-muted-foreground mb-0.5">Abstentions</p>
+                    <p className="text-xl font-mono font-semibold text-foreground">
+                      {confusionMatrix.abstentionCount}
+                      <span className="text-sm text-muted-foreground ml-1">({confusionMatrix.rows.length > 0 ? ((confusionMatrix.abstentionCount / confusionMatrix.rows.length) * 100).toFixed(1) : '0.0'}%)</span>
+                    </p>
+                  </div>
+                )}
                 <div className="bg-muted/30 rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-0.5">TP / FP / FN / TN</p>
                   <p className="text-lg font-mono font-medium text-foreground">
