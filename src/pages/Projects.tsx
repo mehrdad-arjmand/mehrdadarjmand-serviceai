@@ -384,13 +384,21 @@ const Projects = () => {
     for (let from = 0; ; from += PAGE) {
       const { data: page, error } = await supabase
         .from("query_logs")
-        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, judge_tp, judge_fp, relevance_labels, query_text, evaluated_at, total_relevant_chunks, relevant_in_top_k")
+        .select("execution_time_ms, upstream_inference_cost, top_k, top_k_eval, judge_tp, judge_fp, relevance_labels, query_text, evaluated_at, total_relevant_chunks, relevant_in_top_k, response_text")
         .range(from, from + PAGE - 1);
       if (error || !page || page.length === 0) break;
       rawLogs.push(...page);
       if (page.length < PAGE) break;
     }
     if (rawLogs.length === 0) return;
+
+    // Exclude benchmark rows — MUST mirror run-eval/index.ts :: isBenchmarkRow so
+    // Latency/Cost KPIs match the Evaluation page exactly.
+    const isBenchmarkRow = (l: any) => {
+      const rt = (l.response_text || "") as string;
+      return LOCKED.some((name) => rt.startsWith(`[benchmark:${name}`));
+    };
+    const nonBenchLogs = rawLogs.filter((l) => !isBenchmarkRow(l));
 
     // Gold (locked benchmark) question set — excluded from the judge accuracy slice
     const goldRes = await supabase
@@ -400,7 +408,7 @@ const Projects = () => {
     const goldSet = new Set<string>((goldRes.data || []).map((r: any) => (r.query_text || "").trim()));
 
     // ── Judge hit rate (same numerator/denominator as QueryAnalytics Judge confusion matrix) ──
-    const judgeLogs = rawLogs.filter((l) =>
+    const judgeLogs = nonBenchLogs.filter((l) =>
       l.evaluated_at != null &&
       l.total_relevant_chunks != null &&
       l.relevant_in_top_k != null &&
@@ -411,16 +419,16 @@ const Projects = () => {
     const hitCount = judgeLogs.filter((l) => (l.judge_tp ?? 0) > 0).length;
     const judgeHitRate = judgeLogs.length > 0 ? hitCount / judgeLogs.length : 0;
 
-    // ── Latency P50 (across ALL logs) ──
-    const times = rawLogs
+    // ── Latency P50 (non-benchmark logs, matches Evaluation page) ──
+    const times = nonBenchLogs
       .map((l) => l.execution_time_ms)
       .filter((v): v is number => typeof v === "number")
       .sort((a, b) => a - b);
     const p50 = times.length > 0 ? times[Math.max(0, Math.ceil(0.5 * times.length) - 1)] : 0;
 
-    // ── Avg cost per 1,000 queries (across ALL logs) ──
-    const avgCost = rawLogs.length > 0
-      ? rawLogs.reduce((s, l) => s + (l.upstream_inference_cost ?? 0), 0) / rawLogs.length
+    // ── Avg cost per 1,000 queries (non-benchmark logs, matches Evaluation page) ──
+    const avgCost = nonBenchLogs.length > 0
+      ? nonBenchLogs.reduce((s, l) => s + (l.upstream_inference_cost ?? 0), 0) / nonBenchLogs.length
       : 0;
     const avgCostPerThousand = avgCost * 1000;
 
