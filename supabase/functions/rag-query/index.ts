@@ -414,7 +414,7 @@ Deno.serve(async (req) => {
 
     // ── STANDALONE QUERY REWRITE for follow-up questions ──
     // If conversation history exists, rewrite the question into a standalone search query
-    let retrievalQuery = question
+    let retrievalQuery = normalizeQueryTokens(question)
     let wasRewritten = false
     if (conversationHistory.length > 0 && isConversationMode) {
       const rewritten = await rewriteFollowUpQuery(question, conversationHistory, sessionSummary)
@@ -744,27 +744,10 @@ Deno.serve(async (req) => {
       topChunks = rankedChunks.slice(0, benchFixedK)
       console.log(`Benchmark fixed K=${benchFixedK} rerank=${!skipRerank} hybrid=${retrievalMode==='hybrid'} returned=${topChunks.length}`)
     } else {
-      // Phase 2: Adaptive K via intent classifier + dual-floor confidence gate.
-      const { intent, k: targetK, classifierMs } = await classifyIntent(retrievalQuery)
-      const SIMILARITY_FLOOR = 0.55
-      const topScore = rankedChunks[0]?.finalScore ?? 0
-      const REL_FLOOR = 0.6 * topScore
-      const eligible = rankedChunks.filter((c: any) =>
-        (c.similarity ?? 0) >= SIMILARITY_FLOOR &&
-        (c.finalScore ?? 0) >= REL_FLOOR
-      )
-      const MIN_K = 4
-      let pool = eligible.length > 0 ? eligible : rankedChunks.slice(0, 1)
-      if (pool.length < MIN_K && rankedChunks.length > pool.length) {
-        const poolIds = new Set(pool.map((c: any) => c.id))
-        for (const c of rankedChunks) {
-          if (pool.length >= MIN_K) break
-          if (!poolIds.has(c.id)) { pool.push(c); poolIds.add(c.id) }
-        }
-      }
-      const k = Math.max(MIN_K, Math.min(targetK, pool.length))
-      topChunks = pool.slice(0, k)
-      console.log(`Adaptive: intent=${intent} targetK=${targetK} returned=${topChunks.length} clsMs=${classifierMs} simFloor=${SIMILARITY_FLOOR} relFloor=${REL_FLOOR.toFixed(3)} preFloor=${rankedChunks.length} minK=${MIN_K}`)
+      // Uniform K=10: rerank the top-20 candidate pool with exact entity/config-token
+      // boosts, then apply a per-document cap when the question names no product.
+      topChunks = selectTopKWithEntityRerank(rankedChunks, retrievalQuery, queryEntities, Boolean(inferredDocIds?.length || filterDocumentIds?.length), projectDocsWithNames, 10)
+      console.log(`Uniform K=10 rerank: entities=${JSON.stringify(queryEntities)} returned=${topChunks.length} preFloor=${rankedChunks.length}`)
     }
 
     console.log('Top ranked chunks:', topChunks.slice(0, 5).map((c: any) => ({
