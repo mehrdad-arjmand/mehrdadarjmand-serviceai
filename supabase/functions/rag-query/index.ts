@@ -838,12 +838,18 @@ ${citationInstructions}`
         .join('\n')
     }
 
+    const topDocNames = [...new Set(topChunks.map((c: any) => (c.filename || 'Unknown').replace(/\.[^.]+$/, '')))]
+    const isAmbiguousProduct = !inferredDocIds?.length && !filterDocumentIds?.length && allEntityTokens(queryEntities).length === 0 &&
+      !queryNamesProduct(retrievalQuery, projectDocsWithNames) && topDocNames.length > 1
+    const ambiguityNote = isAmbiguousProduct
+      ? `IMPORTANT: This question does not name a product, and the sources come from different documents/products (${topDocNames.join(', ')}). Do NOT give a single universal value. Either list the value per product, starting each line with the product/document name in bold, or ask which product the technician means.\n\n`
+      : ''
     const userPrompt = `Technician Question: ${question}${retrievalQuery !== question && !wasRewritten ? `\n(Normalized: ${retrievalQuery})` : ''}
 ${conversationContext}
 Context from documents (search ALL sources carefully - actual content may be in later chunks):
 ${context}
 
-Provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries. REMEMBER: You MUST include inline citations (Source N) for every factual claim. Every sentence with document-derived information needs a citation.`
+${ambiguityNote}Provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries. REMEMBER: You MUST include inline citations (Source N) for every factual claim. Every sentence with document-derived information needs a citation.`
 
     // Pre-generation guardrail: a queried configuration (e.g. "0.5P") must exist verbatim
     // in the project's documents; otherwise abstain without calling the model.
@@ -1890,7 +1896,10 @@ async function checkConfigurationExists(supabase: any, entities: QueryEntities, 
 function applyEntityValueGuardrail(answer: string, entities: QueryEntities, topChunks: any[]): string {
   const tokens = allEntityTokens(entities)
   if (tokens.length === 0 || !answer) return answer
-  const entityChunks = topChunks.filter((c: any) => tokens.some(t => textHasToken(c.text, t)))
+  // Configuration tokens are the strictest: values must come from a chunk naming the configuration.
+  const entityChunks = entities.configs.length > 0
+    ? topChunks.filter((c: any) => entities.configs.every(t => textHasToken(c.text, t)))
+    : topChunks.filter((c: any) => tokens.some(t => textHasToken(c.text, t)))
   const body = answer.replace(/\(\s*Sources?[^)]*\)/gi, ' ')
   const entityDigits = new Set(tokens.flatMap(t => t.match(/\d+(?:\.\d+)?/g) || []))
   const nums = (body.match(/\d[\d,]*(?:\.\d+)?/g) || [])
