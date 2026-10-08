@@ -5,3 +5,4 @@
 - rag-query abstains deterministically when a queried configuration token exists nowhere in the project, and replaces answers whose numbers are not in a chunk naming the queried entity/config — prevents cross-product value borrowing.
 - query_logs.upstream_inference_cost uses the gateway cost field when present, otherwise a token × price-table estimate in rag-query — keeps the cost tile populated.
 - Regression cases from external briefs live in their own eval_dataset benchmark_name, never in the locked 100-question Gold set.
+- rag-query generates with temperature 0 in text mode and retries upstream model/embedding calls once on network/429/5xx — keeps spec answers deterministic and absorbs cold-start blips.
