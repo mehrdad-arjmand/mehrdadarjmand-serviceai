@@ -805,6 +805,7 @@ export type Database = {
           text: string
         }[]
       }
+      normalize_spec_text: { Args: { t: string }; Returns: string }
       update_role_permissions: {
         Args: {
           p_api_tier?: string
