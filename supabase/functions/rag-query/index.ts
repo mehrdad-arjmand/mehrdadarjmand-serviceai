@@ -772,6 +772,7 @@ ENTITY AND SCOPE RULES (MANDATORY):
 - Only state a value for an entity, model, or configuration (for example "0.25P", "EnerX", a model number) if the SAME source chunk explicitly names that entity or configuration. If no source names it, say so and do NOT borrow values from other products.
 - Never present one manufacturer's value as if it applies to another product or as a universal value.
 - If the question names no product and the sources cover more than one product, either give the value per product with a clear product label for each, or ask which product the technician means (listing the products you have specs for).
+- SPEC INTERPRETATION: When a spec lists a "Rated" value and a time-limited "Maximum" (for example "Rated 1060 A, Maximum 1357 A / 1 minute"), treat the Rated value as the continuous value. Answer with the Rated value and also give the time-limited maximum. Never say the continuous value is "not stated" when a Rated value is listed.
 - If you abstain, stop. Do not add related information from other products unless the user asks for alternatives.
 `
     const citationInstructions = groundingRules + `
@@ -860,7 +861,7 @@ ${ambiguityNote}Provide a clear, concise answer based on the actual procedural c
       answer = configAbstain
       console.log(`Config guardrail abstained: ${configAbstain}`)
     } else {
-      const gen = await generateAnswer(systemPrompt, userPrompt, selectedModel)
+      const gen = await generateAnswer(systemPrompt, userPrompt, selectedModel, isConversationMode ? 0.3 : 0)
       usage = gen.usage
       // Post-generation guardrail: values stated for a named entity/config must come
       // from a source chunk that names that entity.
@@ -952,7 +953,7 @@ ${ambiguityNote}Provide a clear, concise answer based on the actual procedural c
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (error) {
-    console.error('Error processing RAG query:', error)
+    console.error('Error processing RAG query:', error instanceof Error ? `${error.name}: ${error.message}\n${error.stack}` : JSON.stringify(error))
     return new Response(
       JSON.stringify({ error: 'An error occurred processing your request. Please try again.' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
@@ -1426,7 +1427,7 @@ async function generateEmbedding(text: string, apiTier: string = 'free'): Promis
     throw new Error('No Google API key configured')
   }
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`,
     {
       method: 'POST',
@@ -1447,9 +1448,9 @@ async function generateEmbedding(text: string, apiTier: string = 'free'): Promis
   return data.embedding.values
 }
 
-async function generateAnswer(systemPrompt: string, userPrompt: string, model: string = 'google/gemini-2.5-flash-lite'): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
+async function generateAnswer(systemPrompt: string, userPrompt: string, model: string = 'google/gemini-2.5-flash-lite', temperature = 0.3): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number; total_tokens: number; upstream_inference_cost: number } }> {
   // Use Lovable AI Gateway (free Gemini models).
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+  const response = await fetchWithRetry('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1461,7 +1462,7 @@ async function generateAnswer(systemPrompt: string, userPrompt: string, model: s
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      temperature: 0.3,
+      temperature,
       max_tokens: 8192
     })
   })
@@ -1916,4 +1917,26 @@ function applyEntityValueGuardrail(answer: string, entities: QueryEntities, topC
   if (unsupported.length === 0) return answer
   console.log(`Guardrail: unsupported values for ${tokens.join(',')}: ${unsupported.slice(0, 10).join(', ')}`)
   return `I couldn't find this value in a passage that explicitly names ${tokens.join(', ')}, so I won't borrow figures from other products. Try naming the exact product or model, or check the source document.`
+}
+
+
+// One automatic retry on network errors, 429 and 5xx from upstream model/embedding APIs.
+async function fetchWithRetry(url: string, init: RequestInit, retries = 1): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, init)
+      if ((res.status === 429 || res.status >= 500) && attempt < retries) {
+        const ra = Number(res.headers.get('retry-after'))
+        const wait = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 3000) : 600 + Math.random() * 400
+        console.warn(`Upstream ${res.status} from ${url.split('?')[0]}; retrying in ${Math.round(wait)}ms. Body: ${(await res.text()).slice(0, 300)}`)
+        await new Promise(r => setTimeout(r, wait))
+        continue
+      }
+      return res
+    } catch (e) {
+      if (attempt >= retries) throw e
+      console.warn(`Upstream network error from ${url.split('?')[0]}: ${e instanceof Error ? e.message : e}; retrying`)
+      await new Promise(r => setTimeout(r, 600 + Math.random() * 400))
+    }
+  }
 }
