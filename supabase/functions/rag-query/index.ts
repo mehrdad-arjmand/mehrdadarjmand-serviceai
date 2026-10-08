@@ -1757,3 +1757,149 @@ async function classifyIntent(query: string): Promise<{ intent: string; k: numbe
     return { intent: 'default', k: 5, classifierMs: Date.now() - start }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENTITY / CONFIGURATION GUARDRAILS (BUG-2/3/4/5)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface QueryEntities { configs: string[]; models: string[]; names: string[] }
+
+// Normalize configuration tokens so "0.25 P", ".25P", "0. 2 5 P" all become "0.25P".
+function normalizeQueryTokens(q: string): string {
+  let t = q.replace(/\bEner\s+X\b/gi, 'EnerX')
+  t = t.replace(/(\d)\.\s+(\d)/g, '$1.$2')
+  let prev = ''
+  while (prev !== t) { prev = t; t = t.replace(/(\d\.\d+)\s(\d)(?=\s?P\b)/g, '$1$2') }
+  t = t.replace(/(\d\.\d+)\s+P\b/g, '$1P')
+  t = t.replace(/(^|[\s(])\.(\d+)\s*P\b/g, '$10.$2P')
+  return t
+}
+
+const UNIT_LIKE = new Set(['kwh', 'mwh', 'kw', 'mw', 'vdc', 'vac', 'mah', 'ah'])
+
+function extractQueryEntities(q: string): QueryEntities {
+  const configs = [...new Set([...q.matchAll(/(?:^|[^\w.])(\d*\.\d+)P\b/gi)].map(m => {
+    const n = m[1].startsWith('.') ? '0' + m[1] : m[1]
+    return `${n}P`
+  }))]
+  const models = [...new Set((q.match(/\b[A-Za-z0-9-]{4,}\b/g) || []).filter(w =>
+    /\d/.test(w) && /[A-Za-z]/.test(w) &&
+    !/^\d+(\.\d+)?[a-z]{1,3}$/i.test(w) &&     // 1060A, 140kW
+    !/^\d*\.?\d+P$/i.test(w)                    // configs handled above
+  ))]
+  const names = [...new Set((q.match(/\b[A-Za-z]*[a-z][A-Z][A-Za-z0-9]*\b/g) || []).filter(w => !UNIT_LIKE.has(w.toLowerCase())))]
+  return { configs, models, names }
+}
+
+function allEntityTokens(e: QueryEntities): string[] { return [...e.configs, ...e.models, ...e.names] }
+
+function escapeRe(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+
+function textHasToken(text: string, token: string): boolean {
+  if (/^\d*\.\d+P$/i.test(token)) {
+    const num = token.slice(0, -1)
+    return new RegExp(`(^|[^\\d.])${escapeRe(num)}\\s?P\\b`, 'i').test(text)
+  }
+  return new RegExp(`(^|[^A-Za-z0-9])${escapeRe(token)}($|[^A-Za-z0-9])`, 'i').test(text)
+}
+
+const GENERIC_FILENAME_WORDS = new Set(['complete', 'manual', 'model', 'year', 'vehicles', 'discharge', 'amps', 'watts', 'single', 'cell', 'railway', 'utility', 'dimensions', 'and', 'weights', 'case', 'study', 'telecom', 'interlock'])
+
+function queryNamesProduct(q: string, projectDocs: { id: string; filename: string }[]): boolean {
+  const ql = q.toLowerCase()
+  for (const d of projectDocs) {
+    const words = d.filename.toLowerCase().replace(/\.[^.]+$/, '').split(/[-_\s]+/)
+    for (const w of words) {
+      if (w.length >= 2 && /[a-z]/.test(w) && !GENERIC_FILENAME_WORDS.has(w) && new RegExp(`\\b${escapeRe(w)}\\b`).test(ql)) return true
+    }
+  }
+  return false
+}
+
+// Rerank the head of the candidate list with exact entity-token boosts, then pick K
+// with a per-document cap (2) when the question names no specific product.
+function selectTopKWithEntityRerank(
+  ranked: any[], query: string, entities: QueryEntities, docScoped: boolean,
+  projectDocs: { id: string; filename: string }[], K: number,
+): any[] {
+  const scan = ranked.slice(0, 60)
+  const tokens = allEntityTokens(entities)
+  const rescored = scan.map((c: any, i: number) => {
+    let s = 1 - i / Math.max(scan.length, 1)
+    for (const cfg of entities.configs) if (textHasToken(c.text, cfg)) s += 1.0
+    for (const t of [...entities.models, ...entities.names]) if (textHasToken(c.text, t)) s += 0.5
+    if (isTOCChunk(c.text)) s *= 0.5
+    return { ...c, finalScore: s }
+  }).sort((a: any, b: any) => b.finalScore - a.finalScore)
+  const pool = rescored.slice(0, 20)
+  const entityMatched = tokens.length > 0 && pool.some((c: any) => tokens.some(t => textHasToken(c.text, t)))
+  const productNamed = docScoped || entityMatched || queryNamesProduct(query, projectDocs)
+  if (productNamed) return pool.slice(0, K)
+  const perDoc = new Map<string, number>()
+  const picked: any[] = []
+  for (const c of pool) {
+    const n = perDoc.get(c.document_id) || 0
+    if (n >= 2) continue
+    perDoc.set(c.document_id, n + 1)
+    picked.push(c)
+    if (picked.length >= K) break
+  }
+  // Diversify beyond the head if the top-20 is dominated by one or two documents.
+  if (picked.length < K) {
+    for (const c of rescored.slice(20)) {
+      const n = perDoc.get(c.document_id) || 0
+      if (n >= 2 || picked.some(p => p.id === c.id)) continue
+      perDoc.set(c.document_id, n + 1)
+      picked.push(c)
+      if (picked.length >= K) break
+    }
+  }
+  return picked
+}
+
+async function checkConfigurationExists(supabase: any, entities: QueryEntities, docIds: string[], topChunks: any[]): Promise<string | null> {
+  if (entities.configs.length === 0) return null
+  const missing: string[] = []
+  for (const cfg of entities.configs) {
+    if (topChunks.some((c: any) => textHasToken(c.text, cfg))) continue
+    if (docIds.length > 0) {
+      const { data } = await supabase.from('chunks').select('id, text').in('document_id', docIds).ilike('text', `%${cfg.slice(0, -1)}%P%`).limit(20)
+      if ((data || []).some((r: any) => textHasToken(r.text, cfg))) continue
+    } else {
+      continue // cannot verify outside a project scope; let the model + post-guardrail decide
+    }
+    missing.push(cfg)
+  }
+  if (missing.length === 0) return null
+  // Collect the configurations that DO exist for the named product (or in the retrieved passages).
+  const product = entities.names[0] || entities.models[0] || null
+  let texts: string[] = topChunks.map((c: any) => c.text)
+  if (product && docIds.length > 0) {
+    const { data } = await supabase.from('chunks').select('text').in('document_id', docIds).ilike('text', `%${product}%`).limit(40)
+    texts = (data || []).map((r: any) => r.text)
+  }
+  const available = new Set<string>()
+  for (const t of texts) for (const m of t.matchAll(/(?:^|[^\d.])(\d*\.\d+)\s?P\b/g)) available.add(`${m[1].startsWith('.') ? '0' + m[1] : m[1]}P`)
+  const label = product ? `The ${product} documentation` : 'The documentation'
+  const avail = [...available]
+  return avail.length > 0
+    ? `${label} only specifies the ${avail.join(', ')} configuration${avail.length > 1 ? 's' : ''}. I couldn't find any information about a ${missing.join(', ')} configuration.`
+    : `I couldn't find any information about a ${missing.join(', ')} configuration in the documents.`
+}
+
+function applyEntityValueGuardrail(answer: string, entities: QueryEntities, topChunks: any[]): string {
+  const tokens = allEntityTokens(entities)
+  if (tokens.length === 0 || !answer) return answer
+  const entityChunks = topChunks.filter((c: any) => tokens.some(t => textHasToken(c.text, t)))
+  const body = answer.replace(/\(\s*Sources?[^)]*\)/gi, ' ')
+  const entityDigits = new Set(tokens.flatMap(t => t.match(/\d+(?:\.\d+)?/g) || []))
+  const nums = (body.match(/\d[\d,]*(?:\.\d+)?/g) || [])
+    .map(n => n.replace(/,/g, ''))
+    .filter(n => (n.length >= 2 || n.includes('.')) && !entityDigits.has(n))
+  if (nums.length === 0) return answer
+  const corpus = entityChunks.map((c: any) => c.text.replace(/,/g, '')).join(' \n ')
+  const unsupported = nums.filter(n => !new RegExp(`(^|[^\\d.])${escapeRe(n)}(?![\\d])`).test(corpus))
+  if (unsupported.length === 0) return answer
+  console.log(`Guardrail: unsupported values for ${tokens.join(',')}: ${unsupported.slice(0, 10).join(', ')}`)
+  return `I couldn't find this value in a passage that explicitly names ${tokens.join(', ')}, so I won't borrow figures from other products. Try naming the exact product or model, or check the source document.`
+}
