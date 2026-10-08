@@ -838,7 +838,7 @@ ${citationInstructions}`
         .join('\n')
     }
 
-    const userPrompt = `Technician Question: ${question}
+    const userPrompt = `Technician Question: ${question}${retrievalQuery !== question && !wasRewritten ? `\n(Normalized: ${retrievalQuery})` : ''}
 ${conversationContext}
 Context from documents (search ALL sources carefully - actual content may be in later chunks):
 ${context}
