@@ -1832,7 +1832,12 @@ function selectTopKWithEntityRerank(
   const tokens = allEntityTokens(entities)
   const rescored = scan.map((c: any, i: number) => {
     let s = 1 - i / Math.max(scan.length, 1)
-    for (const cfg of entities.configs) if (textHasToken(c.text, cfg)) s += 1.0
+    for (const cfg of entities.configs) {
+      if (textHasToken(c.text, cfg)) {
+        const occ = (c.text.match(new RegExp(`(^|[^\\d.])${escapeRe(cfg.slice(0, -1))}\\s?P\\b`, 'gi')) || []).length
+        s += 1.0 + 0.1 * Math.min(occ, 5)
+      }
+    }
     for (const t of [...entities.models, ...entities.names]) if (textHasToken(c.text, t)) s += 0.5
     if (isTOCChunk(c.text)) s *= 0.5
     return { ...c, finalScore: s }
