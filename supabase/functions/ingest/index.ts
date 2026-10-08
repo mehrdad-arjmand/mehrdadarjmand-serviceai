@@ -493,7 +493,7 @@ async function extractAndChunkPdf(
   for (let i = 1; i <= pageCount; i++) {
     const page = await document.getPage(i)
     const content = await page.getTextContent()
-    const pageText = content.items.map((item: any) => item.str).join(' ').replace(/\s+/g, ' ').trim()
+    const pageText = normalizeSpecText(content.items.map((item: any) => item.str).join(' ').replace(/\s+/g, ' ').trim())
     rollingText = `${rollingText}\n\n${pageText}`.trim()
 
     while (rollingText.length >= chunkSize) {
@@ -535,7 +535,7 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
   }
 
   let rawText = pageTexts.join('\n\n')
-  rawText = rawText.replace(/\s+/g, ' ').trim()
+  rawText = normalizeSpecText(rawText.replace(/\s+/g, ' ').trim())
 
   // Check text quality
   const words = rawText.split(/\s+/)
@@ -577,6 +577,19 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer, googleApiKey?: strin
   }
 
   return { text: applyRegexNormalization(pageTexts), pageCount }
+}
+
+// Rejoin numbers and configuration tokens split by PDF extraction:
+// "0. 2 5 P" -> "0.25P", "5644.2 9 kWh" -> "5644.29 kWh", "1 040 ~1 500 VDC" -> "1040 ~1500 VDC".
+function normalizeSpecText(t: string): string {
+  t = t.replace(/\bEner X\b/g, 'EnerX')
+  t = t.replace(/\b0\.\s+(\d)/g, '0.$1')
+  let prev = ''
+  while (prev !== t) { prev = t; t = t.replace(/(\d\.\d+) (\d)(?=\s*[A-Za-z%)~/]| ?P\b)/g, '$1$2') }
+  t = t.replace(/(^|[\s~])(\d) (\d{3})(?=\s*(?:~|VDC|V\b|kWh|kW|A\b|mm|kg))/g, '$1$2$3')
+  t = t.replace(/(\d\.\d+)\s+P\b/g, '$1P')
+  t = t.replace(/(^|[\s(])\.(\d+)\s*P\b/g, '$10.$2P')
+  return t
 }
 
 function applyRegexNormalization(pageTexts: string[]): string {
