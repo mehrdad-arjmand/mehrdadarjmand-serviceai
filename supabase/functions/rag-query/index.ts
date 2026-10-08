@@ -1458,15 +1458,29 @@ async function generateAnswer(systemPrompt: string, userPrompt: string, model: s
   }
 
   const data = await response.json()
+  const input_tokens = data.usage?.prompt_tokens ?? 0
+  const output_tokens = data.usage?.completion_tokens ?? 0
+  const providerCost = Number(data.usage?.cost_details?.upstream_inference_cost ?? data.usage?.cost ?? 0)
   return {
     content: data.choices[0].message.content,
     usage: {
-      input_tokens: data.usage?.prompt_tokens ?? 0,
-      output_tokens: data.usage?.completion_tokens ?? 0,
-      total_tokens: data.usage?.total_tokens ?? 0,
-      upstream_inference_cost: data.usage?.cost_details?.upstream_inference_cost ?? 0,
+      input_tokens,
+      output_tokens,
+      total_tokens: data.usage?.total_tokens ?? (input_tokens + output_tokens),
+      upstream_inference_cost: providerCost > 0 ? providerCost : estimateCostUsd(model, input_tokens, output_tokens),
     }
   }
+}
+
+// USD per 1M tokens (input, output). Used when the gateway does not return a cost field.
+const MODEL_PRICING: Record<string, [number, number]> = {
+  'google/gemini-2.5-flash-lite': [0.10, 0.40],
+  'google/gemini-2.5-flash': [0.30, 2.50],
+  'google/gemini-2.5-pro': [1.25, 10.00],
+}
+function estimateCostUsd(model: string, inputTokens: number, outputTokens: number): number {
+  const [inP, outP] = MODEL_PRICING[model] ?? MODEL_PRICING['google/gemini-2.5-flash-lite']
+  return (inputTokens * inP + outputTokens * outP) / 1_000_000
 }
 
 const EVAL_MODEL = 'google/gemini-2.5-flash'
