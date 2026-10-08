@@ -419,11 +419,12 @@ Deno.serve(async (req) => {
     if (conversationHistory.length > 0 && isConversationMode) {
       const rewritten = await rewriteFollowUpQuery(question, conversationHistory, sessionSummary)
       if (rewritten && rewritten !== question) {
-        retrievalQuery = rewritten
+        retrievalQuery = normalizeQueryTokens(rewritten)
         wasRewritten = true
         console.log(`Query rewritten for retrieval: "${question.slice(0, 60)}" → "${retrievalQuery.slice(0, 100)}"`)
       }
     }
+    const queryEntities = extractQueryEntities(retrievalQuery)
     
     console.log('RAG Query:', { 
       question: question.slice(0, 100), 
@@ -765,7 +766,15 @@ Deno.serve(async (req) => {
       .join('\n\n---\n\n') || 'No relevant context found.'
 
     // Generate answer
-    const citationInstructions = `
+    const groundingRules = `
+ENTITY AND SCOPE RULES (MANDATORY):
+- Each source is labelled with its file name. Treat each file as a different product/manufacturer.
+- Only state a value for an entity, model, or configuration (for example "0.25P", "EnerX", a model number) if the SAME source chunk explicitly names that entity or configuration. If no source names it, say so and do NOT borrow values from other products.
+- Never present one manufacturer's value as if it applies to another product or as a universal value.
+- If the question names no product and the sources cover more than one product, either give the value per product with a clear product label for each, or ask which product the technician means (listing the products you have specs for).
+- If you abstain, stop. Do not add related information from other products unless the user asks for alternatives.
+`
+    const citationInstructions = groundingRules + `
 CITATION INSTRUCTIONS (MANDATORY):
 - You MUST cite every factual claim, measurement, procedure, or specific detail with its source using the format (Source N) immediately after the relevant sentence or phrase.
 - Use ALL relevant sources - do not limit yourself to one source. If multiple sources support a claim, cite all of them: (Source 1, Source 3).
@@ -836,7 +845,23 @@ ${context}
 
 Provide a clear, concise answer based on the actual procedural content in the context above. Ignore table of contents entries. REMEMBER: You MUST include inline citations (Source N) for every factual claim. Every sentence with document-derived information needs a citation.`
 
-    const { content: answer, usage } = await generateAnswer(systemPrompt, userPrompt, selectedModel)
+    // Pre-generation guardrail: a queried configuration (e.g. "0.5P") must exist verbatim
+    // in the project's documents; otherwise abstain without calling the model.
+    const configAbstain = await checkConfigurationExists(supabase, queryEntities, effectiveDocIds, topChunks)
+    let answer: string
+    let usage = { input_tokens: 0, output_tokens: 0, total_tokens: 0, upstream_inference_cost: 0 }
+    if (configAbstain) {
+      answer = configAbstain
+      console.log(`Config guardrail abstained: ${configAbstain}`)
+    } else {
+      const gen = await generateAnswer(systemPrompt, userPrompt, selectedModel)
+      usage = gen.usage
+      // Post-generation guardrail: values stated for a named entity/config must come
+      // from a source chunk that names that entity.
+      const guarded = applyEntityValueGuardrail(gen.content, queryEntities, topChunks)
+      if (guarded !== gen.content) console.log('Entity-value guardrail replaced the answer with an abstention')
+      answer = guarded
+    }
 
     const executionTimeMs = Date.now() - startTime
 
